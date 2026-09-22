@@ -24,3 +24,24 @@ def test_which_minimal_uses_given_path(tmp_path: Path) -> None:
     exe.chmod(0o755)
     assert plat.which_minimal("tool", path=str(tmp_path)) is not None
     assert plat.which_minimal("tool", path=str(tmp_path / "nowhere")) is None
+
+
+def test_kill_tree_reports_whether_the_signal_was_delivered() -> None:
+    assert plat.kill_tree(999999) is False
+    assert plat.kill_pid(999999) is False
+
+
+def test_kill_tree_on_windows_always_forces(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    class _Done:
+        returncode = 0
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _Done()
+
+    monkeypatch.setattr(plat, "is_windows", lambda: True)
+    monkeypatch.setattr(plat.subprocess, "run", fake_run)
+    assert plat.kill_tree(4242) is True
+    assert calls == [["taskkill", "/T", "/F", "/PID", "4242"]]

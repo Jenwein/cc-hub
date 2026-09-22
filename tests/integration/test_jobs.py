@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os
+import signal
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -82,6 +84,25 @@ def test_stop_immediately_after_start_still_kills(hub: Path, tmp_path: Path) -> 
     time.sleep(0.5)
     assert not pid_alive(stopped.pid)
     assert not pid_alive(stopped.runner_pid)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX process groups")
+def test_stop_kills_child_when_runner_is_dead(hub: Path, tmp_path: Path) -> None:
+    job = start_job(hub, [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and load_job(hub, job.id).pid is None:
+        time.sleep(0.1)
+    started = load_job(hub, job.id)
+    assert started.pid, "runner never reported the child pid"
+    os.kill(started.runner_pid, signal.SIGKILL)
+    try:  # reap it, so the pid is really gone and os.getpgid() can no longer find it
+        os.waitpid(started.runner_pid, 0)
+    except ChildProcessError:
+        pass
+    stopped = stop_job(hub, job.id, grace=3.0)
+    assert stopped.status == "stopped"
+    time.sleep(0.5)
+    assert not pid_alive(started.pid)
 
 
 def test_reconcile_marks_dead_runner_as_lost(hub: Path) -> None:

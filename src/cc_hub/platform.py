@@ -118,14 +118,37 @@ def pid_alive(pid: int | None) -> bool:
         return False
 
 
-def kill_tree(pid: int, *, force: bool = False) -> None:
-    """Terminate a process and everything under it."""
+def kill_tree(pid: int, *, force: bool = False) -> bool:
+    """Terminate a process group and everything in it; False when nothing was signalled.
+
+    POSIX: `pid` must be the group leader, which every process started by
+    `spawn_detached` is (start_new_session makes its pgid equal its pid). The
+    group outlives its leader, so signalling it still reaches the children of a
+    runner that has already died.
+
+    Windows: taskkill always gets /F. A process started with DETACHED_PROCESS
+    has no console and no message queue that WM_CLOSE could reach, so the
+    graceful pass would only ever be a no-op.
+    """
     if is_windows():
-        argv = ["taskkill", "/T", "/PID", str(pid)] + (["/F"] if force else [])
-        subprocess.run(argv, capture_output=True, check=False)
-        return
+        argv = ["taskkill", "/T", "/F", "/PID", str(pid)]
+        return subprocess.run(argv, capture_output=True, check=False).returncode == 0
     sig = signal.SIGKILL if force else signal.SIGTERM
     try:
-        os.killpg(os.getpgid(pid), sig)
+        os.killpg(pid, sig)
     except (ProcessLookupError, PermissionError):
-        pass
+        return False
+    return True
+
+
+def kill_pid(pid: int, *, force: bool = False) -> bool:
+    """Signal one process rather than its group; False when it is already gone."""
+    if is_windows():
+        argv = ["taskkill", "/F", "/PID", str(pid)]
+        return subprocess.run(argv, capture_output=True, check=False).returncode == 0
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    try:
+        os.kill(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True

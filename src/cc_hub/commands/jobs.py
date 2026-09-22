@@ -17,7 +17,7 @@ from pathlib import Path
 import typer
 
 from cc_hub.encoding import decode_bytes, read_text, write_text
-from cc_hub.platform import child_env, kill_tree, pid_alive, spawn_detached
+from cc_hub.platform import child_env, kill_pid, kill_tree, pid_alive, spawn_detached
 
 STATUSES = ("running", "done", "failed", "stopped", "lost")
 STARTUP_GRACE = timedelta(seconds=10)
@@ -151,6 +151,17 @@ def _no_pid_yet(job: Job) -> bool:
     return job.status == "running" and job.runner_pid is None and job.pid is None
 
 
+def _signal(job: Job, *, force: bool) -> bool:
+    """Reach the job however we can: runner's group, child's group, then the child alone."""
+    if job.runner_pid and kill_tree(job.runner_pid, force=force):
+        return True
+    if not job.pid:
+        return False
+    # The child shares the runner's group, so killpg on its own pid usually
+    # fails; signalling the process itself is the last resort.
+    return kill_tree(job.pid, force=force) or kill_pid(job.pid, force=force)
+
+
 def stop_job(hub: Path, job_id: str, *, force: bool = False, grace: float = 10.0) -> Job:
     job = reconcile(hub, load_job(hub, job_id))
     if _no_pid_yet(job):
@@ -165,13 +176,12 @@ def stop_job(hub: Path, job_id: str, *, force: bool = False, grace: float = 10.0
             return reconcile(hub, job)
     if job.status != "running":
         return job
-    target = job.runner_pid or job.pid
-    kill_tree(target, force=force)
+    _signal(job, force=force)
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline and _alive(job):
         time.sleep(0.1)
     if _alive(job):
-        kill_tree(target, force=True)
+        _signal(job, force=True)
         time.sleep(0.3)
     job = load_job(hub, job_id)
     if job.status == "running":
