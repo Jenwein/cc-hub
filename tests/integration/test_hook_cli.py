@@ -33,6 +33,21 @@ def test_evaluate_blocks_codex_list_command_rm_root(hub: Path) -> None:
     assert blocked and "rm-root" in reason
 
 
+def test_evaluate_blocks_codex_compound_list_command(hub: Path) -> None:
+    payload = {
+        "tool_name": "shell",
+        "tool_input": {"command": ["bash", "-lc", "cd /tmp && rm -rf /"]},
+    }
+    blocked, reason = evaluate(payload, hub)
+    assert blocked and "rm-root" in reason
+
+
+def test_evaluate_blocks_a_protected_path_inside_a_shell_wrapper(hub: Path) -> None:
+    blocked, reason = evaluate({"tool_input": {"command": 'bash -lc "cat secrets/key"'}}, hub)
+    assert blocked and "protected path in command" in reason
+    assert evaluate({"tool_input": {"command": 'bash -lc "ls -la"'}}, hub) == (False, "")
+
+
 def test_evaluate_blocks_protected_read(hub: Path) -> None:
     payload = load("claude_pretooluse_read.json")
     payload["tool_input"]["file_path"] = str(hub / "secrets" / "token.txt")

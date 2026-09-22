@@ -43,6 +43,14 @@ BLOCKED = [
     ("/bin/sh -c 'shutdown -h now'", "power"),
     ("Remove-Item -Recurse -Force C:\\Users\\bob", "win-remove-root"),
     ("git push -fu origin main", "force-push-main"),
+    ("bash -lc 'cd /tmp && rm -rf /'", "rm-root"),
+    ('bash -lc "rm -rf / ; echo done"', "rm-root"),
+    ("echo hi; rm -rf /", "rm-root"),
+    ("rm -rf \\/", "rm-root"),
+    ("rm -rf \\~", "rm-root"),
+    ("rm -rf /\\*", "rm-root"),
+    ("rm -rf \\/home\\/bob", "rm-root"),
+    ("chmod -R 777 \\/", "chmod-root"),
 ]
 
 ALLOWED = [
@@ -71,6 +79,9 @@ ALLOWED = [
     "git push -u origin main",
     "dd if=/dev/zero of=/dev/null bs=1M count=1",
     "Remove-Item -Recurse -Force C:\\Users\\bob\\dev\\build",
+    "git commit -m 'cleanup; rm -rf / in docs'",
+    "echo 'rm -rf /'",
+    "bash -lc 'ls && pwd'",
     "",
 ]
 
@@ -105,3 +116,4 @@ def test_protected_paths(hub: Path) -> None:
     assert not is_protected_path("/anywhere/.env.example", hub)
     assert not is_protected_path(str(hub / "AGENTS.md"), hub)
     assert not is_protected_path("secrets.md", hub)
+    assert not is_protected_path("~nosuchuser42/x", hub)

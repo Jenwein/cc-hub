@@ -15,6 +15,7 @@ class Segment:
     raw: str
     name: str
     args: list[str]
+    program: str = ""  # argv[0] as written, before basename normalisation
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,9 @@ PROTECTED_NAME = re.compile(r"^\.env(?:\..+)?$")
 SHELLS = {"bash", "sh", "zsh", "dash", "fish", "ksh", "pwsh", "powershell", "cmd"}
 SHELL_SCRIPT_OPTS = {"-c", "-lc", "-ec", "-ic", "-command", "/c"}
 MAX_SHELL_DEPTH = 4
+# shlex(punctuation_chars=True) returns runs of these as their own tokens.
+PUNCTUATION = "();<>|&"
+QUOTES = "\"'"
 
 
 def normalize(command: str) -> str:
@@ -58,15 +62,22 @@ def _basename(token: str) -> str:
     return Path(token).name.casefold().removesuffix(".exe")
 
 
+def _unquote(token: str) -> str:
+    """Strip one matched pair of surrounding quotes (the non-posix pass keeps them)."""
+    if len(token) >= 2 and token[0] in QUOTES and token[-1] == token[0]:
+        return token[1:-1]
+    return token
+
+
 def _shell_script(tokens: list[str]) -> str | None:
     """For `bash -lc <script>` return <script>; None when this is not such a wrapper."""
-    if _basename(tokens[0]) not in SHELLS:
+    if _basename(_unquote(tokens[0])) not in SHELLS:
         return None
     index = 1
     while index < len(tokens):
-        token = tokens[index].casefold()
+        token = _unquote(tokens[index]).casefold()
         if token in SHELL_SCRIPT_OPTS:
-            script = tokens[index + 1] if index + 1 < len(tokens) else ""
+            script = _unquote(tokens[index + 1]) if index + 1 < len(tokens) else ""
             return script or None
         if token.startswith("-") and not token.startswith("--") and len(token) > 1:
             index += 1  # an option of the shell itself, e.g. `bash -l -c ...`
@@ -75,42 +86,100 @@ def _shell_script(tokens: list[str]) -> str | None:
     return None
 
 
-def _tokenize(part: str) -> list[str]:
-    # shlex eats backslashes in posix mode, which would turn C:\Users\bob into
-    # CUsersbob; double them first so Windows paths survive tokenization.
-    source = part.replace("\\", "\\\\") if "\\" in part else part
+def _is_punctuation(token: str) -> bool:
+    return bool(token) and all(ch in PUNCTUATION for ch in token)
+
+
+def _lex_groups(line: str, *, posix: bool) -> list[list[str]] | None:
+    """Tokenize one line and cut it at shell operators; None if the quotes are unbalanced.
+
+    Splitting the token stream rather than the raw text is what keeps a quoted
+    operator (`git commit -m 'a; b'`) inside its argument and still separates a
+    real one (`echo hi; rm -rf /`).
+    """
+    lexer = shlex.shlex(line, posix=posix, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
     try:
-        return shlex.split(source, posix=True)
+        tokens = list(lexer)
     except ValueError:
-        return part.split()
+        return None
+    groups: list[list[str]] = [[]]
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if not _is_punctuation(token):
+            groups[-1].append(token)
+        elif ">" in token or "<" in token:
+            skip_next = ">" in token  # the redirect target is not an argument
+        else:
+            groups.append([])  # && || | ; ;; & ( )
+    return groups
+
+
+def _fallback_groups(line: str) -> list[list[str]]:
+    """Unbalanced quotes: the old behaviour, splitting the raw text on operators."""
+    return [part.split() for part in SPLIT_RE.split(line) if part.strip()]
+
+
+def _strip_wrappers(tokens: list[str]) -> list[str]:
+    while tokens and (
+        tokens[0] in WRAPPERS or ("=" in tokens[0] and not tokens[0].startswith("-"))
+    ):
+        head = tokens.pop(0)
+        if head in ("sudo", "doas", "timeout", "nice", "env"):
+            while tokens and tokens[0].startswith("-"):
+                opt = tokens.pop(0)
+                if opt in WRAPPER_OPTS_WITH_ARG and tokens:
+                    tokens.pop(0)
+            if head == "timeout" and tokens:
+                tokens.pop(0)  # the duration
+    return tokens
+
+
+def _segments_from(tokens: list[str], *, depth: int) -> list[Segment]:
+    tokens = _strip_wrappers(list(tokens))
+    if not tokens:
+        return []
+    inner = _shell_script(tokens) if depth < MAX_SHELL_DEPTH else None
+    if inner is not None:
+        # `bash -lc "cd /tmp && rm -rf /"` must be judged by the script, not by
+        # `bash`; the posix pass hands us the whole script as a single token.
+        return split_segments(inner, _depth=depth + 1)
+    return [
+        Segment(
+            raw=" ".join(tokens),
+            name=_basename(tokens[0]),
+            args=tokens[1:],
+            program=tokens[0],
+        )
+    ]
 
 
 def split_segments(command: str, *, _depth: int = 0) -> list[Segment]:
+    """Every command in `command`, seen both as POSIX and as literal text.
+
+    The two passes disagree about backslashes: POSIX reads `rm -rf \\/` as the
+    root directory, the literal pass keeps `C:\\Users\\bob` in one piece. Both
+    readings are returned so a rule matching either one blocks the command.
+    """
     segments: list[Segment] = []
-    for part in SPLIT_RE.split(command):
-        part = part.strip()
-        if not part:
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    for line in command.split("\n"):
+        if not line.strip():
             continue
-        tokens = _tokenize(part)
-        while tokens and (
-            tokens[0] in WRAPPERS or ("=" in tokens[0] and not tokens[0].startswith("-"))
-        ):
-            head = tokens.pop(0)
-            if head in ("sudo", "doas", "timeout", "nice", "env"):
-                while tokens and tokens[0].startswith("-"):
-                    opt = tokens.pop(0)
-                    if opt in WRAPPER_OPTS_WITH_ARG and tokens:
-                        tokens.pop(0)
-                if head == "timeout" and tokens:
-                    tokens.pop(0)  # the duration
-        if not tokens:
-            continue
-        inner = _shell_script(tokens) if _depth < MAX_SHELL_DEPTH else None
-        if inner is not None:
-            # `bash -lc "rm -rf /"` must be judged by the script, not by `bash`.
-            segments.extend(split_segments(inner, _depth=_depth + 1))
-            continue
-        segments.append(Segment(raw=part, name=_basename(tokens[0]), args=tokens[1:]))
+        for posix in (True, False):
+            groups = _lex_groups(line, posix=posix)
+            if groups is None:
+                groups = _fallback_groups(line)
+            for tokens in groups:
+                for segment in _segments_from(tokens, depth=_depth):
+                    key = (segment.name, tuple(segment.args))
+                    if key not in seen:
+                        seen.add(key)
+                        segments.append(segment)
     return segments
 
 
@@ -241,13 +310,18 @@ def match_command(command: str, extra: Iterable[str] = ()) -> str | None:
 
 
 def is_protected_path(path: str, hub: Path) -> bool:
-    candidate = Path(path).expanduser()
-    if not candidate.is_absolute():
-        candidate = Path(hub) / candidate
     try:
-        resolved = candidate.resolve()
-    except (OSError, ValueError):
-        resolved = candidate
+        candidate = Path(path).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path(hub) / candidate
+        try:
+            resolved = candidate.resolve()
+        except (OSError, ValueError):
+            resolved = candidate
+    except (OSError, ValueError, RuntimeError):
+        # `~nobody/x` raises RuntimeError and a NUL byte raises ValueError:
+        # a path we cannot even name is not one of ours.
+        return False
     secrets = (Path(hub) / "secrets").resolve()
     if resolved == secrets or secrets in resolved.parents:
         return True

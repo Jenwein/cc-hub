@@ -118,8 +118,16 @@ def pid_alive(pid: int | None) -> bool:
         return False
 
 
+def _signalable(pid: object) -> bool:
+    """Guard the killers: 0 and negatives address whole groups or every process."""
+    return isinstance(pid, int) and not isinstance(pid, bool) and pid > 1
+
+
 def kill_tree(pid: int, *, force: bool = False) -> bool:
     """Terminate a process group and everything in it; False when nothing was signalled.
+
+    A pid that is not an integer above 1 is refused outright: os.killpg(-1, ...)
+    and os.kill(-1, ...) address whole groups or every process on the machine.
 
     POSIX: `pid` must be the group leader, which every process started by
     `spawn_detached` is (start_new_session makes its pgid equal its pid). The
@@ -130,6 +138,8 @@ def kill_tree(pid: int, *, force: bool = False) -> bool:
     has no console and no message queue that WM_CLOSE could reach, so the
     graceful pass would only ever be a no-op.
     """
+    if not _signalable(pid):
+        return False
     if is_windows():
         argv = ["taskkill", "/T", "/F", "/PID", str(pid)]
         return subprocess.run(argv, capture_output=True, check=False).returncode == 0
@@ -143,6 +153,8 @@ def kill_tree(pid: int, *, force: bool = False) -> bool:
 
 def kill_pid(pid: int, *, force: bool = False) -> bool:
     """Signal one process rather than its group; False when it is already gone."""
+    if not _signalable(pid):
+        return False
     if is_windows():
         argv = ["taskkill", "/F", "/PID", str(pid)]
         return subprocess.run(argv, capture_output=True, check=False).returncode == 0

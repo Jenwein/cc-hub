@@ -45,3 +45,9 @@ def test_kill_tree_on_windows_always_forces(monkeypatch) -> None:
     monkeypatch.setattr(plat.subprocess, "run", fake_run)
     assert plat.kill_tree(4242) is True
     assert calls == [["taskkill", "/T", "/F", "/PID", "4242"]]
+
+
+def test_kill_helpers_refuse_bogus_pids() -> None:
+    for bad in (-1, 0, 1, "x", None, 2.5):
+        assert plat.kill_tree(bad) is False, bad
+        assert plat.kill_pid(bad) is False, bad

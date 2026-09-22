@@ -13,7 +13,7 @@ from pathlib import Path
 
 import typer
 
-from cc_hub.blocklist import is_protected_path, match_command, normalize
+from cc_hub.blocklist import is_protected_path, match_command, normalize, split_segments
 from cc_hub.encoding import append_text, decode_bytes
 from cc_hub.hub import HubNotFound, find_hub, load_config
 from cc_hub.platform import is_windows
@@ -43,10 +43,12 @@ def extract_path(tool_input: dict) -> str | None:
 
 
 def command_tokens(command: str) -> list[str]:
-    try:
-        return shlex.split(command, posix=True)
-    except ValueError:
-        return command.split()
+    """Every word of every command in `command`, seen through shell wrappers."""
+    tokens: list[str] = []
+    for segment in split_segments(command):
+        tokens.append(segment.program or segment.name)
+        tokens.extend(segment.args)
+    return tokens
 
 
 def evaluate(payload: dict, hub: Path, *, extra: Iterable[str] = ()) -> tuple[bool, str]:
