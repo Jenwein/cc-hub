@@ -36,6 +36,16 @@ def version() -> None:
     typer.echo(__version__)
 
 
+@app.command()
+def where(ctx: typer.Context) -> None:
+    """Print the hub directory and the package location."""
+    import cc_hub
+    from cc_hub.console import resolve_hub
+
+    typer.echo(f"hub: {resolve_hub(ctx)}")
+    typer.echo(f"package: {Path(cc_hub.__file__).parent}")
+
+
 def main() -> None:
     configure_stdio()
     app()
