@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -31,6 +32,16 @@ def write_text(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
+        # Preserve file permissions: copy from existing file or use umask-derived default
+        try:
+            if path.exists():
+                os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+            else:
+                current = os.umask(0)
+                os.umask(current)
+                os.chmod(tmp, 0o666 & ~current)
+        except OSError:
+            pass
         os.replace(tmp, path)
     finally:
         if tmp.exists():
@@ -58,7 +69,7 @@ def decode_bytes(data: bytes) -> str:
         best = from_bytes(data).best()
         if best is not None:
             return str(best)
-    except Exception:  # noqa: BLE001 - detection is best effort
+    except Exception:  # detection is best effort
         pass
     return data.decode("utf-8", errors="replace")
 

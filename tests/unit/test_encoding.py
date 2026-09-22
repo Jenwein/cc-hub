@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 import base64
+import stat
+import sys
 from pathlib import Path
+
+import pytest
 
 from cc_hub import encoding
 
@@ -68,3 +72,29 @@ def test_powershell_wrapper_uses_utf16le_base64() -> None:
 
 def test_powershell_wrapper_default_exe_is_pwsh() -> None:
     assert encoding.powershell_wrapper("dir").startswith("pwsh ")
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="Unix permissions test")
+def test_write_text_fresh_file_respects_umask(tmp_path: Path) -> None:
+    """Fresh write_text should produce readable file, not 0o600."""
+    target = tmp_path / "fresh.txt"
+    encoding.write_text(target, "content")
+    mode = stat.S_IMODE(target.stat().st_mode)
+    # Assert that group/other have read permission (not mode 0o600)
+    assert mode & 0o044 != 0
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="Unix permissions test")
+def test_write_text_preserves_existing_permissions(tmp_path: Path) -> None:
+    """Overwriting a file should preserve its existing permissions."""
+    target = tmp_path / "existing.txt"
+    # Create file with specific permissions 0o640
+    encoding.write_text(target, "original")
+    target.chmod(0o640)
+    original_mode = stat.S_IMODE(target.stat().st_mode)
+    assert original_mode == 0o640
+    # Overwrite the file
+    encoding.write_text(target, "new content")
+    # Permissions should be preserved
+    new_mode = stat.S_IMODE(target.stat().st_mode)
+    assert new_mode == 0o640
