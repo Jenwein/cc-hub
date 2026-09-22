@@ -46,6 +46,11 @@ def where(ctx: typer.Context) -> None:
     typer.echo(f"package: {Path(cc_hub.__file__).parent}")
 
 
+from cc_hub.commands import init as _init  # noqa: E402
+
+_init.register(app)
+
+
 def main() -> None:
     configure_stdio()
     app()
