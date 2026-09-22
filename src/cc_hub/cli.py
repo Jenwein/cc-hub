@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 
 from cc_hub import __version__
+from cc_hub.encoding import configure_stdio
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -36,4 +37,5 @@ def version() -> None:
 
 
 def main() -> None:
+    configure_stdio()
     app()
