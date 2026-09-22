@@ -305,6 +305,20 @@ def run_checks(
             )
         )
 
+    # jobs-lost
+    from cc_hub.commands.jobs import is_lost, list_jobs, reconcile
+
+    lost_jobs = [j for j in list_jobs(hub)] if (hub / "jobs").is_dir() else []
+    lost_ids = [j.id for j in lost_jobs if is_lost(j)]
+    if fix:
+        for j in lost_jobs:
+            reconcile(hub, j)
+    if lost_ids:
+        checks.append(Check("jobs-lost", "warn", "running but dead: " + ", ".join(lost_ids),
+                            "`cc-hub doctor --fix` marks them lost"))
+    else:
+        checks.append(_ok("jobs-lost", "no orphaned jobs"))
+
     return checks
 
 

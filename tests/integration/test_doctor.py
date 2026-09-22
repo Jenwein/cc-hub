@@ -128,3 +128,17 @@ def test_invalid_toml_syntax_in_hosts_fails_only_that_check(hub: Path, tmp_path:
     ids = statuses(s)
     assert ids["hosts"] == "fail"
     assert "nested-git" in ids
+
+
+def test_jobs_lost_check_and_fix(hub: Path, tmp_path: Path) -> None:
+    from cc_hub.commands.jobs import Job, load_job, save_job
+
+    save_job(hub, Job(
+        id="20260101-000000-dead", name="x", cmd=["x"], cwd=str(hub),
+        pid=999999, runner_pid=999999, started="2026-01-01T00:00:00+00:00",
+        ended=None, status="running", exit_code=None,
+        log="jobs/20260101-000000-dead.log",
+    ))
+    assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["jobs-lost"] == "warn"
+    run_checks(hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    assert load_job(hub, "20260101-000000-dead").status == "lost"

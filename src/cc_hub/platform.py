@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
+
+import psutil
 
 COPY_MARKER = ".cc-hub-copied"
 
@@ -80,3 +83,49 @@ def link_dir(
         shutil.copytree(src, dst)
         (dst / COPY_MARKER).write_text(f"copied from {src}\n", encoding="utf-8")
         return "copy"
+
+
+def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env.update(extra or {})
+    return env
+
+
+def spawn_detached(argv: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> int:
+    """Start argv detached from this process and its session; return the pid."""
+    kwargs: dict = {
+        "cwd": str(cwd),
+        "env": env or child_env(),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if is_windows():
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    else:
+        kwargs["start_new_session"] = True
+    return subprocess.Popen(argv, **kwargs).pid
+
+
+def pid_alive(pid: int | None) -> bool:
+    if not pid or not psutil.pid_exists(pid):
+        return False
+    try:
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
+        return False
+
+
+def kill_tree(pid: int, *, force: bool = False) -> None:
+    """Terminate a process and everything under it."""
+    if is_windows():
+        argv = ["taskkill", "/T", "/PID", str(pid)] + (["/F"] if force else [])
+        subprocess.run(argv, capture_output=True, check=False)
+        return
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    try:
+        os.killpg(os.getpgid(pid), sig)
+    except (ProcessLookupError, PermissionError):
+        pass
