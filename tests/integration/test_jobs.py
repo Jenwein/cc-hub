@@ -197,7 +197,9 @@ def test_jobs_status_cli_survives_corrupt_records(hub: Path, tmp_path: Path) -> 
     _bad_records(hub)
     r = CliRunner().invoke(app, ["--hub", str(hub), "jobs", "status"])
     assert r.exit_code == 0, r.output
-    assert good.id in r.output
+    assert good.id in r.stdout
+    skipped = [line for line in r.stderr.splitlines() if "skipping" in line]
+    assert len(skipped) == 2, r.stderr
 
 
 def test_tail_rejects_a_record_with_a_foreign_log_path(hub: Path) -> None:
