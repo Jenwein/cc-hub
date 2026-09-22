@@ -16,6 +16,14 @@
 - Hub templates: `AGENTS.md`, `BOOTSTRAP.md`, persona files, six `hub-*` skills,
   `cron/memory-consolidate.md`.
 
+### Known limitations
+
+- The Codex hook payload shape is inferred from the documentation, not verified
+  against a real Codex run; the fixtures in `tests/fixtures` encode that guess.
+- The native-Windows code paths (junctions, `taskkill`, `.cmd` shims) are
+  reasoned about rather than CI-executed: CI runs the suite on windows-latest,
+  but the jobs and kill paths are not exercised there.
+
 ### Migration notes
 
 First release; nothing to migrate.

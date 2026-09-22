@@ -29,3 +29,16 @@ def test_docs_explain_cc_hub_dir() -> None:
     cc_connect_text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
     assert "CC_HUB_DIR" in cc_connect_text
     assert "CC_HUB_DIR" in (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+
+
+def test_changelog_records_known_limitations() -> None:
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "### Known limitations" in text
+    assert "Codex hook payload" in text
+    assert "windows-latest" in text
+
+
+def test_every_python_file_declares_utf8() -> None:
+    for path in sorted(ROOT.glob("src/**/*.py")) + sorted(ROOT.glob("tests/**/*.py")):
+        first = path.read_text(encoding="utf-8").splitlines()[:1]
+        assert first == ["# -*- coding: utf-8 -*-"], path

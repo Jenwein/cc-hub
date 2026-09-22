@@ -37,6 +37,6 @@ Finish with `cc-hub doctor`, fix what it reports, then
 | Runtime | Instruction pointer | Skills path | Hooks file | Deny reads | Trust step |
 |---|---|---|---|---|---|
 | Claude Code | `CLAUDE.md` containing `@AGENTS.md` (2.1.277+ reads `AGENTS.md` natively when no CLAUDE.md exists) | `.claude/skills` | `hooks` key in `.claude/settings.json` | `permissions.deny`: `Read(./secrets/**)`, `Read(./.env)` | run `claude` once interactively here and accept the trust prompt |
-| Codex CLI | none needed, reads `AGENTS.md` | `.agents/skills` | `.codex/hooks.json` | no read rule; add project paths to `[sandbox_workspace_write] writable_roots` in `.codex/config.toml` | run `codex` once here, trust hooks via `/hooks`, mark the directory trusted |
+| Codex CLI | none needed, reads `AGENTS.md` | `.agents/skills` | `.codex/hooks.json`, generated with `cc-hub hook snippet --no-matcher` because the default matcher names Claude's tools | no read rule; add project paths to `[sandbox_workspace_write] writable_roots` in `.codex/config.toml` | run `codex` once here, trust hooks via `/hooks`, mark the directory trusted |
 
 All of these pointer files are gitignored by the hub.

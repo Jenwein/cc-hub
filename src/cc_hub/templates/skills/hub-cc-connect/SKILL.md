@@ -27,10 +27,10 @@ than pasting it into the chat.
 ## Scheduling
 
     cc-connect cron add --cron "0 3 * * *" --prompt "<text>"
-    cc-connect cron list
-    cc-connect cron del <id>
 
-Task definitions live in `cron/*.md`; register from there.
+Task definitions live in `cron/*.md`; register from there. To review or remove
+schedules, tell the user to type `/cron list` or `/cron del <id>` in the chat:
+those are the commands cc-connect documents.
 
 ## Things to know
 

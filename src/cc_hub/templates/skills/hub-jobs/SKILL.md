@@ -26,6 +26,8 @@ Short commands (seconds) run inline as usual.
     cc-hub jobs clean --older-than 7d
 
 `start` returns immediately with the id and log path. Tell the user the id.
+The command after `--` is executed directly, not through a shell, so a single
+compound string will not work: use `-- bash -c "npm test && npm build"`.
 
 ## Delegating a coding task
 

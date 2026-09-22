@@ -63,3 +63,14 @@ def test_ownership_sets_are_disjoint() -> None:
     assert not set(manifest.FRAMEWORK_OWNED) & set(manifest.USER_OWNED)
     assert manifest.HUB_TOML not in manifest.FRAMEWORK_OWNED + manifest.USER_OWNED
     assert set(manifest.ONE_TIME) <= set(manifest.FRAMEWORK_OWNED)
+
+
+def test_skill_guidance_matches_verified_behaviour() -> None:
+    adapt = manifest.render("skills/hub-adapt/SKILL.md")
+    assert "cc-hub hook snippet --no-matcher" in adapt
+    jobs = manifest.render("skills/hub-jobs/SKILL.md")
+    assert 'bash -c "npm test && npm build"' in jobs
+    cc_connect = manifest.render("skills/hub-cc-connect/SKILL.md")
+    assert "/cron list" in cc_connect and "/cron del <id>" in cc_connect
+    assert "cc-connect cron list" not in cc_connect
+    assert "cc-connect cron del" not in cc_connect
