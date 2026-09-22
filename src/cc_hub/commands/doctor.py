@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from cc_hub import __version__, manifest
@@ -325,7 +326,7 @@ def register(app: typer.Typer) -> None:
             for col in ("check", "status", "message", "fix"):
                 table.add_column(col)
             for c in checks:
-                table.add_row(c.id, c.status, c.message, c.fix)
+                table.add_row(escape(c.id), escape(c.status), escape(c.message), escape(c.fix))
             console.print(table)
         if any(c.status == "fail" for c in checks):
             raise typer.Exit(code=1)

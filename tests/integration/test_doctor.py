@@ -104,3 +104,10 @@ def test_doctor_cli_exit_1_on_fail(hub: Path) -> None:
     (hub / "MEMORY.md").write_text("\n".join(["- x"] * 201), encoding="utf-8")
     result = CliRunner().invoke(app, ["--hub", str(hub), "doctor"])
     assert result.exit_code == 1
+
+
+def test_doctor_cli_table_escapes_rich_markup(hub: Path) -> None:
+    (hub / "memory" / "[note].md").write_text("x", encoding="utf-8")
+    result = CliRunner().invoke(app, ["--hub", str(hub), "doctor"])
+    assert result.exit_code == 0, result.output
+    assert "[note].md" in result.output
