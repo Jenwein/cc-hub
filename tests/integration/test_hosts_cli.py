@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import base64
 import json
 import os
 from pathlib import Path
@@ -50,8 +51,25 @@ def test_hosts_run_invokes_ssh_with_wrapped_command(hosts_hub: Path, fake_ssh: P
     assert r.exit_code == 0, r.output
     argv = json.loads(r.output)
     assert argv[argv.index("-p") + 1] == "2222"
+    assert argv[argv.index("--") + 1] == "user@nas.local"
     assert argv[-2] == "user@nas.local"
     assert argv[-1].startswith('bash -c "$(printf %s ')
+    prefix, suffix = 'bash -c "$(printf %s ', ' | base64 -d)"'
+    b64 = argv[-1][len(prefix) : -len(suffix)]
+    assert base64.b64decode(b64).decode("utf-8") == "echo hi"
+
+
+@pytest.mark.skipif(is_windows(), reason="fake ssh script needs a POSIX shebang")
+def test_hosts_run_timeout_after_name_and_single_string_command(
+    hosts_hub: Path, fake_ssh: Path
+) -> None:
+    args = ["--hub", str(hosts_hub), "hosts", "run", "nas", "--timeout", "5", "--", "cd /x && make"]
+    r = CliRunner().invoke(app, args)
+    assert r.exit_code == 0, r.output
+    argv = json.loads(r.output)
+    prefix, suffix = 'bash -c "$(printf %s ', ' | base64 -d)"'
+    b64 = argv[-1][len(prefix) : -len(suffix)]
+    assert base64.b64decode(b64).decode("utf-8") == "cd /x && make"
 
 
 @pytest.mark.skipif(is_windows(), reason="fake ssh script needs a POSIX shebang")

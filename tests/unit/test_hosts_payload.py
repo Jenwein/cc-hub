@@ -70,18 +70,22 @@ def test_ssh_argv_includes_port_key_and_batchmode(hosts_hub: Path) -> None:
     assert "BatchMode=yes" in argv
     assert argv[argv.index("-p") + 1] == "2222"
     assert argv[argv.index("-i") + 1] == str(hosts_hub / "secrets" / "nas_key")
+    assert argv[argv.index("--") + 1] == "user@nas.local"
     assert argv[-2] == "user@nas.local"
     assert argv[-1] == "exit 0"
     plain = ssh_argv(get_host(hosts_hub, "winbox"), hosts_hub, None)
-    assert "-p" not in plain and "-i" not in plain and plain[-1] == "win.local"
+    assert "-p" not in plain and "-i" not in plain
+    assert plain[-2] == "--" and plain[-1] == "win.local"
 
 
 def test_scp_argv_upload_and_download(hosts_hub: Path) -> None:
     host = get_host(hosts_hub, "nas")
     up = scp_argv(host, hosts_hub, "/tmp/a.txt", "/srv/a.txt", upload=True)
     assert up[0] == "scp" and up[up.index("-P") + 1] == "2222"
+    assert up[-3] == "--"
     assert up[-2:] == ["/tmp/a.txt", "user@nas.local:/srv/a.txt"]
     down = scp_argv(host, hosts_hub, "/srv/a.txt", "/tmp/a.txt", upload=False)
+    assert down[-3] == "--"
     assert down[-2:] == ["user@nas.local:/srv/a.txt", "/tmp/a.txt"]
 
 

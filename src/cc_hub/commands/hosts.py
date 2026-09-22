@@ -58,16 +58,19 @@ def _common_opts(host: dict, hub: Path, *, port_flag: str) -> list[str]:
 
 
 def ssh_argv(host: dict, hub: Path, remote_command: str | None) -> list[str]:
-    argv = ["ssh", *_common_opts(host, hub, port_flag="-p"), str(host["target"])]
+    # "--" marks end-of-options so a target like "-oProxyCommand=..." in
+    # hosts.toml is taken as a positional hostname, never as an ssh flag.
+    argv = ["ssh", *_common_opts(host, hub, port_flag="-p"), "--", str(host["target"])]
     if remote_command:
         argv.append(remote_command)
     return argv
 
 
 def scp_argv(host: dict, hub: Path, src: str, dst: str, *, upload: bool) -> list[str]:
+    # Same "--" end-of-options guard as ssh_argv, ahead of the src/dst pair.
     target = str(host["target"])
     pair = [src, f"{target}:{dst}"] if upload else [f"{target}:{src}", dst]
-    return ["scp", *_common_opts(host, hub, port_flag="-P"), *pair]
+    return ["scp", *_common_opts(host, hub, port_flag="-P"), "--", *pair]
 
 
 def run_ssh(
@@ -108,7 +111,7 @@ def join_command(parts: list[str]) -> str:
 hosts_app = typer.Typer(
     no_args_is_help=True, help="Remote hosts over ssh (keys only, no passwords)."
 )
-_RAW = {"allow_interspersed_args": False, "ignore_unknown_options": True}
+_RAW = {"ignore_unknown_options": True}
 
 
 def _emit(code: int, out: str, err: str) -> None:
@@ -159,6 +162,12 @@ def run_cmd(
     """Run a command on the host; output and exit code are passed through."""
     from cc_hub.console import fail, resolve_hub
 
+    # click may leave a leaked "--" sentinel in the variadic argument even
+    # with ignore_unknown_options; strip it defensively before joining.
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        fail("no remote command given")
     try:
         code, out, err = run_remote(resolve_hub(ctx), name, join_command(command), timeout=timeout)
     except HostError as exc:
