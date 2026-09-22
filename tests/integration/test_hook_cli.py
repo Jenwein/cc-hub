@@ -40,6 +40,14 @@ def test_evaluate_blocks_protected_read(hub: Path) -> None:
     assert blocked and "protected" in reason
 
 
+def test_evaluate_blocks_a_protected_path_named_by_a_command(hub: Path) -> None:
+    blocked, reason = evaluate({"tool_input": {"command": "cat secrets/key"}}, hub)
+    assert blocked and "protected path in command" in reason
+    assert evaluate({"tool_input": {"command": "cat .env.example"}}, hub) == (False, "")
+    assert evaluate({"tool_input": {"command": "echo hello"}}, hub) == (False, "")
+    assert evaluate({"tool_input": {"command": "ls -la /"}}, hub) == (False, "")
+
+
 def test_evaluate_allows_harmless_and_unknown_shapes(hub: Path) -> None:
     assert evaluate({"tool_name": "Bash", "tool_input": {"command": "ls"}}, hub) == (False, "")
     assert evaluate({"tool_name": "Edit", "tool_input": {"old_string": "a"}}, hub) == (False, "")

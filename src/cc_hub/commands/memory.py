@@ -144,6 +144,8 @@ def search_cmd(
         typer.echo("no matches")
     for hit in hits:
         typer.echo(f"{hit.file}:{hit.line_no}: {hit.line}")
+        if hit.context.strip():
+            typer.echo(f"    {hit.context}")
 
 
 @memory_app.command("recent")

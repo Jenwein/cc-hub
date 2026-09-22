@@ -72,6 +72,13 @@ def test_memory_cli_log_recent_search(hub: Path) -> None:
     assert "hello 世界" in r.output
     r = runner.invoke(app, ["--hub", str(hub), "memory", "search", "世界", "--json"])
     assert json.loads(r.output)[0]["line"].endswith("hello 世界")
+    r = runner.invoke(app, ["--hub", str(hub), "memory", "log", "second entry"])
+    assert r.exit_code == 0, r.output
+    r = runner.invoke(app, ["--hub", str(hub), "memory", "search", "世界"])
+    lines = r.output.splitlines()
+    hit = next(i for i, line in enumerate(lines) if "hello 世界" in line)
+    assert lines[hit + 1].startswith("    ")
+    assert "second entry" in lines[hit + 1]
     r = runner.invoke(app, ["--hub", str(hub), "memory", "search", "nothing-here"])
     assert "no matches" in r.output
 

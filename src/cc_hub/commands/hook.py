@@ -42,6 +42,13 @@ def extract_path(tool_input: dict) -> str | None:
     return None
 
 
+def command_tokens(command: str) -> list[str]:
+    try:
+        return shlex.split(command, posix=True)
+    except ValueError:
+        return command.split()
+
+
 def evaluate(payload: dict, hub: Path, *, extra: Iterable[str] = ()) -> tuple[bool, str]:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
@@ -51,6 +58,13 @@ def evaluate(payload: dict, hub: Path, *, extra: Iterable[str] = ()) -> tuple[bo
         rule = match_command(command, extra)
         if rule:
             return True, f"cc-hub blocked this command (rule {rule}): {normalize(command)[:200]}"
+        for token in command_tokens(command):
+            # `cat secrets/key` must be refused as firmly as a Read of it.
+            if not token.startswith("-") and is_protected_path(token, hub):
+                return True, (
+                    "cc-hub blocked this command (protected path in command): "
+                    f"{token[:200]}"
+                )
     path = extract_path(tool_input)
     if path and is_protected_path(path, hub):
         return True, f"cc-hub blocked access to a protected path (secrets/ or .env): {path}"
