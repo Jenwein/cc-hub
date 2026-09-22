@@ -130,10 +130,13 @@ def search_cmd(
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Search MEMORY.md and the daily logs, newest first."""
-    from cc_hub.console import echo_json, resolve_hub
+    from cc_hub.console import echo_json, fail, resolve_hub
 
     hub = resolve_hub(ctx)
-    hits = search(hub, query, days=days, limit=limit, regex=regex)
+    try:
+        hits = search(hub, query, days=days, limit=limit, regex=regex)
+    except re.error as exc:
+        fail(f"invalid regex: {exc}")
     if as_json:
         echo_json([asdict(h) for h in hits])
         return
@@ -154,7 +157,8 @@ def recent_cmd(
     from cc_hub.console import resolve_hub
 
     hub = resolve_hub(ctx)
-    days = days or int(load_config(hub).get("memory", {}).get("recent_days", 2))
+    days = (days if days is not None else
+            int(load_config(hub).get("memory", {}).get("recent_days", 2)))
     files = recent(hub, days=days)
     if not files:
         typer.echo("no memory logs yet")

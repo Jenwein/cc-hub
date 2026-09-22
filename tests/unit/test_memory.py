@@ -74,3 +74,11 @@ def test_memory_cli_log_recent_search(hub: Path) -> None:
     assert json.loads(r.output)[0]["line"].endswith("hello 世界")
     r = runner.invoke(app, ["--hub", str(hub), "memory", "search", "nothing-here"])
     assert "no matches" in r.output
+
+
+def test_search_cli_reports_invalid_regex(hub: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["--hub", str(hub), "memory", "search",
+                            "(unclosed", "--regex"])
+    assert r.exit_code == 1
+    assert "invalid regex" in r.output
