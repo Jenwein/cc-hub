@@ -60,3 +60,27 @@ def test_init_cli_reports_nested_git(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     result = CliRunner().invoke(app, ["init", str(tmp_path / "h"), "--no-git"])
     assert result.exit_code == 1
+
+
+def test_init_refuses_an_existing_repo_root_that_is_not_a_hub(tmp_path: Path) -> None:
+    target = tmp_path / "h"
+    (target / ".git").mkdir(parents=True)
+    with pytest.raises(NestedGitError):
+        init_hub(target, git=False)
+    assert not (target / "hub.toml").exists()
+
+
+def test_init_reruns_inside_an_existing_hub_repo(tmp_path: Path) -> None:
+    target = tmp_path / "h"
+    init_hub(target, git=False)
+    (target / ".git").mkdir()
+    result = init_hub(target, git=False)
+    assert result.created == []
+    assert "hub.toml" in result.skipped
+
+
+def test_init_cli_explains_cc_hub_dir_for_a_non_default_hub(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["init", str(tmp_path / "h"), "--no-git"])
+    assert result.exit_code == 0, result.output
+    assert "CC_HUB_DIR" in result.output
+    assert "projects.agent.options.env" in result.output

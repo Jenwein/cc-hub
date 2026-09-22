@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import typer
+from rich.markup import escape
 from rich.table import Table
 
 from cc_hub import manifest
@@ -43,6 +44,12 @@ def init_hub(target: Path, *, name: str | None = None, git: bool = True) -> Init
         raise NestedGitError(
             f"{target} is inside the git repository {repo}. "
             "A hub must live outside every code repository."
+        )
+    if (target / ".git").exists() and not (target / "hub.toml").is_file():
+        raise NestedGitError(
+            f"{target} is the root of the git repository {target}. "
+            "A hub must live outside every code repository; "
+            "pass an empty directory instead."
         )
     result = InitResult(target=target)
     target.mkdir(parents=True, exist_ok=True)
@@ -94,3 +101,10 @@ def register(app: typer.Typer) -> None:
             "Next: set cc-connect's work_dir to this directory and send the first message; "
             "the agent will follow BOOTSTRAP.md."
         )
+        if result.target != default_hub_dir().expanduser().resolve():
+            console.print(
+                escape(
+                    f'This hub is not ~/.cc-hub, so set CC_HUB_DIR = "{result.target}" in '
+                    "cc-connect's [projects.agent.options.env] (see docs/cc-connect.md)."
+                )
+            )

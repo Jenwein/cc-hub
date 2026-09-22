@@ -23,3 +23,9 @@ def test_docs_exist_and_are_utf8_lf() -> None:
     codex_sandbox_text = (ROOT / "docs" / "codex-sandbox.md").read_text(encoding="utf-8")
     assert "writable_roots" in codex_sandbox_text
     assert "## 0.1.0" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_docs_explain_cc_hub_dir() -> None:
+    cc_connect_text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
+    assert "CC_HUB_DIR" in cc_connect_text
+    assert "CC_HUB_DIR" in (ROOT / "docs" / "install.md").read_text(encoding="utf-8")

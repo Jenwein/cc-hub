@@ -16,6 +16,7 @@ Minimal `[[projects]]` entry pointing a Claude Code bot at the hub:
     [projects.agent.options.env]
     PATH = "/home/you/.local/bin:/usr/local/bin:/usr/bin:/bin"
     PYTHONUTF8 = "1"
+    CC_HUB_DIR = "/home/you/.cc-hub"  # only needed when the hub is not ~/.cc-hub
 
     [[projects.platforms]]
     type = "feishu"

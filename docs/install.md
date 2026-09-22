@@ -19,7 +19,11 @@ Make sure that directory is on your PATH; `uv tool update-shell` can add it.
     cc-hub init              # ~/.cc-hub
     cc-hub init ~/my-hub     # anywhere else
 
-The hub must not live inside another git repository; `init` refuses that.
+The hub must not live inside another git repository, and it must not be the
+root of one either; `init` refuses both. If the hub is not `~/.cc-hub`, set
+`CC_HUB_DIR` to its absolute path in cc-connect's
+`[projects.agent.options.env]` so every `cc-hub` call finds it from any
+working directory.
 Treat the hub as private data: commit it to a private repository if you want
 backups. `secrets/`, generated files and agent pointers are already gitignored.
 
