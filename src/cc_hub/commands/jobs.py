@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -117,6 +118,19 @@ def start_job(hub: Path, cmd: list[str], *, cwd: Path, name: str | None = None) 
     return job
 
 
+def resolve_exe(name: str) -> str:
+    """Resolve a bare command name on PATH; Windows only finds .cmd/.bat shims that way.
+
+    Names that already contain a separator are passed through: they are relative
+    to the job's cwd, not to the runner's, so which() would answer the wrong
+    question. An unresolvable name is passed through too, so a missing command
+    still fails as exit 127 inside run_job.
+    """
+    if os.sep in name or (os.altsep and os.altsep in name):
+        return name
+    return shutil.which(name) or name
+
+
 def run_job(hub: Path, job_id: str) -> int:
     """Runner body: execute the command, stream output to the log, record the outcome."""
     hub = Path(hub)
@@ -127,8 +141,9 @@ def run_job(hub: Path, job_id: str) -> int:
     log.parent.mkdir(exist_ok=True)
     with log.open("ab") as fh:
         try:
+            argv = [resolve_exe(job.cmd[0]), *job.cmd[1:]]
             proc = subprocess.Popen(
-                job.cmd, cwd=job.cwd, stdin=subprocess.DEVNULL, stdout=fh,
+                argv, cwd=job.cwd, stdin=subprocess.DEVNULL, stdout=fh,
                 stderr=subprocess.STDOUT, env=child_env(),
             )
         except OSError as exc:

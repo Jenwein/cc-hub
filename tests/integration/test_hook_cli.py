@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from cc_hub.cli import app
@@ -142,3 +144,20 @@ def test_snippet_shape() -> None:
     assert json.loads(r.output)["hooks"]["PostToolUse"][0]["hooks"][0]["command"].endswith(
         "post-tool-use"
     )
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX quoting")
+def test_snippet_quotes_an_exe_path_with_spaces() -> None:
+    command = snippet("/opt/my tools/cc-hub")["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert command.startswith("'/opt/my tools/cc-hub'")
+    assert command.endswith(" hook pre-tool-use")
+
+
+def test_snippet_quotes_an_exe_path_with_spaces_on_windows(monkeypatch) -> None:
+    from cc_hub.commands import hook as hook_mod
+
+    monkeypatch.setattr(hook_mod, "is_windows", lambda: True)
+    command = snippet(r"C:\Program Files\cc-hub.exe")["hooks"]["PreToolUse"][0]["hooks"][0][
+        "command"
+    ]
+    assert command.startswith('"C:\\Program Files\\cc-hub.exe"')

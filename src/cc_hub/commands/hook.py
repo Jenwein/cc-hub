@@ -16,6 +16,7 @@ import typer
 from cc_hub.blocklist import is_protected_path, match_command, normalize
 from cc_hub.encoding import append_text, decode_bytes
 from cc_hub.hub import HubNotFound, find_hub, load_config
+from cc_hub.platform import is_windows
 
 COMMAND_KEYS = ("command", "cmd")
 PATH_KEYS = ("file_path", "path", "filePath")
@@ -56,13 +57,20 @@ def evaluate(payload: dict, hub: Path, *, extra: Iterable[str] = ()) -> tuple[bo
     return False, ""
 
 
+def quote_exe(exe: str) -> str:
+    """Quote a program path so a hook command with spaces in it still parses."""
+    if is_windows():
+        return exe if exe.startswith('"') or " " not in exe else f'"{exe}"'
+    return shlex.quote(exe)
+
+
 def default_exe() -> str:
     found = shutil.which("cc-hub")
-    return found if found else f"{sys.executable} -m cc_hub"
+    return quote_exe(found) if found else f"{quote_exe(sys.executable)} -m cc_hub"
 
 
 def snippet(exe: str | None = None, *, matcher: bool = True) -> dict:
-    exe = exe or default_exe()
+    exe = quote_exe(exe) if exe else default_exe()
     pre: dict = {}
     post: dict = {}
     if matcher:

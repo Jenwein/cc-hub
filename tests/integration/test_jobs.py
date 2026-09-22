@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import shutil
 import signal
 import sys
 import time
@@ -18,6 +19,7 @@ from cc_hub.commands.jobs import (
     load_job,
     parse_days,
     reconcile,
+    resolve_exe,
     save_job,
     start_job,
     stop_job,
@@ -208,3 +210,24 @@ def test_tail_rejects_a_record_with_a_foreign_log_path(hub: Path) -> None:
         tail(hub, "20260101-000000-evil", 5)
     with pytest.raises(JobError):
         clean(hub, older_than_days=7)
+
+
+def test_resolve_exe_finds_bare_names_and_passes_paths_through() -> None:
+    bare = Path(PY).name
+    resolved = resolve_exe(bare)
+    if shutil.which(bare):
+        assert Path(resolved).is_absolute()
+    assert resolve_exe(PY) == PY
+    assert resolve_exe("definitely-not-a-command-xyz") == "definitely-not-a-command-xyz"
+    assert resolve_exe(os.path.join(".", "build.sh")) == os.path.join(".", "build.sh")
+
+
+def test_job_with_a_bare_command_name_runs(hub: Path, tmp_path: Path) -> None:
+    bare = Path(PY).name
+    if shutil.which(bare) is None:
+        bare = "python3"
+    if shutil.which(bare) is None:
+        pytest.skip("no bare python interpreter on PATH")
+    job = start_job(hub, [bare, "-c", "print('bare ok')"], cwd=tmp_path)
+    assert wait_for(hub, job.id).status == "done"
+    assert "bare ok" in tail(hub, job.id, 5)
