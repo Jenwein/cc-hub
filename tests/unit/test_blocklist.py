@@ -26,7 +26,11 @@ BLOCKED = [
     ("Restart-Computer -Force", "power"),
     ("git push --force origin main", "force-push-main"),
     ("git push -f origin HEAD:master", "force-push-main"),
+    ("git push origin +main", "force-push-main"),
+    ("git push -f origin +main:main", "force-push-main"),
     ("chmod -R 777 /", "chmod-root"),
+    ("find / -delete", "find-delete"),
+    ("sudo find /home -exec rm -rf {} +", "find-delete"),
     ("Remove-Item -Recurse -Force C:\\", "win-remove-root"),
     ("rd /s /q C:\\", "win-remove-root"),
     ("format C:", "win-format"),
@@ -41,6 +45,7 @@ ALLOWED = [
     "git push origin main",
     "git push --force-with-lease origin feature",
     "git push -f origin feature",
+    "git push origin +feature",
     "curl -fsSL https://example.com/install.sh -o install.sh",
     "ls -la /",
     "grep -r foo /",
@@ -49,6 +54,8 @@ ALLOWED = [
     "npm run build && npm test",
     "python -c 'print(1)'",
     "./format-code.sh",
+    "find . -name '*.pyc' -delete",
+    "find /tmp/build -delete",
     "",
 ]
 

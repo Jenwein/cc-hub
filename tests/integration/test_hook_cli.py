@@ -59,6 +59,12 @@ def test_cli_pre_tool_use_exit_codes(hub: Path) -> None:
     assert r.exit_code == 0
 
 
+def test_cli_pre_tool_use_fails_open_on_nul_byte_path(hub: Path) -> None:
+    payload = r'{"tool_name": "Read", "tool_input": {"file_path": "/tmp/foo\u0000bar"}}'
+    r = CliRunner().invoke(app, ["--hub", str(hub), "hook", "pre-tool-use"], input=payload)
+    assert r.exit_code == 0
+
+
 def test_cli_pre_tool_use_uses_blocklist_extra(hub: Path) -> None:
     cfg = hub / "hub.toml"
     cfg.write_text(

@@ -137,13 +137,18 @@ hook_app = typer.Typer(
 @hook_app.command("pre-tool-use")
 def pre_tool_use(ctx: typer.Context) -> None:
     """Read the tool-call JSON from stdin; exit 2 to block catastrophic commands."""
-    hub = _try_hub(ctx)
     try:
         payload = read_payload()
     except (ValueError, OSError) as exc:
         typer.echo(f"cc-hub hook: could not parse payload ({exc}); allowing", err=True)
         raise typer.Exit(code=0) from exc
-    blocked, reason = evaluate(payload, hub or Path.cwd(), extra=_extra(hub))
+    blocked, reason = False, ""
+    try:
+        hub = _try_hub(ctx)
+        blocked, reason = evaluate(payload, hub or Path.cwd(), extra=_extra(hub))
+    except Exception as exc:  # noqa: BLE001 - fail-open: a bug here must never block the agent
+        typer.echo(f"cc-hub hook: evaluation failed ({exc}); allowing", err=True)
+        raise typer.Exit(code=0) from exc
     if blocked:
         typer.echo(reason, err=True)
         raise typer.Exit(code=2)

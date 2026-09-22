@@ -127,13 +127,31 @@ def rule_power(seg: Segment) -> bool:
 def rule_force_push_main(seg: Segment) -> bool:
     if seg.name != "git" or "push" not in seg.args:
         return False
+    refs = [a for a in seg.args if not a.startswith("-")]
+    main_refs = [a for a in refs if MAIN_REF.match(a.lstrip("+"))]
+    if not main_refs:
+        return False
     force = any(a in ("-f", "--force") for a in seg.args)
-    return force and any(MAIN_REF.match(a) for a in seg.args if not a.startswith("-"))
+    plus_force = any(a.startswith("+") for a in main_refs)
+    return force or plus_force
 
 
 def rule_chmod_root(seg: Segment) -> bool:
     return seg.name in ("chmod", "chown", "chgrp") and _recursive(seg.args) and any(
         _is_root_target(t) for t in _targets(seg.args)
+    )
+
+
+def rule_find_delete(seg: Segment) -> bool:
+    if seg.name != "find":
+        return False
+    targets = _targets(seg.args)
+    if not targets or not _is_root_target(targets[0]):
+        return False
+    if "-delete" in seg.args:
+        return True
+    return any(
+        a == "-exec" and seg.args[i + 1] == "rm" for i, a in enumerate(seg.args[:-1])
     )
 
 
@@ -157,6 +175,7 @@ BUILTIN_RULES: tuple[Rule, ...] = (
     Rule("power", "segment", rule_power),
     Rule("force-push-main", "segment", rule_force_push_main),
     Rule("chmod-root", "segment", rule_chmod_root),
+    Rule("find-delete", "segment", rule_find_delete),
     Rule("win-remove-root", "segment", rule_win_remove_root),
     Rule("win-format", "segment", rule_win_format),
 )
@@ -188,7 +207,7 @@ def is_protected_path(path: str, hub: Path) -> bool:
         candidate = Path(hub) / candidate
     try:
         resolved = candidate.resolve()
-    except OSError:
+    except (OSError, ValueError):
         resolved = candidate
     secrets = (Path(hub) / "secrets").resolve()
     if resolved == secrets or secrets in resolved.parents:
