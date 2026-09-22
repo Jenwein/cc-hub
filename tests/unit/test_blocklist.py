@@ -51,6 +51,12 @@ BLOCKED = [
     ("rm -rf /\\*", "rm-root"),
     ("rm -rf \\/home\\/bob", "rm-root"),
     ("chmod -R 777 \\/", "chmod-root"),
+    ("find / \\( -name '*.log' -o -name '*.tmp' \\) -delete", "find-delete"),
+    ("find ~ \\( -type f \\) -delete", "find-delete"),
+    ("find / -type f \\( -name a \\) -exec rm {} \\;", "find-delete"),
+    ("( rm -rf / )", "rm-root"),
+    ("$(rm -rf /)", "rm-root"),
+    ("echo hi\nrm -rf /", "rm-root"),
 ]
 
 ALLOWED = [
@@ -82,6 +88,8 @@ ALLOWED = [
     "git commit -m 'cleanup; rm -rf / in docs'",
     "echo 'rm -rf /'",
     "bash -lc 'ls && pwd'",
+    "find . \\( -name '*.pyc' \\) -delete",
+    "echo '(' && echo ')'",
     "",
 ]
 

@@ -48,6 +48,8 @@ def command_tokens(command: str) -> list[str]:
     for segment in split_segments(command):
         tokens.append(segment.program or segment.name)
         tokens.extend(segment.args)
+        # `echo x > secrets/key` writes the secret just as surely as reading it.
+        tokens.extend(segment.redirects)
     return tokens
 
 

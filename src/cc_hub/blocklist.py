@@ -6,16 +6,24 @@ from __future__ import annotations
 import re
 import shlex
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 @dataclass
 class Segment:
-    raw: str
     name: str
     args: list[str]
     program: str = ""  # argv[0] as written, before basename normalisation
+    redirects: list[str] = field(default_factory=list)  # targets of > >> < 2> &>
+
+
+@dataclass
+class Group:
+    """One command's tokens, with the redirect targets kept out of its arguments."""
+
+    tokens: list[str]
+    redirects: list[str]
 
 
 @dataclass(frozen=True)
@@ -90,38 +98,55 @@ def _is_punctuation(token: str) -> bool:
     return bool(token) and all(ch in PUNCTUATION for ch in token)
 
 
-def _lex_groups(line: str, *, posix: bool) -> list[list[str]] | None:
-    """Tokenize one line and cut it at shell operators; None if the quotes are unbalanced.
+def _is_paren(token: str) -> bool:
+    return bool(token) and all(ch in "()" for ch in token)
 
-    Splitting the token stream rather than the raw text is what keeps a quoted
-    operator (`git commit -m 'a; b'`) inside its argument and still separates a
-    real one (`echo hi; rm -rf /`).
+
+def _lex(line: str, *, posix: bool) -> list[str] | None:
+    """One line's tokens; None if the quotes are unbalanced.
+
+    Working from the token stream rather than the raw text is what keeps a
+    quoted operator (`git commit -m 'a; b'`) inside its argument and still
+    separates a real one (`echo hi; rm -rf /`).
     """
     lexer = shlex.shlex(line, posix=posix, punctuation_chars=True)
     lexer.whitespace_split = True
     lexer.commenters = ""
     try:
-        tokens = list(lexer)
+        return list(lexer)
     except ValueError:
         return None
-    groups: list[list[str]] = [[]]
+
+
+def _group(tokens: list[str], *, split_parens: bool) -> list[Group]:
+    """Cut a token stream at shell operators, keeping each redirect target aside.
+
+    POSIX unescaping makes `find / \\( -name x \\) -delete` look exactly like a
+    subshell, so parens get both readings: one where they end the group (real
+    subshells) and one where they are dropped (escaped parens in an argument
+    list). Callers judge the union.
+    """
+    groups: list[Group] = [Group([], [])]
     skip_next = False
     for token in tokens:
         if skip_next:
             skip_next = False
+            groups[-1].redirects.append(token)
             continue
         if not _is_punctuation(token):
-            groups[-1].append(token)
+            groups[-1].tokens.append(token)
         elif ">" in token or "<" in token:
-            skip_next = ">" in token  # the redirect target is not an argument
+            skip_next = True  # the next token is the redirect target, not an argument
+        elif _is_paren(token) and not split_parens:
+            continue
         else:
-            groups.append([])  # && || | ; ;; & ( )
+            groups.append(Group([], []))  # && || | ; ;; & ( )
     return groups
 
 
-def _fallback_groups(line: str) -> list[list[str]]:
+def _fallback_groups(line: str) -> list[Group]:
     """Unbalanced quotes: the old behaviour, splitting the raw text on operators."""
-    return [part.split() for part in SPLIT_RE.split(line) if part.strip()]
+    return [Group(part.split(), []) for part in SPLIT_RE.split(line) if part.strip()]
 
 
 def _strip_wrappers(tokens: list[str]) -> list[str]:
@@ -139,47 +164,60 @@ def _strip_wrappers(tokens: list[str]) -> list[str]:
     return tokens
 
 
-def _segments_from(tokens: list[str], *, depth: int) -> list[Segment]:
-    tokens = _strip_wrappers(list(tokens))
+def _segments_from(group: Group, *, depth: int) -> list[Segment]:
+    tokens = _strip_wrappers(list(group.tokens))
     if not tokens:
         return []
     inner = _shell_script(tokens) if depth < MAX_SHELL_DEPTH else None
     if inner is not None:
         # `bash -lc "cd /tmp && rm -rf /"` must be judged by the script, not by
         # `bash`; the posix pass hands us the whole script as a single token.
-        return split_segments(inner, _depth=depth + 1)
+        nested = split_segments(inner, _depth=depth + 1)
+        if nested:  # `bash -lc "cat x" > secrets/key` must not lose its target
+            nested[0].redirects.extend(group.redirects)
+        return nested
     return [
         Segment(
-            raw=" ".join(tokens),
             name=_basename(tokens[0]),
             args=tokens[1:],
             program=tokens[0],
+            redirects=list(group.redirects),
         )
     ]
 
 
 def split_segments(command: str, *, _depth: int = 0) -> list[Segment]:
-    """Every command in `command`, seen both as POSIX and as literal text.
+    """Every command in `command`, under every reading that a shell might give it.
 
-    The two passes disagree about backslashes: POSIX reads `rm -rf \\/` as the
-    root directory, the literal pass keeps `C:\\Users\\bob` in one piece. Both
-    readings are returned so a rule matching either one blocks the command.
+    The passes disagree on purpose. POSIX resolves escapes, so `rm -rf \\/` is the
+    root directory; the literal pass keeps `C:\\Users\\bob` in one piece. Parens
+    are read both as subshell boundaries and as ordinary noise. A rule that
+    matches any one reading blocks the command.
     """
     segments: list[Segment] = []
-    seen: set[tuple[str, tuple[str, ...]]] = set()
+    index: dict[tuple[str, tuple[str, ...]], Segment] = {}
     for line in command.split("\n"):
         if not line.strip():
             continue
         for posix in (True, False):
-            groups = _lex_groups(line, posix=posix)
-            if groups is None:
-                groups = _fallback_groups(line)
-            for tokens in groups:
-                for segment in _segments_from(tokens, depth=_depth):
-                    key = (segment.name, tuple(segment.args))
-                    if key not in seen:
-                        seen.add(key)
-                        segments.append(segment)
+            tokens = _lex(line, posix=posix)
+            readings = (
+                [_group(tokens, split_parens=True), _group(tokens, split_parens=False)]
+                if tokens is not None
+                else [_fallback_groups(line)]
+            )
+            for groups in readings:
+                for group in groups:
+                    for segment in _segments_from(group, depth=_depth):
+                        key = (segment.name, tuple(segment.args))
+                        known = index.get(key)
+                        if known is None:
+                            index[key] = segment
+                            segments.append(segment)
+                            continue
+                        for target in segment.redirects:
+                            if target not in known.redirects:
+                                known.redirects.append(target)
     return segments
 
 
@@ -293,7 +331,9 @@ def match_command(command: str, extra: Iterable[str] = ()) -> str | None:
     text = normalize(command)
     if not text:
         return None
-    segments = split_segments(text)
+    # The regex rules want the collapsed one-liner; the segment rules want the
+    # original, whose newlines separate commands just like a `;` would.
+    segments = split_segments(command)
     for rule in BUILTIN_RULES:
         if rule.scope == "command":
             if rule.test(text):

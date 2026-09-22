@@ -48,6 +48,13 @@ def test_evaluate_blocks_a_protected_path_inside_a_shell_wrapper(hub: Path) -> N
     assert evaluate({"tool_input": {"command": 'bash -lc "ls -la"'}}, hub) == (False, "")
 
 
+def test_evaluate_blocks_a_protected_redirect_target(hub: Path) -> None:
+    for command in ("echo x > secrets/key", "echo x > .env", "cat foo >> secrets/key"):
+        blocked, reason = evaluate({"tool_input": {"command": command}}, hub)
+        assert blocked and "protected path in command" in reason, command
+    assert evaluate({"tool_input": {"command": "echo x > /tmp/out.txt"}}, hub) == (False, "")
+
+
 def test_evaluate_blocks_protected_read(hub: Path) -> None:
     payload = load("claude_pretooluse_read.json")
     payload["tool_input"]["file_path"] = str(hub / "secrets" / "token.txt")
