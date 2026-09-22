@@ -50,6 +50,7 @@ POINTER_RULES: dict[str, list[tuple[str, str, str]]] = {
     ],
 }
 PATH_FIX = "set PATH in cc-connect's [projects.agent.options.env] (see docs/cc-connect.md)"
+_READ_ERRORS = (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError)
 
 
 def detect_agents(*, home: Path, which: Which) -> list[str]:
@@ -97,7 +98,7 @@ def run_checks(
                     "run `cc-hub update` (read the migration notes in CHANGELOG.md first)",
                 )
             )
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except _READ_ERRORS as exc:
         checks.append(
             Check("hub-toml", "fail", f"hub.toml unreadable: {exc}", "fix the TOML syntax")
         )
@@ -196,7 +197,7 @@ def run_checks(
             )
         else:
             checks.append(_ok("projects", f"{len(projects)} registered"))
-    except tomllib.TOMLDecodeError as exc:
+    except _READ_ERRORS as exc:
         checks.append(Check("projects", "fail", f"projects.toml: {exc}", "fix the TOML"))
 
     # hosts
@@ -216,7 +217,7 @@ def run_checks(
             )
         else:
             checks.append(_ok("hosts", f"{len(hosts)} registered"))
-    except tomllib.TOMLDecodeError as exc:
+    except _READ_ERRORS as exc:
         checks.append(Check("hosts", "fail", f"hosts.toml: {exc}", "fix the TOML"))
 
     # env-stale

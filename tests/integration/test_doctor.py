@@ -111,3 +111,20 @@ def test_doctor_cli_table_escapes_rich_markup(hub: Path) -> None:
     result = CliRunner().invoke(app, ["--hub", str(hub), "doctor"])
     assert result.exit_code == 0, result.output
     assert "[note].md" in result.output
+
+
+def test_unreadable_projects_toml_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
+    (hub / "projects.toml").write_bytes(b"\xff\xfe[[project]]\n")
+    s = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
+    ids = statuses(s)
+    assert ids["projects"] == "fail"
+    assert "nested-git" in ids
+    assert "daemon-path" in ids
+
+
+def test_invalid_toml_syntax_in_hosts_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
+    (hub / "hosts.toml").write_text("[[host]\nname = \n", encoding="utf-8")
+    s = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
+    ids = statuses(s)
+    assert ids["hosts"] == "fail"
+    assert "nested-git" in ids
