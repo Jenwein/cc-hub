@@ -14,3 +14,9 @@ def test_version_prints_package_version() -> None:
 def test_no_args_shows_help() -> None:
     result = CliRunner().invoke(app, [])
     assert "Usage" in result.output
+
+
+def test_app_does_not_dump_locals_in_tracebacks() -> None:
+    from cc_hub.cli import app as cli_app
+
+    assert cli_app.pretty_exceptions_show_locals is False

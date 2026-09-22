@@ -87,6 +87,18 @@ def test_cli_pre_tool_use_uses_blocklist_extra(hub: Path) -> None:
     assert r.exit_code == 2
 
 
+def test_cli_string_blocklist_extra_does_not_block_everything(hub: Path) -> None:
+    cfg = hub / "hub.toml"
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8").replace(
+            "blocklist_extra = []", 'blocklist_extra = "terraform destroy"'
+        ),
+        encoding="utf-8",
+    )
+    r = CliRunner().invoke(app, ["--hub", str(hub), "hook", "test", "ls"])
+    assert r.exit_code == 0, r.output
+
+
 def test_cli_post_tool_use_appends_jsonl_and_never_fails(hub: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(

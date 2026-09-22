@@ -14,6 +14,8 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
     help="Hub directory tool for agents launched by cc-connect.",
+    # A traceback from a hub command must not print hub contents or secrets.
+    pretty_exceptions_show_locals=False,
 )
 
 

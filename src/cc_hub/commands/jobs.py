@@ -10,6 +10,7 @@ import secrets
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -63,16 +64,36 @@ def save_job(hub: Path, job: Job) -> None:
     write_text(job_path(hub, job.id), json.dumps(asdict(job), ensure_ascii=False, indent=2) + "\n")
 
 
+_RECORD_ERRORS = (json.JSONDecodeError, UnicodeDecodeError, TypeError, KeyError, OSError)
+
+
+def read_record(path: Path) -> Job:
+    """Load one job record; a truncated, mistyped or unreadable file is a JobError."""
+    try:
+        return Job(**json.loads(read_text(path)))
+    except _RECORD_ERRORS as exc:
+        raise JobError(f"{path.name} is not a valid job record: {exc}") from exc
+
+
 def load_job(hub: Path, job_id: str) -> Job:
     path = job_path(hub, job_id)
     if not path.is_file():
         raise JobError(f"no job named {job_id}")
-    return Job(**json.loads(read_text(path)))
+    return read_record(path)
 
 
-def list_jobs(hub: Path) -> list[Job]:
-    paths = sorted(jobs_dir(hub).glob("*.json"), reverse=True)
-    return [Job(**json.loads(read_text(p))) for p in paths]
+def list_jobs(
+    hub: Path, *, on_error: Callable[[Path, Exception], None] | None = None
+) -> list[Job]:
+    """Every readable record, newest first. Corrupt records are skipped, not fatal."""
+    jobs: list[Job] = []
+    for path in sorted(jobs_dir(hub).glob("*.json"), reverse=True):
+        try:
+            jobs.append(read_record(path))
+        except JobError as exc:
+            if on_error is not None:
+                on_error(path, exc)
+    return jobs
 
 
 def start_job(hub: Path, cmd: list[str], *, cwd: Path, name: str | None = None) -> Job:
@@ -191,8 +212,15 @@ def stop_job(hub: Path, job_id: str, *, force: bool = False, grace: float = 10.0
     return job
 
 
+def log_path(hub: Path, job: Job) -> Path:
+    """The job's log, refusing any record that points somewhere else in the hub."""
+    if job.log != f"jobs/{job.id}.log":
+        raise JobError(f"job {job.id} has an unexpected log path: {job.log}")
+    return Path(hub) / job.log
+
+
 def tail(hub: Path, job_id: str, n: int) -> str:
-    path = Path(hub) / load_job(hub, job_id).log
+    path = log_path(hub, load_job(hub, job_id))
     if not path.is_file():
         return ""
     return "\n".join(decode_bytes(path.read_bytes()).splitlines()[-n:])
@@ -216,8 +244,9 @@ def clean(hub: Path, *, older_than_days: int) -> list[str]:
         if ended.tzinfo is None:
             ended = ended.astimezone()
         if ended < cutoff:
+            log = log_path(hub, job)
             job_path(hub, job.id).unlink(missing_ok=True)
-            (Path(hub) / job.log).unlink(missing_ok=True)
+            log.unlink(missing_ok=True)
             removed.append(job.id)
     return removed
 
@@ -263,9 +292,12 @@ def status_cmd(
     """Show one job or all jobs, newest first."""
     from cc_hub.console import echo_json, fail, resolve_hub
 
+    def skipped(path: Path, exc: Exception) -> None:
+        typer.echo(f"cc-hub jobs: skipping {path.name} ({exc})", err=True)
+
     hub = resolve_hub(ctx)
     try:
-        jobs = [load_job(hub, job_id)] if job_id else list_jobs(hub)
+        jobs = [load_job(hub, job_id)] if job_id else list_jobs(hub, on_error=skipped)
     except JobError as exc:
         fail(exc)
     jobs = [reconcile(hub, j) for j in jobs]
@@ -311,7 +343,10 @@ def clean_cmd(ctx: typer.Context, older_than: str = typer.Option("7d", "--older-
         days = parse_days(older_than)
     except ValueError as exc:
         fail(exc)
-    removed = clean(resolve_hub(ctx), older_than_days=days)
+    try:
+        removed = clean(resolve_hub(ctx), older_than_days=days)
+    except JobError as exc:
+        fail(exc)
     typer.echo(f"removed {len(removed)} job(s)")
 
 

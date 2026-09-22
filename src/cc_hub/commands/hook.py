@@ -127,9 +127,18 @@ def _extra(hub: Path | None) -> list[str]:
     if hub is None:
         return []
     try:
-        return [str(p) for p in load_config(hub).get("hooks", {}).get("blocklist_extra", [])]
-    except Exception:  # noqa: BLE001 - a broken hub.toml must not disable the built-in rules
+        value = load_config(hub).get("hooks", {}).get("blocklist_extra", [])
+    except Exception:  # a broken hub.toml must not disable the built-in rules
         return []
+    if not isinstance(value, list):
+        # A bare string would be iterated character by character, and a
+        # single-character regex matches almost every command.
+        typer.echo(
+            "cc-hub hook: hooks.blocklist_extra must be a list of regexes; ignoring it",
+            err=True,
+        )
+        return []
+    return [p for p in value if isinstance(p, str)]
 
 
 hook_app = typer.Typer(
@@ -149,11 +158,14 @@ def pre_tool_use(ctx: typer.Context) -> None:
     try:
         hub = _try_hub(ctx)
         blocked, reason = evaluate(payload, hub or Path.cwd(), extra=_extra(hub))
-    except Exception as exc:  # noqa: BLE001 - fail-open: a bug here must never block the agent
+    except Exception as exc:  # fail-open: a bug here must never block the agent
         typer.echo(f"cc-hub hook: evaluation failed ({exc}); allowing", err=True)
         raise typer.Exit(code=0) from exc
     if blocked:
         typer.echo(reason, err=True)
+        # Deliberately outside the try above: typer.Exit subclasses Exception,
+        # so raising it there would be caught by the fail-open handler and the
+        # block would silently turn into an allow.
         raise typer.Exit(code=2)
 
 
@@ -165,7 +177,7 @@ def post_tool_use(ctx: typer.Context) -> None:
         if hub is None:
             return
         append_audit(hub, audit_record(read_payload()))
-    except Exception as exc:  # noqa: BLE001 - logging must never block the agent
+    except Exception as exc:  # logging must never block the agent
         typer.echo(f"cc-hub hook: audit skipped ({exc})", err=True)
 
 

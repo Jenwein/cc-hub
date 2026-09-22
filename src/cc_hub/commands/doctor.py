@@ -149,19 +149,31 @@ def run_checks(
     max_lines = int(cfg.get("memory", {}).get("max_lines", 200))
     for rel, limit in (("MEMORY.md", max_lines), ("USER.md", 100)):
         p = hub / rel
-        if p.is_file():
+        if not p.is_file():
+            continue
+        try:
             n = len(read_text(p).splitlines())
-            if n <= limit:
-                checks.append(_ok(f"memory-budget:{rel}", f"{n}/{limit} lines"))
-            else:
-                checks.append(
-                    Check(
-                        f"memory-budget:{rel}",
-                        "fail",
-                        f"{n}/{limit} lines",
-                        "run the consolidation procedure from the hub-memory skill",
-                    )
+        except _READ_ERRORS as exc:
+            checks.append(
+                Check(
+                    f"memory-budget:{rel}",
+                    "fail",
+                    f"unreadable: {exc}",
+                    "fix the file's permissions or re-save it as UTF-8",
                 )
+            )
+            continue
+        if n <= limit:
+            checks.append(_ok(f"memory-budget:{rel}", f"{n}/{limit} lines"))
+        else:
+            checks.append(
+                Check(
+                    f"memory-budget:{rel}",
+                    "fail",
+                    f"{n}/{limit} lines",
+                    "run the consolidation procedure from the hub-memory skill",
+                )
+            )
 
     # memory-files
     mem = hub / "memory"
@@ -241,9 +253,16 @@ def run_checks(
         problems = []
         for rel, kind, needle in POINTER_RULES[agent]:
             p = hub / rel
-            if kind == "exists" and not p.exists():
-                problems.append(f"{rel} missing")
-            elif kind == "contains" and (not p.is_file() or needle not in read_text(p)):
+            if kind == "exists":
+                if not p.exists():
+                    problems.append(f"{rel} missing")
+                continue
+            try:
+                found = p.is_file() and needle in read_text(p)
+            except _READ_ERRORS as exc:
+                problems.append(f"{rel} unreadable: {exc}")
+                continue
+            if not found:
                 problems.append(f"{rel} missing or lacks '{needle}'")
         if problems:
             checks.append(

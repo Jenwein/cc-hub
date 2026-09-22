@@ -12,7 +12,9 @@ from typer.testing import CliRunner
 from cc_hub.cli import app
 from cc_hub.commands.jobs import (
     Job,
+    JobError,
     clean,
+    list_jobs,
     load_job,
     parse_days,
     reconcile,
@@ -162,3 +164,47 @@ def test_jobs_cli_start_status_log(hub: Path, tmp_path: Path) -> None:
     assert "from cli" in r.output
     r = runner.invoke(app, ["--hub", str(hub), "jobs", "status", "nope"])
     assert r.exit_code == 1
+
+
+def _bad_records(hub: Path) -> None:
+    (hub / "jobs").mkdir(exist_ok=True)
+    (hub / "jobs" / "garbage.json").write_text("{", encoding="utf-8")
+    (hub / "jobs" / "extra.json").write_text('{"id": "x", "surprise": 1}', encoding="utf-8")
+
+
+def test_load_job_rejects_corrupt_records(hub: Path) -> None:
+    _bad_records(hub)
+    for job_id in ("garbage", "extra"):
+        with pytest.raises(JobError):
+            load_job(hub, job_id)
+
+
+def test_list_jobs_skips_corrupt_records_and_reports_them(hub: Path, tmp_path: Path) -> None:
+    good = start_job(hub, [PY, "-c", "print('ok')"], cwd=tmp_path)
+    wait_for(hub, good.id)
+    _bad_records(hub)
+    seen: list[str] = []
+    jobs = list_jobs(hub, on_error=lambda path, exc: seen.append(path.name))
+    assert [j.id for j in jobs] == [good.id]
+    assert sorted(seen) == ["extra.json", "garbage.json"]
+
+
+def test_jobs_status_cli_survives_corrupt_records(hub: Path, tmp_path: Path) -> None:
+    good = start_job(hub, [PY, "-c", "print('ok')"], cwd=tmp_path)
+    wait_for(hub, good.id)
+    _bad_records(hub)
+    r = CliRunner().invoke(app, ["--hub", str(hub), "jobs", "status"])
+    assert r.exit_code == 0, r.output
+    assert good.id in r.output
+
+
+def test_tail_rejects_a_record_with_a_foreign_log_path(hub: Path) -> None:
+    save_job(hub, Job(
+        id="20260101-000000-evil", name="x", cmd=["x"], cwd=str(hub), pid=1, runner_pid=1,
+        started="2026-01-01T00:00:00+00:00", ended="2026-01-01T00:00:01+00:00",
+        status="done", exit_code=0, log="../../etc/passwd",
+    ))
+    with pytest.raises(JobError):
+        tail(hub, "20260101-000000-evil", 5)
+    with pytest.raises(JobError):
+        clean(hub, older_than_days=7)
