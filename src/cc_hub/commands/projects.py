@@ -10,7 +10,6 @@ from pathlib import Path
 import tomli_w
 import typer
 
-from cc_hub.console import fail
 from cc_hub.encoding import read_text, write_text
 
 HEADER = "# Registered local projects. Managed by `cc-hub projects add|remove`.\n\n"
@@ -18,6 +17,16 @@ HEADER = "# Registered local projects. Managed by `cc-hub projects add|remove`.\
 
 class ProjectError(Exception):
     pass
+
+
+def expand_path(raw: str, home: Path | None = None) -> Path:
+    """Expand a stored path string, honoring injected home for portability."""
+    home = home or Path.home()
+    if raw.startswith("~/"):
+        return (home / raw[2:]).resolve()
+    if raw == "~":
+        return home.resolve()
+    return Path(raw).expanduser().resolve()
 
 
 def load_projects(hub: Path) -> list[dict]:
@@ -65,10 +74,7 @@ def add_project(
         raise ProjectError(f"{target} is not a directory")
     projects = load_projects(hub)
     for proj in projects:
-        if (
-            Path(str(proj.get("path", ""))).expanduser().resolve()
-            == target
-        ):
+        if expand_path(str(proj.get("path", "")), home) == target:
             raise ProjectError(
                 f"{target} is already registered as '{proj.get('name')}'"
             )
@@ -131,7 +137,7 @@ def show_cmd(
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Show one project."""
-    from cc_hub.console import echo_json, resolve_hub
+    from cc_hub.console import echo_json, fail, resolve_hub
 
     try:
         proj = get_project(resolve_hub(ctx), name)
@@ -153,7 +159,7 @@ def add_cmd(
     notes: str = typer.Option("", "--notes", help="How to run/test it, quirks."),
 ) -> None:
     """Register a project directory."""
-    from cc_hub.console import resolve_hub
+    from cc_hub.console import fail, resolve_hub
 
     try:
         entry = add_project(
@@ -171,7 +177,7 @@ def add_cmd(
 @projects_app.command("remove")
 def remove_cmd(ctx: typer.Context, name: str) -> None:
     """Remove a project from the registry (the directory is untouched)."""
-    from cc_hub.console import resolve_hub
+    from cc_hub.console import fail, resolve_hub
 
     try:
         remove_project(resolve_hub(ctx), name)

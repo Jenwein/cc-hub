@@ -78,7 +78,10 @@ def test_projects_cli(hub: Path, tmp_path: Path) -> None:
     a = tmp_path / "proj-a"
     a.mkdir()
     runner = CliRunner()
-    r = runner.invoke(app, ["--hub", str(hub), "projects", "add", str(a), "--description", "demo"])
+    r = runner.invoke(
+        app,
+        ["--hub", str(hub), "projects", "add", str(a), "--description", "demo"],
+    )
     assert r.exit_code == 0, r.output
     r = runner.invoke(app, ["--hub", str(hub), "projects", "list", "--json"])
     assert json.loads(r.output)[0]["name"] == "proj-a"
@@ -88,3 +91,27 @@ def test_projects_cli(hub: Path, tmp_path: Path) -> None:
     assert r.exit_code == 0
     r = runner.invoke(app, ["--hub", str(hub), "projects", "list"])
     assert "no projects" in r.output
+
+
+def test_duplicate_check_uses_injected_home(hub: Path, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / "dev" / "x").mkdir(parents=True)
+    entry = add_project(hub, home / "dev" / "x", home=home)
+    assert entry["path"] == "~/dev/x"
+    assert load_projects(hub)[0]["path"] == "~/dev/x"
+    with pytest.raises(ProjectError):
+        add_project(hub, home / "dev" / "x", home=home)
+
+
+def test_projects_cli_errors_exit_1(hub: Path, tmp_path: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["--hub", str(hub), "projects", "add", str(tmp_path / "missing")],
+    )
+    assert r.exit_code == 1
+    assert "not a directory" in r.output
+    r = runner.invoke(app, ["--hub", str(hub), "projects", "show", "nope"])
+    assert r.exit_code == 1
+    r = runner.invoke(app, ["--hub", str(hub), "projects", "remove", "nope"])
+    assert r.exit_code == 1
