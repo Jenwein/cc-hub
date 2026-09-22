@@ -1,0 +1,9 @@
+# Remote hosts reachable over ssh with keys. Used by `cc-hub hosts`.
+#
+# [[host]]
+# name = "nas"
+# target = "user@nas.local"      # ssh target, or a Host alias from ~/.ssh/config
+# port = 22
+# shell = "bash"                  # bash | pwsh | powershell
+# key = "secrets/nas_ed25519"     # optional, relative to the hub
+# notes = ""

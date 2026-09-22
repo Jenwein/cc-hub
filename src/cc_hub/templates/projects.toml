@@ -1,0 +1,8 @@
+# Registered local projects. Managed by `cc-hub projects add|remove`.
+#
+# [[project]]
+# name = "example"
+# path = "~/dev/example"
+# description = "What this project is"
+# notes = "How to run tests, quirks"
+# added = 2026-01-01
