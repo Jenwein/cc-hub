@@ -140,5 +140,6 @@ def test_jobs_lost_check_and_fix(hub: Path, tmp_path: Path) -> None:
         log="jobs/20260101-000000-dead.log",
     ))
     assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["jobs-lost"] == "warn"
-    run_checks(hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    fixed = run_checks(hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
     assert load_job(hub, "20260101-000000-dead").status == "lost"
+    assert statuses(fixed)["jobs-lost"] == "ok"

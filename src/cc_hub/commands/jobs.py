@@ -143,17 +143,34 @@ def reconcile(hub: Path, job: Job) -> Job:
     return job
 
 
+def _alive(job: Job) -> bool:
+    return pid_alive(job.runner_pid) or pid_alive(job.pid)
+
+
+def _no_pid_yet(job: Job) -> bool:
+    return job.status == "running" and job.runner_pid is None and job.pid is None
+
+
 def stop_job(hub: Path, job_id: str, *, force: bool = False, grace: float = 10.0) -> Job:
     job = reconcile(hub, load_job(hub, job_id))
+    if _no_pid_yet(job):
+        # The runner may not have persisted its own pid yet (start_job returns
+        # right after spawning it). Wait up to the startup grace before giving
+        # up, so we do not silently skip killing a job that is really running.
+        deadline = time.monotonic() + STARTUP_GRACE.total_seconds()
+        while _no_pid_yet(job) and time.monotonic() < deadline:
+            time.sleep(0.1)
+            job = load_job(hub, job_id)
+        if _no_pid_yet(job):
+            return reconcile(hub, job)
     if job.status != "running":
         return job
     target = job.runner_pid or job.pid
-    if target:
-        kill_tree(target, force=force)
+    kill_tree(target, force=force)
     deadline = time.monotonic() + grace
-    while time.monotonic() < deadline and (pid_alive(job.runner_pid) or pid_alive(job.pid)):
+    while time.monotonic() < deadline and _alive(job):
         time.sleep(0.1)
-    if target and (pid_alive(job.runner_pid) or pid_alive(job.pid)):
+    if _alive(job):
         kill_tree(target, force=True)
         time.sleep(0.3)
     job = load_job(hub, job_id)

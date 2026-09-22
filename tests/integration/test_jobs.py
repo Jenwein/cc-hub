@@ -75,6 +75,15 @@ def test_stop_kills_running_job(hub: Path, tmp_path: Path) -> None:
     assert not pid_alive(stopped.pid)
 
 
+def test_stop_immediately_after_start_still_kills(hub: Path, tmp_path: Path) -> None:
+    job = start_job(hub, [PY, "-c", "import time; time.sleep(120)"], cwd=tmp_path)
+    stopped = stop_job(hub, job.id, grace=3.0)
+    assert stopped.status == "stopped"
+    time.sleep(0.5)
+    assert not pid_alive(stopped.pid)
+    assert not pid_alive(stopped.runner_pid)
+
+
 def test_reconcile_marks_dead_runner_as_lost(hub: Path) -> None:
     job = Job(
         id="20260101-000000-dead", name="x", cmd=["x"], cwd=str(hub), pid=999999, runner_pid=999999,
