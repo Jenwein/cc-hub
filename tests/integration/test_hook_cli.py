@@ -25,6 +25,12 @@ def test_evaluate_blocks_codex_shell_fixture(hub: Path) -> None:
     assert blocked and "pipe-to-shell" in reason
 
 
+def test_evaluate_blocks_codex_list_command_rm_root(hub: Path) -> None:
+    payload = {"tool_name": "shell", "tool_input": {"command": ["bash", "-lc", "rm -rf /"]}}
+    blocked, reason = evaluate(payload, hub)
+    assert blocked and "rm-root" in reason
+
+
 def test_evaluate_blocks_protected_read(hub: Path) -> None:
     payload = load("claude_pretooluse_read.json")
     payload["tool_input"]["file_path"] = str(hub / "secrets" / "token.txt")

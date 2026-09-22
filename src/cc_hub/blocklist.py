@@ -42,24 +42,56 @@ PIPE_TO_SHELL = re.compile(
 POWER = {"shutdown", "reboot", "poweroff", "halt", "stop-computer", "restart-computer"}
 WIN_REMOVE = {"remove-item", "ri", "del", "erase", "rd", "rmdir"}
 FORMAT = {"format", "format.com", "diskpart", "diskpart.exe"}
+DD_SAFE_SINKS = {"of=/dev/null", "of=/dev/zero", "of=/dev/stdout", "of=/dev/stderr"}
 MAIN_REF = re.compile(r"^(?:.*:)?(?:refs/heads/)?(?:main|master)$")
 PROTECTED_NAME = re.compile(r"^\.env(?:\..+)?$")
+SHELLS = {"bash", "sh", "zsh", "dash", "fish", "ksh", "pwsh", "powershell", "cmd"}
+SHELL_SCRIPT_OPTS = {"-c", "-lc", "-ec", "-ic", "-command", "/c"}
+MAX_SHELL_DEPTH = 4
 
 
 def normalize(command: str) -> str:
     return " ".join(command.split())
 
 
-def split_segments(command: str) -> list[Segment]:
+def _basename(token: str) -> str:
+    return Path(token).name.casefold().removesuffix(".exe")
+
+
+def _shell_script(tokens: list[str]) -> str | None:
+    """For `bash -lc <script>` return <script>; None when this is not such a wrapper."""
+    if _basename(tokens[0]) not in SHELLS:
+        return None
+    index = 1
+    while index < len(tokens):
+        token = tokens[index].casefold()
+        if token in SHELL_SCRIPT_OPTS:
+            script = tokens[index + 1] if index + 1 < len(tokens) else ""
+            return script or None
+        if token.startswith("-") and not token.startswith("--") and len(token) > 1:
+            index += 1  # an option of the shell itself, e.g. `bash -l -c ...`
+            continue
+        return None
+    return None
+
+
+def _tokenize(part: str) -> list[str]:
+    # shlex eats backslashes in posix mode, which would turn C:\Users\bob into
+    # CUsersbob; double them first so Windows paths survive tokenization.
+    source = part.replace("\\", "\\\\") if "\\" in part else part
+    try:
+        return shlex.split(source, posix=True)
+    except ValueError:
+        return part.split()
+
+
+def split_segments(command: str, *, _depth: int = 0) -> list[Segment]:
     segments: list[Segment] = []
     for part in SPLIT_RE.split(command):
         part = part.strip()
         if not part:
             continue
-        try:
-            tokens = shlex.split(part, posix=True)
-        except ValueError:
-            tokens = part.split()
+        tokens = _tokenize(part)
         while tokens and (
             tokens[0] in WRAPPERS or ("=" in tokens[0] and not tokens[0].startswith("-"))
         ):
@@ -73,8 +105,12 @@ def split_segments(command: str) -> list[Segment]:
                     tokens.pop(0)  # the duration
         if not tokens:
             continue
-        name = Path(tokens[0]).name.casefold()
-        segments.append(Segment(raw=part, name=name, args=tokens[1:]))
+        inner = _shell_script(tokens) if _depth < MAX_SHELL_DEPTH else None
+        if inner is not None:
+            # `bash -lc "rm -rf /"` must be judged by the script, not by `bash`.
+            segments.extend(split_segments(inner, _depth=_depth + 1))
+            continue
+        segments.append(Segment(raw=part, name=_basename(tokens[0]), args=tokens[1:]))
     return segments
 
 
@@ -115,7 +151,10 @@ def rule_mkfs(seg: Segment) -> bool:
 
 
 def rule_dd_device(seg: Segment) -> bool:
-    return seg.name == "dd" and any(a.startswith("of=/dev/") for a in seg.args)
+    return seg.name == "dd" and any(
+        a.casefold().startswith("of=/dev/") and a.casefold() not in DD_SAFE_SINKS
+        for a in seg.args
+    )
 
 
 def rule_power(seg: Segment) -> bool:
@@ -131,7 +170,7 @@ def rule_force_push_main(seg: Segment) -> bool:
     main_refs = [a for a in refs if MAIN_REF.match(a.lstrip("+"))]
     if not main_refs:
         return False
-    force = any(a in ("-f", "--force") for a in seg.args)
+    force = "--force" in seg.args or "f" in _short_flags(seg.args)
     plus_force = any(a.startswith("+") for a in main_refs)
     return force or plus_force
 

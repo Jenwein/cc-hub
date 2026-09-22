@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import sys
 from collections.abc import Iterable
@@ -26,7 +27,9 @@ def extract_command(tool_input: dict) -> str | None:
         if isinstance(value, str) and value.strip():
             return value
         if isinstance(value, list) and value:
-            return " ".join(str(v) for v in value)
+            # shlex.join keeps `["bash", "-lc", "rm -rf /"]` a single script token
+            # so the blocklist can unwrap the shell instead of seeing loose words.
+            return shlex.join(str(v) for v in value)
     return None
 
 

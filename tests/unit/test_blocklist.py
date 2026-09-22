@@ -35,6 +35,14 @@ BLOCKED = [
     ("rd /s /q C:\\", "win-remove-root"),
     ("format C:", "win-format"),
     ("diskpart", "win-format"),
+    ("bash -lc 'rm -rf /'", "rm-root"),
+    ('sh -c "git push --force origin main"', "force-push-main"),
+    ("pwsh -Command 'Stop-Computer'", "power"),
+    ("bash -c 'mkfs.ext4 /dev/sda'", "mkfs"),
+    ("bash -l -c 'rm -rf /'", "rm-root"),
+    ("/bin/sh -c 'shutdown -h now'", "power"),
+    ("Remove-Item -Recurse -Force C:\\Users\\bob", "win-remove-root"),
+    ("git push -fu origin main", "force-push-main"),
 ]
 
 ALLOWED = [
@@ -56,6 +64,13 @@ ALLOWED = [
     "./format-code.sh",
     "find . -name '*.pyc' -delete",
     "find /tmp/build -delete",
+    "bash -lc 'ls -la'",
+    "bash -c 'rm -rf build/'",
+    "bash -lc",
+    "sh -c",
+    "git push -u origin main",
+    "dd if=/dev/zero of=/dev/null bs=1M count=1",
+    "Remove-Item -Recurse -Force C:\\Users\\bob\\dev\\build",
     "",
 ]
 
