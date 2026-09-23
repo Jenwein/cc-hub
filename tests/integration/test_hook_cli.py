@@ -184,6 +184,19 @@ def test_hook_test_command(hub: Path) -> None:
     assert r.exit_code == 0 and "allowed" in r.output
 
 
+def test_hook_test_command_evaluates_protected_paths_like_the_real_hook(hub: Path) -> None:
+    """`hook test` must never diverge from `pre-tool-use`: same evaluate() call."""
+    runner = CliRunner()
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "cat secrets/key"])
+    assert r.exit_code == 2 and "protected" in r.output
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "> secrets/key"])
+    assert r.exit_code == 2, r.output
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "echo hello"])
+    assert r.exit_code == 0 and "allowed" in r.output
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "rm -rf /"])
+    assert r.exit_code == 2 and "rm-root" in r.output
+
+
 def test_snippet_shape() -> None:
     data = snippet("/opt/bin/cc-hub")
     pre = data["hooks"]["PreToolUse"][0]

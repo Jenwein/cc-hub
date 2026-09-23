@@ -211,10 +211,12 @@ def post_tool_use(ctx: typer.Context) -> None:
 def test_cmd(
     ctx: typer.Context, command: str = typer.Argument(..., help="Command to check.")
 ) -> None:
-    """Check a command against the blocklist without running it."""
-    rule = match_command(command, _extra(_try_hub(ctx)))
-    if rule:
-        typer.echo(f"BLOCKED by rule {rule}")
+    """Check a command the same way `pre-tool-use` would, without running it."""
+    hub = _try_hub(ctx)
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+    blocked, reason = evaluate(payload, hub or Path.cwd(), extra=_extra(hub))
+    if blocked:
+        typer.echo(reason)
         raise typer.Exit(code=2)
     typer.echo("allowed")
 
