@@ -129,6 +129,18 @@ def test_reconcile_keeps_just_started_job_without_runner_pid(hub: Path) -> None:
     assert reconcile(hub, load_job(hub, job.id)).status == "running"
 
 
+def test_jobs_status_cli_reports_dash_for_none_exit_code(hub: Path) -> None:
+    save_job(hub, Job(
+        id="20260101-000000-none", name="x", cmd=["x"], cwd=str(hub), pid=None, runner_pid=None,
+        started="2020-01-01T00:00:00+00:00", ended=None, status="running", exit_code=None,
+        log="jobs/20260101-000000-none.log",
+    ))
+    r = CliRunner().invoke(app, ["--hub", str(hub), "jobs", "status", "20260101-000000-none"])
+    assert r.exit_code == 0, r.output
+    assert "exit=-" in r.output
+    assert "exit=None" not in r.output
+
+
 def test_clean_removes_only_old_finished_jobs(hub: Path) -> None:
     old_end = (datetime.now(UTC) - timedelta(days=10)).isoformat(timespec="seconds")
     new_end = datetime.now(UTC).isoformat(timespec="seconds")

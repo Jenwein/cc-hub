@@ -55,6 +55,13 @@ def test_evaluate_blocks_a_protected_redirect_target(hub: Path) -> None:
     assert evaluate({"tool_input": {"command": "echo x > /tmp/out.txt"}}, hub) == (False, "")
 
 
+def test_evaluate_blocks_a_bare_redirect_with_no_command(hub: Path) -> None:
+    for command in ("> secrets/key", ">> .env"):
+        blocked, reason = evaluate({"tool_input": {"command": command}}, hub)
+        assert blocked and "protected path in command" in reason, command
+    assert evaluate({"tool_input": {"command": "> /tmp/x"}}, hub) == (False, "")
+
+
 def test_evaluate_blocks_protected_read(hub: Path) -> None:
     payload = load("claude_pretooluse_read.json")
     payload["tool_input"]["file_path"] = str(hub / "secrets" / "token.txt")
@@ -95,6 +102,21 @@ def test_cli_pre_tool_use_exit_codes(hub: Path) -> None:
         app, ["--hub", str(hub), "hook", "pre-tool-use"], input="this is not json"
     )
     assert r.exit_code == 0
+
+
+def test_cli_pre_tool_use_blocks_a_bare_redirect(hub: Path) -> None:
+    r = CliRunner().invoke(
+        app,
+        ["--hub", str(hub), "hook", "pre-tool-use"],
+        input='{"tool_input": {"command": "> secrets/key"}}',
+    )
+    assert r.exit_code == 2, r.output
+    r = CliRunner().invoke(
+        app,
+        ["--hub", str(hub), "hook", "pre-tool-use"],
+        input='{"tool_input": {"command": "> /tmp/x"}}',
+    )
+    assert r.exit_code == 0, r.output
 
 
 def test_cli_pre_tool_use_fails_open_on_nul_byte_path(hub: Path) -> None:
@@ -160,6 +182,19 @@ def test_hook_test_command(hub: Path) -> None:
     assert r.exit_code == 2 and "rm-root" in r.output
     r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "ls"])
     assert r.exit_code == 0 and "allowed" in r.output
+
+
+def test_hook_test_command_evaluates_protected_paths_like_the_real_hook(hub: Path) -> None:
+    """`hook test` must never diverge from `pre-tool-use`: same evaluate() call."""
+    runner = CliRunner()
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "cat secrets/key"])
+    assert r.exit_code == 2 and "protected" in r.output
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "> secrets/key"])
+    assert r.exit_code == 2, r.output
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "echo hello"])
+    assert r.exit_code == 0 and "allowed" in r.output
+    r = runner.invoke(app, ["--hub", str(hub), "hook", "test", "rm -rf /"])
+    assert r.exit_code == 2 and "rm-root" in r.output
 
 
 def test_snippet_shape() -> None:

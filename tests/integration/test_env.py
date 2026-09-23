@@ -65,6 +65,16 @@ def test_version_of_handles_missing_binary() -> None:
     assert envmod.version_of("/definitely/not/here") == ""
 
 
+def test_probe_resolves_python_alias_to_python3(hub: Path, tmp_path: Path) -> None:
+    which = lambda name: "/fake/bin/python3" if name == "python3" else None  # noqa: E731
+    data = envmod.probe(
+        hub, tools=["python"], home=tmp_path / "home", which=which,
+        which_daemon=FAKE_DAEMON, version_of=FAKE_VERSION,
+    )
+    assert data["paths"]["python"]["path"] == "/fake/bin/python3"
+    assert data["tools"]["python"]["path"] == "/fake/bin/python3"
+
+
 def test_env_cli_json(hub: Path) -> None:
     result = CliRunner().invoke(app, ["--hub", str(hub), "env", "--json"])
     assert result.exit_code == 0, result.output

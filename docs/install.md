@@ -14,6 +14,19 @@
 `uv tool install` puts `cc-hub` in `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`).
 Make sure that directory is on your PATH; `uv tool update-shell` can add it.
 
+## Install without PyPI
+
+If PyPI is unreachable or you want a specific commit, install straight from
+GitHub (a released tag, or `main` for the latest):
+
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.1.0
+
+Or download the wheel attached to the GitHub release and install that file:
+
+    uv tool install ./cc_hub-0.1.0-py3-none-any.whl
+
+Upgrading works the same way with `uv tool install --force` and the new tag.
+
 ## Create the hub
 
     cc-hub init              # ~/.cc-hub

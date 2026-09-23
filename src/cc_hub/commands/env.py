@@ -10,7 +10,7 @@ import platform as pyplatform
 import shutil
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +24,45 @@ from cc_hub.platform import is_windows, is_wsl, which_minimal
 PROBE_BINARIES = ("cc-hub", "uv", "python", "cc-connect", "claude", "codex")
 SHELLS = ("bash", "zsh", "pwsh", "powershell", "cmd")
 CC_CONNECT_CONFIGS = (".cc-connect/config.toml",)
+# Systems that only ship python3 must not be reported as "python: not installed".
+ALIASES: dict[str, tuple[str, ...]] = {"python": ("python3", "python")}
+
+
+def _resolve_alias(which: Callable[[str], str | None], name: str) -> tuple[str | None, str]:
+    """The first alias of `name` (itself, when it has none) that resolves on PATH.
+
+    Returns the resolved path and the alias that produced it, so a caller can
+    probe further (e.g. its version) under the name that actually exists.
+    """
+    for candidate in ALIASES.get(name, (name,)):
+        found = which(candidate)
+        if found:
+            return found, candidate
+    return None, name
+
+
+def _probe_tools(
+    names: Iterable[str],
+    which: Callable[[str], str | None],
+    version_of: Callable[[str], str],
+) -> dict[str, dict]:
+    entries = {}
+    for name in names:
+        path, resolved = _resolve_alias(which, name)
+        entries[name] = {"path": path, "version": version_of(resolved) if path else ""}
+    return entries
+
+
+def _probe_paths(
+    names: Iterable[str],
+    which: Callable[[str], str | None],
+    which_daemon: Callable[[str], str | None],
+) -> dict[str, dict]:
+    entries = {}
+    for name in names:
+        path, resolved = _resolve_alias(which, name)
+        entries[name] = {"path": path, "daemon_visible": which_daemon(resolved) is not None}
+    return entries
 
 
 def version_of(exe: str, *, run: Callable = subprocess.run) -> str:
@@ -70,25 +109,13 @@ def probe(
             "pythonutf8": os.environ.get("PYTHONUTF8", ""),
         },
         "shells": shells,
-        "tools": {
-            name: {
-                "path": which(name),
-                "version": version_of(name) if which(name) else "",
-            }
-            for name in tools
-        },
+        "tools": _probe_tools(tools, which, version_of),
         "agents": {
             "claude_home": (home / ".claude").is_dir(),
             "codex_home": (home / ".codex").is_dir(),
             "cc_connect_config": cc_cfg,
         },
-        "paths": {
-            name: {
-                "path": which(name),
-                "daemon_visible": which_daemon(name) is not None,
-            }
-            for name in PROBE_BINARIES
-        },
+        "paths": _probe_paths(PROBE_BINARIES, which, which_daemon),
         "resources": {
             "cpus": os.cpu_count() or 1,
             "memory_gb": round(psutil.virtual_memory().total / 2**30, 1),

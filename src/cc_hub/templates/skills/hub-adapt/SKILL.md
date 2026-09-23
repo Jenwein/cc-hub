@@ -21,7 +21,8 @@ duplicate anything.
    command picks symlink, junction or copy for this platform and says which.
 3. **Hooks.** Run `cc-hub hook snippet` and merge its JSON into your hook
    configuration (pre-tool-use blocks catastrophic commands, post-tool-use
-   writes the audit log). Keep existing hooks; add, do not replace.
+   writes the audit log). Keep existing hooks; add, do not replace. After
+   installing it, confirm it is wired up with `cc-hub hook test "<command>"`.
 4. **Permissions.** Deny reads of `secrets/` and `.env` in your permission
    system. Make sure your sandbox or permission rules allow writing to every
    path in `projects.toml`; repeat this after `cc-hub projects add`.

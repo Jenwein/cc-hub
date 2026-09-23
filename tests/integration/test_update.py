@@ -56,7 +56,8 @@ def test_update_does_not_recreate_deleted_bootstrap(hub: Path) -> None:
     (hub / "BOOTSTRAP.md").unlink()
     result = update_hub(hub, version="9.9.9")
     assert not (hub / "BOOTSTRAP.md").exists()
-    assert "BOOTSTRAP.md" in result.skipped
+    assert "BOOTSTRAP.md" in result.absent
+    assert "BOOTSTRAP.md" not in result.skipped
 
 
 def test_update_merges_hub_toml_keeping_user_values(hub: Path) -> None:
@@ -86,3 +87,12 @@ def test_update_cli(hub: Path) -> None:
     result = CliRunner().invoke(app, ["--hub", str(hub), "update"])
     assert result.exit_code == 0, result.output
     assert "AGENTS.md" in result.output
+
+
+def test_update_cli_dry_run_reports_deleted_one_time_file_as_absent(hub: Path) -> None:
+    (hub / "BOOTSTRAP.md").unlink()
+    result = CliRunner().invoke(app, ["--hub", str(hub), "update", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    line = next(line for line in result.output.splitlines() if "BOOTSTRAP.md" in line)
+    assert "not present (one-time)" in line
+    assert "unchanged" not in line

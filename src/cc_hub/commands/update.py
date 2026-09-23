@@ -20,6 +20,7 @@ from cc_hub.hub import load_config, save_config
 class UpdateResult:
     updated: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    absent: list[str] = field(default_factory=list)
     backup_dir: Path | None = None
     config_changed: bool = False
 
@@ -53,7 +54,7 @@ def update_hub(
     for rel in manifest.FRAMEWORK_OWNED:
         dst = hub / rel
         if rel in manifest.ONE_TIME and not dst.exists():
-            result.skipped.append(rel)
+            result.absent.append(rel)
             continue
         new_text = manifest.render(rel, name=name, version=version)
         if dst.is_file() and read_text(dst) == new_text:
@@ -116,6 +117,8 @@ def register(app: typer.Typer) -> None:
             table.add_row(rel, "updated")
         for rel in result.skipped:
             table.add_row(rel, "unchanged")
+        for rel in result.absent:
+            table.add_row(rel, "not present (one-time)")
         console.print(table)
         if result.backup_dir:
             console.print(

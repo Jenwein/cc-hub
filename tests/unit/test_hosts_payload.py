@@ -68,6 +68,7 @@ def test_ssh_argv_includes_port_key_and_batchmode(hosts_hub: Path) -> None:
     argv = ssh_argv(get_host(hosts_hub, "nas"), hosts_hub, "exit 0")
     assert argv[0] == "ssh"
     assert "BatchMode=yes" in argv
+    assert "ConnectTimeout=15" in argv
     assert argv[argv.index("-p") + 1] == "2222"
     assert argv[argv.index("-i") + 1] == str(hosts_hub / "secrets" / "nas_key")
     assert argv[argv.index("--") + 1] == "user@nas.local"
@@ -82,6 +83,7 @@ def test_scp_argv_upload_and_download(hosts_hub: Path) -> None:
     host = get_host(hosts_hub, "nas")
     up = scp_argv(host, hosts_hub, "/tmp/a.txt", "/srv/a.txt", upload=True)
     assert up[0] == "scp" and up[up.index("-P") + 1] == "2222"
+    assert "ConnectTimeout=15" in up
     assert up[-3] == "--"
     assert up[-2:] == ["/tmp/a.txt", "user@nas.local:/srv/a.txt"]
     down = scp_argv(host, hosts_hub, "/srv/a.txt", "/tmp/a.txt", upload=False)

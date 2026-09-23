@@ -27,6 +27,20 @@ def test_agents_md_within_budget() -> None:
     assert len(text.splitlines()) <= 150
 
 
+def test_agents_md_safety_section_mentions_hook_test() -> None:
+    text = manifest.render("AGENTS.md")
+    assert 'cc-hub hook test "<command>"' in text
+
+
+def test_user_md_has_a_placeholder_for_each_bootstrap_question() -> None:
+    """BOOTSTRAP.md step 4 asks three things; USER.md must have a line for each."""
+    text = manifest.render("USER.md")
+    assert "- Address the user as" in text
+    assert "- Reply in" in text
+    assert "- Mainly works on" in text
+    assert text.count("<!-- observed:") == 3
+
+
 def test_skills_have_valid_frontmatter_and_budget() -> None:
     skills = [rel for rel in manifest.FRAMEWORK_OWNED if rel.startswith("skills/")]
     assert len(skills) == 6
@@ -68,9 +82,14 @@ def test_ownership_sets_are_disjoint() -> None:
 def test_skill_guidance_matches_verified_behaviour() -> None:
     adapt = manifest.render("skills/hub-adapt/SKILL.md")
     assert "cc-hub hook snippet --no-matcher" in adapt
+    assert 'cc-hub hook test "<command>"' in adapt
     jobs = manifest.render("skills/hub-jobs/SKILL.md")
     assert 'bash -c "npm test && npm build"' in jobs
     cc_connect = manifest.render("skills/hub-cc-connect/SKILL.md")
     assert "/cron list" in cc_connect and "/cron del <id>" in cc_connect
     assert "cc-connect cron list" not in cc_connect
     assert "cc-connect cron del" not in cc_connect
+    hosts = manifest.render("skills/hub-hosts/SKILL.md")
+    assert "Connections give up after 15 s" in hosts
+    assert "--timeout <seconds>" in hosts
+    assert "There is no `hosts add` yet; edit `hosts.toml` by hand." in hosts

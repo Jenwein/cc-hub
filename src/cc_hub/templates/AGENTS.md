@@ -80,6 +80,7 @@ Do these in order before answering the first message:
 - Never read, print, or copy anything under `secrets/` or any `.env` file.
 - Confirm before irreversible actions outside the hub.
 - Do not edit `SOUL.md` unless asked; if you do, say so.
+- Unsure whether a command is on the list? `cc-hub hook test "<command>"` tells you without running it.
 
 ## 8. When a command is not found
 

@@ -21,9 +21,12 @@ base64-encoded and decoded on the other side according to the host's shell.
 Write the remote command exactly as you would type it on that host; do not
 add quoting for ssh. Exit code and output are passed through.
 
+Connections give up after 15 s; pass `--timeout <seconds>` to bound the
+whole command, otherwise a long-running remote command runs to completion.
+
 ## Registering a host
 
-Add a block to `hosts.toml`:
+There is no `hosts add` yet; edit `hosts.toml` by hand. Add a block:
 
     [[host]]
     name = "nas"

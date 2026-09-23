@@ -46,7 +46,7 @@ def build_remote_command(host: dict, command: str) -> str:
 
 
 def _common_opts(host: dict, hub: Path, *, port_flag: str) -> list[str]:
-    opts = ["-o", "BatchMode=yes"]
+    opts = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
     if host.get("port"):
         opts += [port_flag, str(host["port"])]
     if host.get("key"):
