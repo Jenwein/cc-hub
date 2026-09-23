@@ -18,6 +18,9 @@ first run the agent creates the pointers its own ecosystem needs (`hub-adapt`).
     cc-hub init                     # creates ~/.cc-hub
     cc-hub doctor
 
+Without PyPI: `uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.1.0`
+(see [docs/install.md](docs/install.md)).
+
 Point cc-connect at the hub (`work_dir = "/home/you/.cc-hub"`, see
 [docs/cc-connect.md](docs/cc-connect.md)) and send the first message. The agent
 follows `BOOTSTRAP.md`: names itself, learns who you are, registers projects,
