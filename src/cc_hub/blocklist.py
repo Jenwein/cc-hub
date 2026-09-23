@@ -167,6 +167,10 @@ def _strip_wrappers(tokens: list[str]) -> list[str]:
 def _segments_from(group: Group, *, depth: int) -> list[Segment]:
     tokens = _strip_wrappers(list(group.tokens))
     if not tokens:
+        # `> secrets/key` has a redirect target and no command at all; keep the
+        # target visible to the protected-path scan. Rules ignore an empty name.
+        if group.redirects:
+            return [Segment(name="", args=[], redirects=list(group.redirects))]
         return []
     inner = _shell_script(tokens) if depth < MAX_SHELL_DEPTH else None
     if inner is not None:
@@ -199,13 +203,20 @@ def split_segments(command: str, *, _depth: int = 0) -> list[Segment]:
     for line in command.split("\n"):
         if not line.strip():
             continue
+        # The parens-dropped reading exists only for escaped parens in an argument
+        # list (`find / \( -name x \) -delete`); on an unescaped `(`/`)` -- a real
+        # subshell, or a `$( ... )` substitution -- dropping them merges the
+        # substitution's words into the outer command's arguments (e.g. `~` in
+        # `rm -rf $(find ~ -name '*.pyc')` would look like `rm`'s own target).
+        has_escaped_paren = "\\(" in line or "\\)" in line
         for posix in (True, False):
             tokens = _lex(line, posix=posix)
-            readings = (
-                [_group(tokens, split_parens=True), _group(tokens, split_parens=False)]
-                if tokens is not None
-                else [_fallback_groups(line)]
-            )
+            if tokens is None:
+                readings = [_fallback_groups(line)]
+            else:
+                readings = [_group(tokens, split_parens=True)]
+                if has_escaped_paren:
+                    readings.append(_group(tokens, split_parens=False))
             for groups in readings:
                 for group in groups:
                     for segment in _segments_from(group, depth=_depth):

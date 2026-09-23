@@ -323,7 +323,8 @@ def status_cmd(
         typer.echo("no jobs")
         return
     for j in jobs:
-        typer.echo(f"{j.id}\t{j.status}\t{j.name}\texit={j.exit_code}\tstarted={j.started}\tcwd={j.cwd}")
+        exit_code = j.exit_code if j.exit_code is not None else "-"
+        typer.echo(f"{j.id}\t{j.status}\t{j.name}\texit={exit_code}\tstarted={j.started}\tcwd={j.cwd}")
 
 
 @jobs_app.command("log")

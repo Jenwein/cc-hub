@@ -90,6 +90,10 @@ ALLOWED = [
     "bash -lc 'ls && pwd'",
     "find . \\( -name '*.pyc' \\) -delete",
     "echo '(' && echo ')'",
+    "rm -rf $(find ~ -name '*.pyc')",
+    "chmod -R 644 $(find ~ -name '*.pem')",
+    "chown -R me $(find ~ -type d)",
+    "rm -rf ./dist $(find ~ -name junk)",
     "",
 ]
 
