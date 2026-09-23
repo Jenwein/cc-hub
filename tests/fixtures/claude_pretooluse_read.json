@@ -1,0 +1,7 @@
+{
+  "session_id": "abc123",
+  "cwd": "/home/u/.cc-hub",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Read",
+  "tool_input": {"file_path": "REPLACED_IN_TEST"}
+}
