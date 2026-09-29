@@ -35,7 +35,6 @@ For Codex use `type = "codex"` with the same `work_dir` and `env`, and read
 Windows Task Scheduler. Those do not read your shell profile, so PATH is often
 just the system directories and `cc-hub`, `uv`, `claude` or `codex` are not
 found. Put the full PATH in `[projects.agent.options.env]` as above.
-`cc-hub doctor` reports which binaries would be missing (`daemon-path`), and
 `ENV.md` lists absolute paths the agent can fall back to.
 
 ## What the agent uses
@@ -47,10 +46,17 @@ found. Put the full PATH in `[projects.agent.options.env]` as above.
 - Scheduled prompts: `cc-connect cron add --cron "<expr>" --prompt "<text>"`.
   The hub keeps definitions in `cron/*.md`; bootstrap registers the defaults.
 - `/dir <path>` in the chat switches the working directory for the *next*
-  session only. Keep `work_dir` on the hub and let the agent `cd` or use jobs.
+  session only. Keep `work_dir` on the hub and let the agent `cd` into projects.
 
 ## Approvals
 
-`mode = "default"` relays every tool approval to the chat. The hub's hook is
-the floor beneath that: it blocks a short list of catastrophic commands even
-when you switch to `/mode yolo` or answer "allow all".
+`mode = "default"` relays every tool approval to the chat. With `/mode yolo`
+or "allow all" the decision rests with the agent runtime's own permission
+settings; the hub adds no enforcement of its own.
+
+## Sessions and background work
+
+cc-connect keeps one agent process per chat session and ends it, together
+with everything it started, on `/new`, `/switch`, a turn that stays silent
+longer than `idle_timeout_mins`, or a daemon restart. Background tasks and
+subagents the agent starts therefore live as long as that session.

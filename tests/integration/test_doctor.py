@@ -11,7 +11,7 @@ from cc_hub.cli import app
 from cc_hub.commands.doctor import run_checks
 from cc_hub.commands.init import init_hub
 
-NO_AGENTS = dict(which=lambda name: None, which_daemon=lambda name: None)
+NO_AGENTS = dict(which=lambda name: None)
 
 
 def statuses(checks) -> dict[str, str]:
@@ -25,8 +25,10 @@ def test_fresh_hub_has_no_failures(hub: Path, tmp_path: Path) -> None:
     assert s["bootstrap-pending"] == "warn"
     assert s["env-stale"] == "warn"
     assert s["pointers"] == "ok"
-    assert s["daemon-path"] == "ok"
+    assert "daemon-path" not in s
     assert s["nested-git"] == "ok"
+    assert s["stale-hooks"] == "ok"
+    assert "jobs-lost" not in s
     assert "fail" not in s.values()
 
 
@@ -41,32 +43,67 @@ def test_template_version_mismatch_warns(hub: Path, tmp_path: Path) -> None:
     assert s["hub-toml"] == "warn"
 
 
-def test_pointer_check_for_detected_claude(hub: Path, tmp_path: Path) -> None:
+def _pointer(hub: Path, home: Path, agent: str):
+    return next(c for c in run_checks(hub, home=home, **NO_AGENTS) if c.id == f"pointers:{agent}")
+
+
+def test_runtime_not_set_up_here_is_not_a_warning(hub: Path, tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
-    s = statuses(run_checks(hub, home=home, **NO_AGENTS))
-    assert s["pointers:claude"] == "warn"
-    (hub / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    (home / ".codex").mkdir(parents=True)
+    for agent in ("claude", "codex"):
+        check = _pointer(hub, home, agent)
+        assert check.status == "ok", agent
+        assert "not set up" in check.message
+
+
+def test_claude_pointers(hub: Path, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
     (hub / ".claude" / "skills").mkdir(parents=True)
-    (hub / ".claude" / "settings.json").write_text(
-        '{"hooks": {"PreToolUse": [{"hooks": [{"command": "cc-hub hook pre-tool-use"}]}]}}',
+    assert _pointer(hub, home, "claude").status == "ok"  # AGENTS.md is read natively
+    (hub / "CLAUDE.md").write_text("# my notes\n", encoding="utf-8")
+    check = _pointer(hub, home, "claude")
+    assert check.status == "warn" and "@AGENTS.md" in check.message
+    (hub / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    assert _pointer(hub, home, "claude").status == "ok"
+    (hub / ".claude" / "skills").rmdir()
+    check = _pointer(hub, home, "claude")
+    assert check.status == "warn" and ".claude/skills" in check.message
+
+
+def test_codex_pointers(hub: Path, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    (hub / ".agents" / "skills").mkdir(parents=True)
+    check = _pointer(hub, home, "codex")
+    assert check.status == "ok" and "not set up" not in check.message
+
+
+@pytest.mark.parametrize("rel", [".claude/settings.json", ".codex/hooks.json"])
+def test_leftover_cc_hub_hooks_warn(hub: Path, tmp_path: Path, rel: str) -> None:
+    assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["stale-hooks"] == "ok"
+    path = hub / rel
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", '
+        '"command": "C:\\\\Users\\\\u\\\\.local\\\\bin\\\\cc-hub.EXE hook pre-tool-use"}]}]}}',
         encoding="utf-8",
     )
-    s = statuses(run_checks(hub, home=home, **NO_AGENTS))
-    assert s["pointers:claude"] == "ok"
-
-
-def test_daemon_path_warns_when_binary_is_hidden(hub: Path, tmp_path: Path) -> None:
-    checks = run_checks(
-        hub,
-        home=tmp_path / "home",
-        which=lambda name: f"/opt/bin/{name}",
-        which_daemon=lambda name: None,
-    )
-    check = next(c for c in checks if c.id == "daemon-path")
+    check = next(c for c in run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
+                 if c.id == "stale-hooks")
     assert check.status == "warn"
-    assert "cc-hub" in check.message
-    assert "projects.agent.options.env" in check.fix
+    assert rel in check.message
+    assert "hub-adapt" in check.fix
+
+
+def test_other_hooks_are_not_reported_as_stale(hub: Path, tmp_path: Path) -> None:
+    (hub / ".claude").mkdir()
+    (hub / ".claude" / "settings.json").write_text(
+        '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]}}',
+        encoding="utf-8",
+    )
+    assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["stale-hooks"] == "ok"
 
 
 def test_fix_recreates_missing_user_file_but_not_framework_file(hub: Path, tmp_path: Path) -> None:
@@ -100,7 +137,7 @@ def test_doctor_cli_json(hub: Path) -> None:
     result = CliRunner().invoke(app, ["--hub", str(hub), "doctor", "--json"])
     assert result.exit_code == 0, result.output
     ids = {c["id"] for c in json.loads(result.output)}
-    assert {"hub-toml", "required-files", "daemon-path"} <= ids
+    assert {"hub-toml", "required-files", "stale-hooks"} <= ids
 
 
 def test_doctor_cli_exit_1_on_fail(hub: Path) -> None:
@@ -122,7 +159,7 @@ def test_unreadable_projects_toml_fails_only_that_check(hub: Path, tmp_path: Pat
     ids = statuses(s)
     assert ids["projects"] == "fail"
     assert "nested-git" in ids
-    assert "daemon-path" in ids
+    assert "stale-hooks" in ids
 
 
 def test_invalid_toml_syntax_in_hosts_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
@@ -131,21 +168,6 @@ def test_invalid_toml_syntax_in_hosts_fails_only_that_check(hub: Path, tmp_path:
     ids = statuses(s)
     assert ids["hosts"] == "fail"
     assert "nested-git" in ids
-
-
-def test_jobs_lost_check_and_fix(hub: Path, tmp_path: Path) -> None:
-    from cc_hub.commands.jobs import Job, load_job, save_job
-
-    save_job(hub, Job(
-        id="20260101-000000-dead", name="x", cmd=["x"], cwd=str(hub),
-        pid=999999, runner_pid=999999, started="2026-01-01T00:00:00+00:00",
-        ended=None, status="running", exit_code=None,
-        log="jobs/20260101-000000-dead.log",
-    ))
-    assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["jobs-lost"] == "warn"
-    fixed = run_checks(hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
-    assert load_job(hub, "20260101-000000-dead").status == "lost"
-    assert statuses(fixed)["jobs-lost"] == "ok"
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX file modes")
@@ -172,17 +194,3 @@ def test_unreadable_pointer_file_warns(hub: Path, tmp_path: Path) -> None:
     finally:
         (hub / "CLAUDE.md").chmod(0o644)
     assert ids["pointers:claude"] == "warn"
-
-
-def test_unreadable_job_records_do_not_break_the_jobs_check(hub: Path, tmp_path: Path) -> None:
-    from cc_hub.commands.jobs import Job, save_job
-
-    save_job(hub, Job(
-        id="20260101-000000-dead", name="x", cmd=["x"], cwd=str(hub),
-        pid=999999, runner_pid=999999, started="2026-01-01T00:00:00+00:00",
-        ended=None, status="running", exit_code=None,
-        log="jobs/20260101-000000-dead.log",
-    ))
-    (hub / "jobs" / "garbage.json").write_text("{", encoding="utf-8")
-    (hub / "jobs" / "extra.json").write_text('{"id": "x", "surprise": 1}', encoding="utf-8")
-    assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["jobs-lost"] == "warn"

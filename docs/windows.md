@@ -10,19 +10,19 @@ different permission semantics. Everything in this project behaves as on Linux.
 
 cc-hub works natively, with these differences:
 
+- **Where to install.** Install cc-hub from a regular terminal, not from a
+  shell inside the Claude desktop app. That app is packaged (MSIX), and new
+  folders its shells create under `%APPDATA%` land in its private storage,
+  where cc-connect and the agents it starts cannot see them.
+
 - **Links.** Creating symlinks needs Developer Mode or administrator rights,
   so `cc-hub link` creates a directory junction instead; if that fails it
   copies and leaves a `.cc-hub-copied` marker. `cc-hub doctor` reports
   `link-stale` when the copy is older than `skills/`; re-run the `hub-adapt`
   skill to refresh it.
 - **Shell.** Claude Code uses Git Bash for its Bash tool when Git for Windows
-  is installed and PowerShell otherwise; Codex uses PowerShell. The blocklist
-  covers both syntaxes (`rm -rf ~` and `Remove-Item -Recurse -Force`).
-- **Hooks.** Use the absolute path printed by `cc-hub hook snippet`; it avoids
-  `.cmd` shim problems. Codex hooks accept a `commandWindows` field if you need
-  a different command on Windows.
-- **Encoding.** All cc-hub output is UTF-8. Job logs are stored as raw bytes
-  and decoded on read, so GBK output from legacy tools is still readable.
+  is installed and PowerShell otherwise; Codex uses PowerShell.
+- **Encoding.** All cc-hub output is UTF-8.
 - **Line endings.** Keep hub files LF. Some skill loaders silently drop
   frontmatter when a `SKILL.md` has CRLF endings.
 - **Paths.** The hub defaults to `%USERPROFILE%\.cc-hub`. cc-connect's

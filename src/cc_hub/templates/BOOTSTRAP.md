@@ -8,7 +8,7 @@ where it says you may.
    found, stop and tell the user the installation is incomplete (see
    `docs/install.md` in the cc-hub repository). Nothing below works without it.
 2. **Adapt.** Follow the `hub-adapt` skill so your own ecosystem finds this
-   hub's instructions, skills and hooks.
+   hub's instructions and skills.
 3. **Name.** Ask the user what they want to call you. Never pick a name
    yourself. Agree on a one-line vibe and an emoji. Write all three into
    `IDENTITY.md` and put the vibe line under "Core vibe" in `SOUL.md`.
@@ -22,9 +22,6 @@ where it says you may.
 7. **Scheduled tasks.** For every file in `cron/` with `default: true`, run
    `cc-connect cron add --cron "<schedule>" --prompt "<body>"`. If
    `cc-connect` is not available, log that this is still to do.
-8. **Safety note.** Tell the user, in one or two sentences, that a hook blocks
-   catastrophic commands and that cc-connect's approval mode is the first line
-   of defense.
-9. **Finish.** Write the first entry with
+8. **Finish.** Write the first entry with
    `cc-hub memory log "Bootstrap completed: <name>, <language>, <projects>"`,
    delete this file, run `cc-hub doctor`, and report the result.

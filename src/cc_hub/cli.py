@@ -42,18 +42,23 @@ def version() -> None:
 def where(ctx: typer.Context) -> None:
     """Print the hub directory and the package location."""
     import cc_hub
-    from cc_hub.console import resolve_hub
+    from cc_hub.hub import HubNotFound, find_hub
 
-    typer.echo(f"hub: {resolve_hub(ctx)}")
+    try:
+        hub: Path | None = find_hub((ctx.obj or {}).get("hub"))
+    except HubNotFound as exc:
+        hub = None
+        typer.echo(str(exc), err=True)
+    typer.echo(f"hub: {hub or 'not found'}")
     typer.echo(f"package: {Path(cc_hub.__file__).parent}")
+    if hub is None:
+        raise typer.Exit(code=1)
 
 
 from cc_hub.commands import doctor as _doctor  # noqa: E402
 from cc_hub.commands import env as _env  # noqa: E402
-from cc_hub.commands import hook as _hook  # noqa: E402
 from cc_hub.commands import hosts as _hosts  # noqa: E402
 from cc_hub.commands import init as _init  # noqa: E402
-from cc_hub.commands import jobs as _jobs  # noqa: E402
 from cc_hub.commands import link as _link  # noqa: E402
 from cc_hub.commands import memory as _memory  # noqa: E402
 from cc_hub.commands import projects as _projects  # noqa: E402
@@ -65,9 +70,7 @@ _update.register(app)
 _env.register(app)
 _memory.register(app)
 _projects.register(app)
-_jobs.register(app)
 _link.register(app)
-_hook.register(app)
 _hosts.register(app)
 
 

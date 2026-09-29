@@ -20,7 +20,6 @@ FRAMEWORK_OWNED: tuple[str, ...] = (
     "cron/memory-consolidate.md",
     "skills/hub-adapt/SKILL.md",
     "skills/hub-memory/SKILL.md",
-    "skills/hub-jobs/SKILL.md",
     "skills/hub-hosts/SKILL.md",
     "skills/hub-projects/SKILL.md",
     "skills/hub-cc-connect/SKILL.md",
@@ -37,10 +36,11 @@ USER_OWNED: tuple[str, ...] = (
 )
 # Framework-owned files that `update` must not recreate once the agent removed them.
 ONE_TIME: tuple[str, ...] = ("BOOTSTRAP.md",)
+# Formerly framework-owned; `update` backs them up and removes them from older hubs.
+RETIRED: tuple[str, ...] = ("skills/hub-jobs/SKILL.md",)
 # Structure owned by the framework, values owned by the user: merged, never overwritten.
 HUB_TOML = "hub.toml"
 USER_DIRS: tuple[str, ...] = ("memory", "scripts", "secrets")
-DERIVED_DIRS: tuple[str, ...] = ("jobs", "logs")
 
 _SOURCE_NAMES = {".gitignore": "_gitignore"}
 

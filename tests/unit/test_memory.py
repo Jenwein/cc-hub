@@ -6,7 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from cc_hub.cli import app
-from cc_hub.commands.memory import log_entry, recent, search, stats
+from cc_hub.commands.memory import log_entry, recent, search
 from cc_hub.encoding import read_text
 
 
@@ -56,14 +56,6 @@ def test_search_includes_memory_md_first(hub: Path) -> None:
     assert hits[0].line_no == 5
 
 
-def test_stats_reports_budgets(hub: Path) -> None:
-    write_day(hub, "2026-09-22", "- a\n- b\n")
-    s = stats(hub, max_lines=200)
-    assert s["MEMORY.md"]["max"] == 200
-    assert s["USER.md"]["max"] == 100
-    assert s["memory/"] == {"files": 1, "lines": 4}
-
-
 def test_memory_cli_log_recent_search(hub: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["--hub", str(hub), "memory", "log", "hello 世界"])
@@ -89,3 +81,14 @@ def test_search_cli_reports_invalid_regex(hub: Path) -> None:
                             "(unclosed", "--regex"])
     assert r.exit_code == 1
     assert "invalid regex" in r.output
+
+
+def test_search_ignores_html_comments(hub: Path) -> None:
+    assert search(hub, "explicit") == []  # only in MEMORY.md's template comment
+    body = "- [10:00] deployed foo <!-- note: staging -->\n<!--\nhidden bar\n-->\n"
+    write_day(hub, "2026-09-22", body)
+    hits = search(hub, "foo", today=date(2026, 9, 22))
+    assert [h.line_no for h in hits] == [3]
+    assert hits[0].line == "- [10:00] deployed foo <!-- note: staging -->"
+    assert search(hub, "staging", today=date(2026, 9, 22)) == []
+    assert search(hub, "hidden", today=date(2026, 9, 22)) == []

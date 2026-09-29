@@ -60,6 +60,14 @@ def recent(hub: Path, *, days: int, today: date | None = None) -> list[Path]:
     return _dated_files(hub, days=days, today=today or date.today())
 
 
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def _without_comments(text: str) -> str:
+    """Blank out HTML comments (template notes, observation dates), keeping line numbers."""
+    return _COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+
+
 def search(
     hub: Path,
     query: str,
@@ -78,9 +86,12 @@ def search(
     for path in files:
         if not path.is_file():
             continue
-        lines = read_text(path).splitlines()
+        text = read_text(path)
+        lines = text.splitlines()
+        searchable = _without_comments(text).splitlines()
         for index, line in enumerate(lines):
-            matched = bool(pattern.search(line)) if pattern else needle in line.casefold()
+            visible = searchable[index] if index < len(searchable) else ""
+            matched = bool(pattern.search(visible)) if pattern else needle in visible.casefold()
             if not matched:
                 continue
             context = lines[index + 1] if index + 1 < len(lines) else ""
@@ -88,20 +99,6 @@ def search(
             if len(hits) >= limit:
                 return hits
     return hits
-
-
-def _count(path: Path) -> int:
-    return len(read_text(path).splitlines()) if path.is_file() else 0
-
-
-def stats(hub: Path, *, max_lines: int) -> dict:
-    hub = Path(hub)
-    logs = [p for p in memory_dir(hub).glob("*.md") if DATE_RE.match(p.name)]
-    return {
-        "MEMORY.md": {"lines": _count(hub / "MEMORY.md"), "max": max_lines},
-        "USER.md": {"lines": _count(hub / "USER.md"), "max": 100},
-        "memory/": {"files": len(logs), "lines": sum(_count(p) for p in logs)},
-    }
 
 
 memory_app = typer.Typer(no_args_is_help=True,
@@ -169,23 +166,6 @@ def recent_cmd(
         typer.echo(f"## {path.name}")
         typer.echo(read_text(path).rstrip())
         typer.echo("")
-
-
-@memory_app.command("stats")
-def stats_cmd(ctx: typer.Context,
-              as_json: bool = typer.Option(False, "--json")) -> None:
-    """Line counts against budgets."""
-    from cc_hub.console import echo_json, resolve_hub
-
-    hub = resolve_hub(ctx)
-    data = stats(hub, max_lines=int(load_config(hub).get("memory", {})
-                                    .get("max_lines", 200)))
-    if as_json:
-        echo_json(data)
-        return
-    for name, info in data.items():
-        typer.echo(f"{name}: " + ", ".join(f"{k}={v}"
-                                           for k, v in info.items()))
 
 
 def register(app: typer.Typer) -> None:

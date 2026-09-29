@@ -3,17 +3,19 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import tomli_w
 import typer
 from rich.table import Table
 
 from cc_hub import __version__, manifest
 from cc_hub.encoding import read_text, write_text
-from cc_hub.hub import load_config, save_config
+from cc_hub.hub import HUB_FILE, load_config
 
 
 @dataclass
@@ -21,6 +23,7 @@ class UpdateResult:
     updated: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     absent: list[str] = field(default_factory=list)
+    retired: list[str] = field(default_factory=list)
     backup_dir: Path | None = None
     config_changed: bool = False
 
@@ -39,6 +42,66 @@ def merge_defaults(current: dict, defaults: dict) -> dict:
         elif isinstance(value, dict) and isinstance(out[key], dict):
             out[key] = merge_defaults(out[key], value)
     return out
+
+
+_HEADER = re.compile(r"^\s*\[([A-Za-z0-9_.-]+)\]\s*(?:#.*)?$")
+
+
+def _render_value(value: object) -> str:
+    return tomli_w.dumps({"k": value}).split("=", 1)[1].strip()
+
+
+def _set_value(line: str, key: str, value: object) -> str:
+    """Replace a single-line value, keeping indentation and a trailing comment."""
+    m = re.match(
+        rf'^(\s*{re.escape(key)}\s*=\s*)("(?:[^"\\]|\\.)*"|[^#\s]+)(.*)$', line
+    )
+    if not m:
+        return f"{key} = {_render_value(value)}"
+    return m.group(1) + _render_value(value) + m.group(3)
+
+
+def edit_config_text(text: str, current: dict, merged: dict) -> str:
+    """Apply `merged` to hub.toml's text, leaving the user's comments and layout.
+
+    Handles what `update` changes: values of existing keys, keys missing from
+    an existing table, and missing tables. Anything that does not round-trip
+    to `merged` falls back to a full rewrite.
+    """
+    lines = text.splitlines()
+    headers = {m.group(1): i for i, line in enumerate(lines) if (m := _HEADER.match(line))}
+    starts = sorted(headers.values())
+
+    def section_end(start: int) -> int:
+        return next((s for s in starts if s > start), len(lines))
+
+    appended: list[str] = []
+    inserts: dict[int, list[str]] = {}
+    for table, values in merged.items():
+        if not isinstance(values, dict) or table not in headers:
+            if isinstance(values, dict):
+                appended += ["", f"[{table}]"]
+                appended += [f"{k} = {_render_value(v)}" for k, v in values.items()]
+            continue
+        old = current.get(table, {})
+        start = headers[table]
+        for key, value in values.items():
+            if key not in old:
+                inserts.setdefault(start, []).append(f"{key} = {_render_value(value)}")
+            elif old[key] != value:
+                for i in range(start + 1, section_end(start)):
+                    if re.match(rf"^\s*{re.escape(key)}\s*=", lines[i]):
+                        lines[i] = _set_value(lines[i], key, value)
+                        break
+    for start in sorted(inserts, reverse=True):
+        lines[start + 1 : start + 1] = inserts[start]
+    new_text = "\n".join(lines + appended) + "\n"
+    try:
+        if tomllib.loads(new_text) == merged:
+            return new_text
+    except tomllib.TOMLDecodeError:
+        pass
+    return tomli_w.dumps(merged)
 
 
 def update_hub(
@@ -61,6 +124,7 @@ def update_hub(
             result.skipped.append(rel)
             continue
         plan.append((rel, new_text, dst.is_file()))
+    result.retired = [rel for rel in manifest.RETIRED if (hub / rel).is_file()]
 
     defaults = tomllib.loads(
         manifest.render(manifest.HUB_TOML, name=name, version=version)
@@ -73,21 +137,28 @@ def update_hub(
         return result
 
     backup_dir = hub / ".cc-hub" / "backups" / old_version
+    to_back_up = [rel for rel, _, exists in plan if exists] + result.retired
     try:
-        for rel, _, exists in plan:
-            if exists:
-                bak = backup_dir / rel
-                bak.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(hub / rel, bak)
+        for rel in to_back_up:
+            bak = backup_dir / rel
+            bak.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(hub / rel, bak)
     except OSError as exc:
         raise UpdateError(
             f"backup failed, nothing was changed: {exc}"
         ) from exc
     for rel, text, _ in plan:
         write_text(hub / rel, text)
+    for rel in result.retired:
+        (hub / rel).unlink()
+        try:
+            (hub / rel).parent.rmdir()  # only succeeds once the directory is empty
+        except OSError:
+            pass
     if result.config_changed:
-        save_config(hub, merged)
-    if any(exists for _, _, exists in plan):
+        config_path = hub / HUB_FILE
+        write_text(config_path, edit_config_text(read_text(config_path), cfg, merged))
+    if to_back_up:
         result.backup_dir = backup_dir
     return result
 
@@ -119,6 +190,8 @@ def register(app: typer.Typer) -> None:
             table.add_row(rel, "unchanged")
         for rel in result.absent:
             table.add_row(rel, "not present (one-time)")
+        for rel in result.retired:
+            table.add_row(rel, "removed (retired)")
         console.print(table)
         if result.backup_dir:
             console.print(

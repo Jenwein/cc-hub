@@ -5,21 +5,22 @@ A hub directory convention and CLI for coding agents launched by
 
 cc-connect bridges Claude Code, Codex and other agents to chat platforms and
 starts the agent in a `work_dir`. cc-hub turns that directory into a **hub**:
-the agent's home base on your machine, with a persona, memory, a registry of
-your projects and remote hosts, detached background jobs, and a safety hook
-that blocks catastrophic commands even in "yolo" mode.
+the agent's home base on your machine, with a persona, memory, and a registry
+of your projects and remote hosts. Permissions and background work stay with
+cc-connect and the agent runtime; the hub adds conventions and routing, not
+another layer of either.
 
 The hub is agent-agnostic. It ships no Claude- or Codex-specific files; on
 first run the agent creates the pointers its own ecosystem needs (`hub-adapt`).
 
 ## Quick start
 
-    uv tool install cc-hub
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.0
     cc-hub init                     # creates ~/.cc-hub
     cc-hub doctor
 
-Without PyPI: `uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.1.0`
-(see [docs/install.md](docs/install.md)).
+cc-hub is not on PyPI yet. Install from a regular terminal; on Windows not
+from a shell inside the Claude desktop app (see [docs/install.md](docs/install.md)).
 
 Point cc-connect at the hub (`work_dir = "/home/you/.cc-hub"`, see
 [docs/cc-connect.md](docs/cc-connect.md)) and send the first message. The agent
@@ -31,14 +32,12 @@ adapts to its runtime, and deletes the bootstrap file.
 | Command | Purpose |
 |---|---|
 | `cc-hub init [dir]` | Seed a hub. Existing files are never overwritten. |
-| `cc-hub doctor [--fix] [--json]` | Health checks: budgets, pointers, daemon PATH, orphaned jobs. |
+| `cc-hub doctor [--fix] [--json]` | Health checks: budgets, pointers, leftover hooks. |
 | `cc-hub update [--dry-run]` | Refresh framework-owned files; user files untouched; backups kept. |
 | `cc-hub env` | Probe the machine and write `ENV.md` / `env.json`. |
-| `cc-hub memory log\|search\|recent\|stats` | Daily logs and long-term memory. |
+| `cc-hub memory log\|search\|recent` | Daily logs and long-term memory. |
 | `cc-hub projects list\|show\|add\|remove` | Registry of local project directories. |
-| `cc-hub jobs start\|status\|log\|stop\|clean` | Detached background jobs that outlive the chat session. |
-| `cc-hub hosts list\|check\|run\|push\|pull` | Remote machines over ssh; commands are base64-wrapped. |
-| `cc-hub hook pre-tool-use\|post-tool-use\|test\|snippet` | Blocklist and audit log hooks for the agent runtime. |
+| `cc-hub hosts list` | Registry of remote machines; the agent connects with ssh itself. |
 | `cc-hub link <src> <dst>` | Symlink, junction or copy (platform decides). |
 
 ## Hub layout
@@ -49,7 +48,7 @@ adapts to its runtime, and deletes the bootstrap file.
     ├── MEMORY.md  memory/YYYY-MM-DD.md               memory
     ├── projects.toml  hosts.toml  hub.toml           registries and config
     ├── skills/  cron/  scripts/  secrets/            skills, scheduled prompts, your scripts, credentials
-    └── ENV.md  jobs/  logs/                          generated state (gitignored)
+    └── ENV.md  env.json                              generated state (gitignored)
 
 Framework-owned files (`AGENTS.md`, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`)
 are replaced by `cc-hub update`. Everything else is yours.
