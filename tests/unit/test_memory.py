@@ -6,7 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from cc_hub.cli import app
-from cc_hub.commands.memory import log_entry, recent, search, stats
+from cc_hub.commands.memory import log_entry, recent, search
 from cc_hub.encoding import read_text
 
 
@@ -54,14 +54,6 @@ def test_search_includes_memory_md_first(hub: Path) -> None:
     hits = search(hub, "cc-hub", today=date(2026, 9, 22))
     assert hits[0].file == "MEMORY.md"
     assert hits[0].line_no == 5
-
-
-def test_stats_reports_budgets(hub: Path) -> None:
-    write_day(hub, "2026-09-22", "- a\n- b\n")
-    s = stats(hub, max_lines=200)
-    assert s["MEMORY.md"]["max"] == 200
-    assert s["USER.md"]["max"] == 100
-    assert s["memory/"] == {"files": 1, "lines": 4}
 
 
 def test_memory_cli_log_recent_search(hub: Path) -> None:

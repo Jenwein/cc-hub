@@ -90,20 +90,6 @@ def search(
     return hits
 
 
-def _count(path: Path) -> int:
-    return len(read_text(path).splitlines()) if path.is_file() else 0
-
-
-def stats(hub: Path, *, max_lines: int) -> dict:
-    hub = Path(hub)
-    logs = [p for p in memory_dir(hub).glob("*.md") if DATE_RE.match(p.name)]
-    return {
-        "MEMORY.md": {"lines": _count(hub / "MEMORY.md"), "max": max_lines},
-        "USER.md": {"lines": _count(hub / "USER.md"), "max": 100},
-        "memory/": {"files": len(logs), "lines": sum(_count(p) for p in logs)},
-    }
-
-
 memory_app = typer.Typer(no_args_is_help=True,
                           help="Daily logs and long-term memory.")
 
@@ -169,23 +155,6 @@ def recent_cmd(
         typer.echo(f"## {path.name}")
         typer.echo(read_text(path).rstrip())
         typer.echo("")
-
-
-@memory_app.command("stats")
-def stats_cmd(ctx: typer.Context,
-              as_json: bool = typer.Option(False, "--json")) -> None:
-    """Line counts against budgets."""
-    from cc_hub.console import echo_json, resolve_hub
-
-    hub = resolve_hub(ctx)
-    data = stats(hub, max_lines=int(load_config(hub).get("memory", {})
-                                    .get("max_lines", 200)))
-    if as_json:
-        echo_json(data)
-        return
-    for name, info in data.items():
-        typer.echo(f"{name}: " + ", ".join(f"{k}={v}"
-                                           for k, v in info.items()))
 
 
 def register(app: typer.Typer) -> None:

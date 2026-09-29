@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""UTF-8 discipline: text IO, byte decoding, stdio, and base64 command wrappers."""
+"""UTF-8 discipline: text IO, byte decoding, stdio."""
 
 from __future__ import annotations
 
-import base64
 import os
 import stat
 import sys
@@ -73,14 +72,3 @@ def decode_bytes(data: bytes) -> str:
         pass
     return data.decode("utf-8", errors="replace")
 
-
-def bash_wrapper(command: str) -> str:
-    """Wrap a command so a remote POSIX shell decodes and runs it without quoting issues."""
-    b64 = base64.b64encode(command.encode("utf-8")).decode("ascii")
-    return f'bash -c "$(printf %s {b64} | base64 -d)"'
-
-
-def powershell_wrapper(command: str, exe: str = "pwsh") -> str:
-    """PowerShell's -EncodedCommand expects base64 of UTF-16LE."""
-    b64 = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
-    return f"{exe} -NoProfile -EncodedCommand {b64}"

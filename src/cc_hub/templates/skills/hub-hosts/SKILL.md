@@ -1,28 +1,32 @@
 ---
 name: hub-hosts
-description: Run commands and copy files on remote machines registered in hosts.toml. Use whenever the user refers to another machine, server or NAS.
+description: Find how to reach remote machines registered in hosts.toml. Use whenever the user refers to another machine, server or NAS.
 ---
 
 # hub-hosts
 
-`hosts.toml` lists machines reachable over ssh with keys. `cc-hub hosts`
-wraps ssh and scp so you never hand-quote remote commands: the command is
-base64-encoded and decoded on the other side according to the host's shell.
+`hosts.toml` lists machines reachable over ssh with keys. The hub only
+records them; you connect with `ssh` and `scp` yourself.
 
-## Commands
+    cc-hub hosts list           # name, target, shell, notes
+    cc-hub hosts list --json    # every field, including port and key
 
-    cc-hub hosts list
-    cc-hub hosts check <name>                  # does key-based login work?
-    cc-hub hosts run <name> -- <command ...>   # run there, print output
-    cc-hub hosts run <name> --timeout 600 -- <command ...>
-    cc-hub hosts push <name> <local> <remote>
-    cc-hub hosts pull <name> <remote> <local>
+## Connecting
 
-Write the remote command exactly as you would type it on that host; do not
-add quoting for ssh. Exit code and output are passed through.
+Build the command from the host's fields:
 
-Connections give up after 15 s; pass `--timeout <seconds>` to bound the
-whole command, otherwise a long-running remote command runs to completion.
+    ssh -o BatchMode=yes [-p <port>] [-i <hub>/<key>] <target> '<command>'
+    scp [-P <port>] [-i <hub>/<key>] <local> <target>:<remote>
+
+- `target` is `user@host` or a Host alias from `~/.ssh/config`.
+- `key` is relative to the hub root. Pass its path to ssh; never print the key.
+- `shell` tells you what runs on the other side: write bash for `bash`,
+  PowerShell for `pwsh` or `powershell`.
+- `BatchMode=yes` makes a missing key fail fast instead of waiting for a
+  password prompt.
+- For commands full of quotes, or several lines, send a script on stdin
+  instead of quoting it: `ssh <target> 'bash -s' < script.sh`, or
+  `ssh <target> 'pwsh -NoProfile -Command -' < script.ps1`.
 
 ## Registering a host
 
@@ -35,11 +39,10 @@ There is no `hosts add` yet; edit `hosts.toml` by hand. Add a block:
     shell = "bash"                # bash | pwsh | powershell
     key = "secrets/nas_ed25519"   # optional, relative to the hub
 
-Then `cc-hub hosts check nas`. Passwords are not supported; keys only.
+Then check that key login works: `ssh -o BatchMode=yes <target> true`.
 
 ## Rules
 
 - Destructive operations on a remote host (deleting, reinstalling, rebooting)
   require an explicit request from the user in this conversation.
-- The blocklist hook only sees local commands. Apply the same caution remotely.
 - Log outcomes with `cc-hub memory log`.

@@ -9,6 +9,3 @@ recent_days = 2
 
 [env]
 tools = ["git", "uv", "python", "node", "docker", "tmux", "ssh", "rg", "jq", "claude", "codex", "cc-connect"]
-
-[hooks]
-blocklist_extra = []

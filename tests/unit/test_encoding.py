@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import base64
 import stat
 import sys
 from pathlib import Path
@@ -53,25 +52,6 @@ def test_decode_bytes_never_raises_on_garbage() -> None:
 def test_decode_bytes_empty() -> None:
     assert encoding.decode_bytes(b"") == ""
 
-
-def test_bash_wrapper_carries_command_as_base64() -> None:
-    wrapped = encoding.bash_wrapper(CHINESE)
-    assert wrapped.startswith('bash -c "$(printf %s ')
-    assert wrapped.endswith(' | base64 -d)"')
-    b64 = wrapped[len('bash -c "$(printf %s ') : -len(' | base64 -d)"')]
-    assert base64.b64decode(b64).decode("utf-8") == CHINESE
-    assert '"' not in b64 and "'" not in b64 and "$" not in b64
-
-
-def test_powershell_wrapper_uses_utf16le_base64() -> None:
-    wrapped = encoding.powershell_wrapper(CHINESE, exe="powershell")
-    assert wrapped.startswith("powershell -NoProfile -EncodedCommand ")
-    b64 = wrapped.split()[-1]
-    assert base64.b64decode(b64).decode("utf-16-le") == CHINESE
-
-
-def test_powershell_wrapper_default_exe_is_pwsh() -> None:
-    assert encoding.powershell_wrapper("dir").startswith("pwsh ")
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="Unix permissions test")

@@ -19,7 +19,7 @@ import typer
 
 from cc_hub.encoding import decode_bytes, write_text
 from cc_hub.hub import load_config
-from cc_hub.platform import is_windows, is_wsl, which_minimal
+from cc_hub.platform import is_windows, is_wsl
 
 PROBE_BINARIES = ("cc-hub", "uv", "python", "cc-connect", "claude", "codex")
 SHELLS = ("bash", "zsh", "pwsh", "powershell", "cmd")
@@ -56,12 +56,11 @@ def _probe_tools(
 def _probe_paths(
     names: Iterable[str],
     which: Callable[[str], str | None],
-    which_daemon: Callable[[str], str | None],
 ) -> dict[str, dict]:
     entries = {}
     for name in names:
-        path, resolved = _resolve_alias(which, name)
-        entries[name] = {"path": path, "daemon_visible": which_daemon(resolved) is not None}
+        path, _ = _resolve_alias(which, name)
+        entries[name] = {"path": path}
     return entries
 
 
@@ -80,7 +79,6 @@ def probe(
     tools: list[str],
     home: Path | None = None,
     which: Callable[[str], str | None] = shutil.which,
-    which_daemon: Callable[[str], str | None] = which_minimal,
     version_of: Callable[[str], str] = version_of,
     now: datetime | None = None,
 ) -> dict:
@@ -115,7 +113,7 @@ def probe(
             "codex_home": (home / ".codex").is_dir(),
             "cc_connect_config": cc_cfg,
         },
-        "paths": _probe_paths(PROBE_BINARIES, which, which_daemon),
+        "paths": _probe_paths(PROBE_BINARIES, which),
         "resources": {
             "cpus": os.cpu_count() or 1,
             "memory_gb": round(psutil.virtual_memory().total / 2**30, 1),
@@ -172,13 +170,8 @@ def render_env_md(data: dict) -> str:
     for name, info in data["paths"].items():
         if not info["path"]:
             lines.append(f"- {name}: not installed")
-        elif info["daemon_visible"]:
-            lines.append(f"- {name}: {info['path']}")
         else:
-            lines.append(
-                f"- {name}: {info['path']} "
-                "(not visible to daemons with a minimal PATH)"
-            )
+            lines.append(f"- {name}: {info['path']}")
     r = data["resources"]
     lines += [
         "",

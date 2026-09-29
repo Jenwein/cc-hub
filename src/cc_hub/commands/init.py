@@ -60,7 +60,7 @@ def init_hub(target: Path, *, name: str | None = None, git: bool = True) -> Init
             continue
         write_text(dst, manifest.render(rel, name=name or target.name))
         result.created.append(rel)
-    for d in manifest.USER_DIRS + manifest.DERIVED_DIRS:
+    for d in manifest.USER_DIRS:
         (target / d).mkdir(exist_ok=True)
     if git and shutil.which("git") and not (target / ".git").exists():
         subprocess.run(["git", "init", "-q", str(target)], check=False, capture_output=True)

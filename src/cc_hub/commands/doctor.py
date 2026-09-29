@@ -19,7 +19,7 @@ from cc_hub import __version__, manifest
 from cc_hub.commands.init import enclosing_git_repo
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import load_config
-from cc_hub.platform import COPY_MARKER, which_minimal
+from cc_hub.platform import COPY_MARKER
 
 Which = Callable[[str], "str | None"]
 
@@ -34,7 +34,6 @@ class Check:
 
 DATE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 ENV_MAX_AGE_DAYS = 7
-DAEMON_BINARIES = ("cc-hub", "uv", "cc-connect", "claude", "codex")
 VALID_SHELLS = ("bash", "pwsh", "powershell")
 AGENT_MARKERS = {"claude": ("claude", ".claude"), "codex": ("codex", ".codex")}
 # agent -> [(relative path, "exists" | "contains", needle)]
@@ -42,14 +41,19 @@ POINTER_RULES: dict[str, list[tuple[str, str, str]]] = {
     "claude": [
         ("CLAUDE.md", "contains", "@AGENTS.md"),
         (".claude/skills", "exists", ""),
-        (".claude/settings.json", "contains", "pre-tool-use"),
     ],
     "codex": [
         (".agents/skills", "exists", ""),
-        (".codex/hooks.json", "contains", "pre-tool-use"),
     ],
 }
-PATH_FIX = "set PATH in cc-connect's [projects.agent.options.env] (see docs/cc-connect.md)"
+# Hook configs that cc-hub 0.1.0's hub-adapt wrote into; `cc-hub hook` no longer exists.
+HOOK_CONFIGS = (
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".codex/hooks.json",
+    ".codex/config.toml",
+)
+CC_HUB_HOOK = re.compile(r"\bhook (?:pre|post)-tool-use\b")
 _READ_ERRORS = (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError)
 
 
@@ -73,7 +77,6 @@ def run_checks(
     fix: bool = False,
     home: Path | None = None,
     which: Which = shutil.which,
-    which_daemon: Which = which_minimal,
     now: float | None = None,
     package_version: str = __version__,
 ) -> list[Check]:
@@ -276,6 +279,27 @@ def run_checks(
         else:
             checks.append(_ok(f"pointers:{agent}", "pointers present"))
 
+    # stale-hooks
+    leftover = []
+    for rel in HOOK_CONFIGS:
+        p = hub / rel
+        try:
+            if p.is_file() and CC_HUB_HOOK.search(read_text(p)):
+                leftover.append(rel)
+        except _READ_ERRORS:
+            continue
+    if leftover:
+        checks.append(
+            Check(
+                "stale-hooks",
+                "warn",
+                "cc-hub hook entries left in: " + ", ".join(leftover),
+                "remove them (the command no longer exists); the hub-adapt skill does this",
+            )
+        )
+    else:
+        checks.append(_ok("stale-hooks", "no leftover cc-hub hooks"))
+
     # link-stale
     skills = hub / "skills"
     src_mtime = max((p.stat().st_mtime for p in skills.rglob("*") if p.is_file()), default=0.0)
@@ -296,20 +320,6 @@ def run_checks(
     else:
         checks.append(_ok("link-stale", "no stale copies"))
 
-    # daemon-path
-    lost = [b for b in DAEMON_BINARIES if which(b) and not which_daemon(b)]
-    if lost:
-        checks.append(
-            Check(
-                "daemon-path",
-                "warn",
-                "not visible under a minimal PATH: " + ", ".join(lost),
-                PATH_FIX,
-            )
-        )
-    else:
-        checks.append(_ok("daemon-path", "all installed binaries visible under a minimal PATH"))
-
     # nested-git
     repo = enclosing_git_repo(hub.parent)
     if repo is None:
@@ -323,20 +333,6 @@ def run_checks(
                 "move the hub outside that repository",
             )
         )
-
-    # jobs-lost
-    from cc_hub.commands.jobs import is_lost, list_jobs, reconcile
-
-    if fix and (hub / "jobs").is_dir():
-        for j in list_jobs(hub):
-            reconcile(hub, j)
-    lost_jobs = list_jobs(hub) if (hub / "jobs").is_dir() else []
-    lost_ids = [j.id for j in lost_jobs if is_lost(j)]
-    if lost_ids:
-        checks.append(Check("jobs-lost", "warn", "running but dead: " + ", ".join(lost_ids),
-                            "`cc-hub doctor --fix` marks them lost"))
-    else:
-        checks.append(_ok("jobs-lost", "no orphaned jobs"))
 
     return checks
 

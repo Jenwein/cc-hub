@@ -4,6 +4,8 @@
 状态：待用户审阅
 调研依据：[docs/research/2026-09-22-research-brief.md](../../research/2026-09-22-research-brief.md)
 
+> **2026-09-29 变更**：总站定位收敛为"规范 + 路由"，不重复 cc-connect 和 agent 运行时已经提供的能力。据此删除 j 安全护栏（`cc-hub hook`：黑名单、审计日志）和 b 后台任务（`cc-hub jobs`、`hub-jobs` skill）。权限交给 cc-connect 的审批模式和 agent 自身的权限设置；长任务交给 agent 运行时自己的后台机制，这些任务随 cc-connect 会话一起结束（`/new`、`/switch`、空闲超时、daemon 重启）。2026-09-28 在原生 Windows 上的实测也显示 hook 在 Claude Code 和 Codex 下都会失效放行。以下第 2 节的 b、j 两项，§6.5、§6.7、§7 的 `hub-jobs` 行、§9 和 §14 的第 6、8 步均已作废；`doctor` 新增 `stale-hooks` 检查，`update` 会备份并移除已退役的框架文件。同一原则下还删除了：`hosts check/run/push/pull`（只保留 `hosts.toml` 和 `hosts list` 作注册表，agent 自己用 ssh）、`memory stats`、`doctor` 的 `daemon-path` 检查与 `ENV.md` 的 daemon 可见性标注、`hub-adapt` 的权限目标（禁读规则与 Codex `writable_roots`）。
+
 ---
 
 ## 1. 背景与目标

@@ -25,7 +25,7 @@ Write facts, not feelings. One entry per event. Include paths and commands.
 - `cc-hub memory recent` shows today's and yesterday's logs.
 - `cc-hub memory search "<words>" --days 30` searches the logs and
   `MEMORY.md`, newest first. Add `--regex` for patterns.
-- `cc-hub memory stats` shows sizes against budgets.
+- `cc-hub doctor` reports sizes against budgets.
 
 ## Consolidation (run by the `memory-consolidate` cron task)
 

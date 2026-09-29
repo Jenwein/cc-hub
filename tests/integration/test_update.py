@@ -63,14 +63,56 @@ def test_update_does_not_recreate_deleted_bootstrap(hub: Path) -> None:
 def test_update_merges_hub_toml_keeping_user_values(hub: Path) -> None:
     cfg = load_config(hub)
     cfg["memory"]["max_lines"] = 123
-    del cfg["hooks"]
+    del cfg["env"]
     save_config(hub, cfg)
     result = update_hub(hub, version="9.9.9")
     assert result.config_changed
     new = load_config(hub)
     assert new["memory"]["max_lines"] == 123
-    assert new["hooks"]["blocklist_extra"] == []
+    assert "claude" in new["env"]["tools"]
     assert new["hub"]["template_version"] == "9.9.9"
+
+
+def _seed_retired_jobs_skill(hub: Path) -> Path:
+    old = hub / "skills" / "hub-jobs" / "SKILL.md"
+    old.parent.mkdir(parents=True)
+    old.write_text("old jobs skill", encoding="utf-8")
+    return old
+
+
+def test_update_removes_retired_framework_files_after_backup(hub: Path) -> None:
+    old = _seed_retired_jobs_skill(hub)
+    result = update_hub(hub, version="9.9.9")
+    assert result.retired == ["skills/hub-jobs/SKILL.md"]
+    assert not old.exists()
+    assert not old.parent.exists()
+    backup = hub / ".cc-hub" / "backups" / __version__ / "skills" / "hub-jobs" / "SKILL.md"
+    assert read_text(backup) == "old jobs skill"
+    assert result.backup_dir == hub / ".cc-hub" / "backups" / __version__
+
+
+def test_update_dry_run_reports_retired_files_without_removing(hub: Path) -> None:
+    old = _seed_retired_jobs_skill(hub)
+    result = update_hub(hub, dry_run=True, version="9.9.9")
+    assert result.retired == ["skills/hub-jobs/SKILL.md"]
+    assert old.is_file()
+
+
+def test_update_keeps_user_files_next_to_a_retired_one(hub: Path) -> None:
+    old = _seed_retired_jobs_skill(hub)
+    mine = old.parent / "notes.md"
+    mine.write_text("mine", encoding="utf-8")
+    update_hub(hub, version="9.9.9")
+    assert not old.exists()
+    assert read_text(mine) == "mine"
+
+
+def test_update_cli_lists_retired_files(hub: Path) -> None:
+    _seed_retired_jobs_skill(hub)
+    result = CliRunner().invoke(app, ["--hub", str(hub), "update"])
+    assert result.exit_code == 0, result.output
+    line = next(line for line in result.output.splitlines() if "hub-jobs" in line)
+    assert "removed (retired)" in line
 
 
 def test_dry_run_changes_nothing(hub: Path) -> None:

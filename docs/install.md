@@ -49,9 +49,8 @@ See [cc-connect.md](cc-connect.md). Then send the agent its first message.
     cc-hub doctor
 
 Warnings about `bootstrap-pending` and `pointers` disappear after the first
-conversation. A `daemon-path` warning means cc-connect, when run as a service,
-would not find `cc-hub` or `uv`; fix it in cc-connect's config as described in
-[cc-connect.md](cc-connect.md).
+conversation. When cc-connect runs as a service, make sure it can find
+`cc-hub` and `uv`; see the PATH notes in [cc-connect.md](cc-connect.md).
 
 ## Upgrade
 

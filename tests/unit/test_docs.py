@@ -2,16 +2,31 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMANDS = (
-    "init", "doctor", "update", "env", "memory", "jobs", "hosts", "hook",
-    "projects", "link"
-)
+COMMANDS = ("init", "doctor", "update", "env", "memory", "hosts", "projects", "link")
+REMOVED = ("jobs", "hook")
+REMOVED_SUBCOMMANDS = ("hosts run", "hosts check", "hosts push", "hosts pull",
+                       "memory stats", "hosts list|check", "log|search|recent|stats")
 
 
 def test_readme_mentions_every_command() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    for cmd in COMMANDS:
-        assert f"cc-hub {cmd}" in readme, cmd
+    for name in ("README.md", "README.zh-CN.md"):
+        readme = (ROOT / name).read_text(encoding="utf-8")
+        for cmd in COMMANDS:
+            assert f"cc-hub {cmd}" in readme, (name, cmd)
+        for cmd in REMOVED:
+            assert f"cc-hub {cmd}" not in readme, (name, cmd)
+        for sub in REMOVED_SUBCOMMANDS:
+            assert sub not in readme.replace("\\|", "|"), (name, sub)
+
+
+def test_cli_has_no_removed_commands() -> None:
+    from cc_hub.cli import app
+
+    names = {c.name for c in app.registered_commands} | {
+        g.name for g in app.registered_groups
+    }
+    assert set(COMMANDS) <= names
+    assert not set(REMOVED) & names
 
 
 def test_docs_exist_and_are_utf8_lf() -> None:
