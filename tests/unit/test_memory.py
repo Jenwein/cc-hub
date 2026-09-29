@@ -81,3 +81,14 @@ def test_search_cli_reports_invalid_regex(hub: Path) -> None:
                             "(unclosed", "--regex"])
     assert r.exit_code == 1
     assert "invalid regex" in r.output
+
+
+def test_search_ignores_html_comments(hub: Path) -> None:
+    assert search(hub, "explicit") == []  # only in MEMORY.md's template comment
+    body = "- [10:00] deployed foo <!-- note: staging -->\n<!--\nhidden bar\n-->\n"
+    write_day(hub, "2026-09-22", body)
+    hits = search(hub, "foo", today=date(2026, 9, 22))
+    assert [h.line_no for h in hits] == [3]
+    assert hits[0].line == "- [10:00] deployed foo <!-- note: staging -->"
+    assert search(hub, "staging", today=date(2026, 9, 22)) == []
+    assert search(hub, "hidden", today=date(2026, 9, 22)) == []

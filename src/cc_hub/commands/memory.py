@@ -60,6 +60,14 @@ def recent(hub: Path, *, days: int, today: date | None = None) -> list[Path]:
     return _dated_files(hub, days=days, today=today or date.today())
 
 
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def _without_comments(text: str) -> str:
+    """Blank out HTML comments (template notes, observation dates), keeping line numbers."""
+    return _COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+
+
 def search(
     hub: Path,
     query: str,
@@ -78,9 +86,12 @@ def search(
     for path in files:
         if not path.is_file():
             continue
-        lines = read_text(path).splitlines()
+        text = read_text(path)
+        lines = text.splitlines()
+        searchable = _without_comments(text).splitlines()
         for index, line in enumerate(lines):
-            matched = bool(pattern.search(line)) if pattern else needle in line.casefold()
+            visible = searchable[index] if index < len(searchable) else ""
+            matched = bool(pattern.search(visible)) if pattern else needle in visible.casefold()
             if not matched:
                 continue
             context = lines[index + 1] if index + 1 < len(lines) else ""

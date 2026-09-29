@@ -4,7 +4,7 @@ Environment: WSL2, cc-connect running as a daemon, Claude Code as the agent,
 one chat platform (Feishu or any other).
 
 1. `uv tool install cc-hub`, `cc-hub init`, `cc-hub doctor`: everything green
-   except `bootstrap-pending` and `pointers`.
+   except `bootstrap-pending` and `env-stale`.
 2. Configure cc-connect `work_dir` and `env.PATH`, restart the daemon.
 3. Send the first message. The agent runs bootstrap: asks for a name, writes
    `IDENTITY.md` and `USER.md`, runs `hub-adapt`, registers the cron task,

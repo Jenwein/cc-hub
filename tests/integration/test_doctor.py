@@ -43,23 +43,41 @@ def test_template_version_mismatch_warns(hub: Path, tmp_path: Path) -> None:
     assert s["hub-toml"] == "warn"
 
 
-def test_pointer_check_for_detected_claude(hub: Path, tmp_path: Path) -> None:
+def _pointer(hub: Path, home: Path, agent: str):
+    return next(c for c in run_checks(hub, home=home, **NO_AGENTS) if c.id == f"pointers:{agent}")
+
+
+def test_runtime_not_set_up_here_is_not_a_warning(hub: Path, tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
-    s = statuses(run_checks(hub, home=home, **NO_AGENTS))
-    assert s["pointers:claude"] == "warn"
-    (hub / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    (home / ".codex").mkdir(parents=True)
+    for agent in ("claude", "codex"):
+        check = _pointer(hub, home, agent)
+        assert check.status == "ok", agent
+        assert "not set up" in check.message
+
+
+def test_claude_pointers(hub: Path, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
     (hub / ".claude" / "skills").mkdir(parents=True)
-    s = statuses(run_checks(hub, home=home, **NO_AGENTS))
-    assert s["pointers:claude"] == "ok"
+    assert _pointer(hub, home, "claude").status == "ok"  # AGENTS.md is read natively
+    (hub / "CLAUDE.md").write_text("# my notes\n", encoding="utf-8")
+    check = _pointer(hub, home, "claude")
+    assert check.status == "warn" and "@AGENTS.md" in check.message
+    (hub / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    assert _pointer(hub, home, "claude").status == "ok"
+    (hub / ".claude" / "skills").rmdir()
+    check = _pointer(hub, home, "claude")
+    assert check.status == "warn" and ".claude/skills" in check.message
 
 
-def test_pointer_check_for_detected_codex_needs_only_skills(hub: Path, tmp_path: Path) -> None:
+def test_codex_pointers(hub: Path, tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".codex").mkdir(parents=True)
-    assert statuses(run_checks(hub, home=home, **NO_AGENTS))["pointers:codex"] == "warn"
     (hub / ".agents" / "skills").mkdir(parents=True)
-    assert statuses(run_checks(hub, home=home, **NO_AGENTS))["pointers:codex"] == "ok"
+    check = _pointer(hub, home, "codex")
+    assert check.status == "ok" and "not set up" not in check.message
 
 
 @pytest.mark.parametrize("rel", [".claude/settings.json", ".codex/hooks.json"])

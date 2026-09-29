@@ -20,3 +20,14 @@ def test_app_does_not_dump_locals_in_tracebacks() -> None:
     from cc_hub.cli import app as cli_app
 
     assert cli_app.pretty_exceptions_show_locals is False
+
+
+def test_where_without_hub_still_prints_package(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("CC_HUB_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, ["where"])
+    assert result.exit_code == 1
+    assert "package:" in result.stdout
+    assert "hub: not found" in result.stdout

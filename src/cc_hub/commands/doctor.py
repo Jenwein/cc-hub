@@ -36,11 +36,13 @@ DATE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 ENV_MAX_AGE_DAYS = 7
 VALID_SHELLS = ("bash", "pwsh", "powershell")
 AGENT_MARKERS = {"claude": ("claude", ".claude"), "codex": ("codex", ".codex")}
-# agent -> [(relative path, "exists" | "contains", needle)]
+# agent -> [(relative path, "exists" | "if-present-contains", needle)]
+# A CLAUDE.md is optional (Claude Code reads AGENTS.md when there is none), but
+# one without the import would shadow AGENTS.md.
 POINTER_RULES: dict[str, list[tuple[str, str, str]]] = {
     "claude": [
-        ("CLAUDE.md", "contains", "@AGENTS.md"),
         (".claude/skills", "exists", ""),
+        ("CLAUDE.md", "if-present-contains", "@AGENTS.md"),
     ],
     "codex": [
         (".agents/skills", "exists", ""),
@@ -253,20 +255,29 @@ def run_checks(
     if not agents:
         checks.append(_ok("pointers", "no agent runtimes detected on this machine"))
     for agent in agents:
+        rules = POINTER_RULES[agent]
+        if not any((hub / rel).exists() for rel, _, _ in rules):
+            checks.append(_ok(
+                f"pointers:{agent}",
+                "not set up here; the hub-adapt skill does it when this runtime runs here",
+            ))
+            continue
         problems = []
-        for rel, kind, needle in POINTER_RULES[agent]:
+        for rel, kind, needle in rules:
             p = hub / rel
-            if kind == "exists":
-                if not p.exists():
+            if not p.exists():
+                if kind == "exists":
                     problems.append(f"{rel} missing")
                 continue
+            if kind == "exists":
+                continue
             try:
-                found = p.is_file() and needle in read_text(p)
+                found = needle in read_text(p)
             except _READ_ERRORS as exc:
                 problems.append(f"{rel} unreadable: {exc}")
                 continue
             if not found:
-                problems.append(f"{rel} missing or lacks '{needle}'")
+                problems.append(f"{rel} lacks '{needle}' and hides AGENTS.md")
         if problems:
             checks.append(
                 Check(

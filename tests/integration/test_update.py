@@ -138,3 +138,34 @@ def test_update_cli_dry_run_reports_deleted_one_time_file_as_absent(hub: Path) -
     line = next(line for line in result.output.splitlines() if "BOOTSTRAP.md" in line)
     assert "not present (one-time)" in line
     assert "unchanged" not in line
+
+
+def test_update_edits_hub_toml_in_place(hub: Path) -> None:
+    import tomllib
+
+    text = read_text(hub / "hub.toml")
+    text = text.replace("[memory]\n", "# tuned for a small model\n[memory]\n")
+    text = text.replace("recent_days = 2\n", "")
+    text = text.replace("max_lines = 200", "max_lines = 120  # keep it short")
+    (hub / "hub.toml").write_text(text, encoding="utf-8")
+    update_hub(hub, version="9.9.9")
+    new = read_text(hub / "hub.toml")
+    assert "# tuned for a small model\n[memory]\n" in new
+    assert "max_lines = 120  # keep it short" in new
+    data = tomllib.loads(new)
+    assert data["memory"] == {"max_lines": 120, "recent_days": 2}
+    assert data["hub"]["template_version"] == "9.9.9"
+    tools_line = next(line for line in new.splitlines() if line.startswith("tools"))
+    assert tools_line.endswith('"cc-connect"]')  # the one-line list is not reflowed
+
+
+def test_update_adds_a_missing_table(hub: Path) -> None:
+    import tomllib
+
+    text = read_text(hub / "hub.toml")
+    start = text.index("[env]")
+    (hub / "hub.toml").write_text("# my hub\n" + text[:start], encoding="utf-8")
+    update_hub(hub, version="9.9.9")
+    new = read_text(hub / "hub.toml")
+    assert new.startswith("# my hub\n")
+    assert "claude" in tomllib.loads(new)["env"]["tools"]

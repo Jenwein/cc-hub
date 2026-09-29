@@ -31,6 +31,19 @@ to cc-connect and the agent runtime, so the hub no longer duplicates them.
   still calls `cc-hub hook`.
 - `update` backs up and removes framework files that are no longer shipped
   (`skills/hub-jobs/SKILL.md`).
+- `projects list --json` and `projects show --json` include `resolved`, the
+  absolute path; stored paths stay portable (`~/...`).
+
+### Fixed
+
+- `doctor` `pointers` judges only runtimes set up in this hub, so an installed
+  but unused agent is no longer a warning. `CLAUDE.md` is optional, as
+  `hub-adapt` says; one without `@AGENTS.md` is reported because it hides
+  `AGENTS.md`.
+- `where` prints the package location even when no hub is found (exit 1).
+- `memory search` ignores HTML comments, such as template notes.
+- `update` edits `hub.toml` in place and keeps your comments and layout.
+- `projects list` and `projects show` print absolute paths instead of `~/...`.
 
 ### Migration notes
 

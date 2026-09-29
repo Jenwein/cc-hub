@@ -48,7 +48,7 @@ See [cc-connect.md](cc-connect.md). Then send the agent its first message.
 
     cc-hub doctor
 
-Warnings about `bootstrap-pending` and `pointers` disappear after the first
+Warnings about `bootstrap-pending` and `env-stale` disappear after the first
 conversation. When cc-connect runs as a service, make sure it can find
 `cc-hub` and `uv`; see the PATH notes in [cc-connect.md](cc-connect.md).
 

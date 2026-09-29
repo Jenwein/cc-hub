@@ -108,6 +108,11 @@ projects_app = typer.Typer(
 )
 
 
+def _with_resolved(project: dict) -> dict:
+    """Stored paths stay portable (`~/...`); readers get the absolute path too."""
+    return {**project, "resolved": str(expand_path(str(project.get("path", ""))))}
+
+
 @projects_app.command("list")
 def list_cmd(
     ctx: typer.Context,
@@ -116,7 +121,7 @@ def list_cmd(
     """List registered projects."""
     from cc_hub.console import echo_json, resolve_hub
 
-    projects = load_projects(resolve_hub(ctx))
+    projects = [_with_resolved(p) for p in load_projects(resolve_hub(ctx))]
     if as_json:
         echo_json(projects)
         return
@@ -127,7 +132,7 @@ def list_cmd(
         return
     for p in projects:
         desc = f"  {p.get('description')}" if p.get("description") else ""
-        typer.echo(f"{p.get('name')}\t{p.get('path')}{desc}")
+        typer.echo(f"{p.get('name')}\t{p['resolved']}{desc}")
 
 
 @projects_app.command("show")
@@ -140,12 +145,13 @@ def show_cmd(
     from cc_hub.console import echo_json, fail, resolve_hub
 
     try:
-        proj = get_project(resolve_hub(ctx), name)
+        proj = _with_resolved(get_project(resolve_hub(ctx), name))
     except ProjectError as exc:
         fail(exc)
     if as_json:
         echo_json(proj)
         return
+    proj["path"] = proj.pop("resolved")
     for key, value in proj.items():
         typer.echo(f"{key}: {value}")
 

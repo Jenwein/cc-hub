@@ -115,3 +115,23 @@ def test_projects_cli_errors_exit_1(hub: Path, tmp_path: Path) -> None:
     assert r.exit_code == 1
     r = runner.invoke(app, ["--hub", str(hub), "projects", "remove", "nope"])
     assert r.exit_code == 1
+
+
+def test_list_and_show_print_absolute_paths(hub: Path, tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    (home / "dev" / "x").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    (hub / "projects.toml").write_text(
+        '[[project]]\nname = "x"\npath = "~/dev/x"\n', encoding="utf-8"
+    )
+    absolute = str((home / "dev" / "x").resolve())
+    runner = CliRunner()
+    r = runner.invoke(app, ["--hub", str(hub), "projects", "list"])
+    assert r.exit_code == 0 and absolute in r.output
+    r = runner.invoke(app, ["--hub", str(hub), "projects", "show", "x"])
+    assert f"path: {absolute}" in r.output
+    assert "resolved" not in r.output
+    r = runner.invoke(app, ["--hub", str(hub), "projects", "list", "--json"])
+    entry = json.loads(r.output)[0]
+    assert entry["path"] == "~/dev/x" and entry["resolved"] == absolute

@@ -3,17 +3,19 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import tomli_w
 import typer
 from rich.table import Table
 
 from cc_hub import __version__, manifest
 from cc_hub.encoding import read_text, write_text
-from cc_hub.hub import load_config, save_config
+from cc_hub.hub import HUB_FILE, load_config
 
 
 @dataclass
@@ -40,6 +42,66 @@ def merge_defaults(current: dict, defaults: dict) -> dict:
         elif isinstance(value, dict) and isinstance(out[key], dict):
             out[key] = merge_defaults(out[key], value)
     return out
+
+
+_HEADER = re.compile(r"^\s*\[([A-Za-z0-9_.-]+)\]\s*(?:#.*)?$")
+
+
+def _render_value(value: object) -> str:
+    return tomli_w.dumps({"k": value}).split("=", 1)[1].strip()
+
+
+def _set_value(line: str, key: str, value: object) -> str:
+    """Replace a single-line value, keeping indentation and a trailing comment."""
+    m = re.match(
+        rf'^(\s*{re.escape(key)}\s*=\s*)("(?:[^"\\]|\\.)*"|[^#\s]+)(.*)$', line
+    )
+    if not m:
+        return f"{key} = {_render_value(value)}"
+    return m.group(1) + _render_value(value) + m.group(3)
+
+
+def edit_config_text(text: str, current: dict, merged: dict) -> str:
+    """Apply `merged` to hub.toml's text, leaving the user's comments and layout.
+
+    Handles what `update` changes: values of existing keys, keys missing from
+    an existing table, and missing tables. Anything that does not round-trip
+    to `merged` falls back to a full rewrite.
+    """
+    lines = text.splitlines()
+    headers = {m.group(1): i for i, line in enumerate(lines) if (m := _HEADER.match(line))}
+    starts = sorted(headers.values())
+
+    def section_end(start: int) -> int:
+        return next((s for s in starts if s > start), len(lines))
+
+    appended: list[str] = []
+    inserts: dict[int, list[str]] = {}
+    for table, values in merged.items():
+        if not isinstance(values, dict) or table not in headers:
+            if isinstance(values, dict):
+                appended += ["", f"[{table}]"]
+                appended += [f"{k} = {_render_value(v)}" for k, v in values.items()]
+            continue
+        old = current.get(table, {})
+        start = headers[table]
+        for key, value in values.items():
+            if key not in old:
+                inserts.setdefault(start, []).append(f"{key} = {_render_value(value)}")
+            elif old[key] != value:
+                for i in range(start + 1, section_end(start)):
+                    if re.match(rf"^\s*{re.escape(key)}\s*=", lines[i]):
+                        lines[i] = _set_value(lines[i], key, value)
+                        break
+    for start in sorted(inserts, reverse=True):
+        lines[start + 1 : start + 1] = inserts[start]
+    new_text = "\n".join(lines + appended) + "\n"
+    try:
+        if tomllib.loads(new_text) == merged:
+            return new_text
+    except tomllib.TOMLDecodeError:
+        pass
+    return tomli_w.dumps(merged)
 
 
 def update_hub(
@@ -94,7 +156,8 @@ def update_hub(
         except OSError:
             pass
     if result.config_changed:
-        save_config(hub, merged)
+        config_path = hub / HUB_FILE
+        write_text(config_path, edit_config_text(read_text(config_path), cfg, merged))
     if to_back_up:
         result.backup_dir = backup_dir
     return result
