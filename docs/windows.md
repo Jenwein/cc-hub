@@ -10,6 +10,11 @@ different permission semantics. Everything in this project behaves as on Linux.
 
 cc-hub works natively, with these differences:
 
+- **Where to install.** Install cc-hub from a regular terminal, not from a
+  shell inside the Claude desktop app. That app is packaged (MSIX), and new
+  folders its shells create under `%APPDATA%` land in its private storage,
+  where cc-connect and the agents it starts cannot see them.
+
 - **Links.** Creating symlinks needs Developer Mode or administrator rights,
   so `cc-hub link` creates a directory junction instead; if that fails it
   copies and leaves a `.cc-hub-copied` marker. `cc-hub doctor` reports

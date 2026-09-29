@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-29
 
 The hub is a convention and a router. Permissions and background work belong
 to cc-connect and the agent runtime, so the hub no longer duplicates them.
@@ -44,6 +44,10 @@ to cc-connect and the agent runtime, so the hub no longer duplicates them.
 - `memory search` ignores HTML comments, such as template notes.
 - `update` edits `hub.toml` in place and keeps your comments and layout.
 - `projects list` and `projects show` print absolute paths instead of `~/...`.
+- Install docs no longer point at PyPI, where cc-hub is not published yet, and
+  warn against installing from a shell inside the Claude desktop app on
+  Windows. The release workflow publishes to PyPI only when the repository
+  variable `PUBLISH_PYPI` is `true`.
 
 ### Migration notes
 

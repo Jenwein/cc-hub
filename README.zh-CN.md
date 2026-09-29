@@ -8,9 +8,11 @@ cc-connect 把 Claude Code、Codex 等 agent 接到飞书、微信、Telegram �
 
 ## 快速开始
 
-    uv tool install cc-hub
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.0
     cc-hub init          # 创建 ~/.cc-hub
     cc-hub doctor
+
+cc-hub 还没发布到 PyPI。请在普通终端里安装；Windows 上不要在 Claude 桌面版内的 shell 里装（原因见 [docs/install.md](docs/install.md)）。
 
 把 cc-connect 的 `work_dir` 指向总站（见 [docs/cc-connect.md](docs/cc-connect.md)），发第一条消息。agent 会按 `BOOTSTRAP.md` 起名、认识你、登记项目、适配自己的运行时，然后删除引导文件。
 

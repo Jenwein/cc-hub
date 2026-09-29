@@ -35,8 +35,10 @@ jobs:
           generate_release_notes: true
 
   publish-pypi:
-    # Independent of the GitHub release: a PyPI outage or a missing trusted
-    # publisher must not block the release assets.
+    # Opt-in: set the repository variable PUBLISH_PYPI to "true" once a PyPI
+    # trusted publisher exists. Independent of the GitHub release, so a PyPI
+    # outage must not block the release assets.
+    if: vars.PUBLISH_PYPI == 'true'
     needs: build
     runs-on: ubuntu-latest
     continue-on-error: true
