@@ -60,8 +60,8 @@ Do these in order before answering the first message:
   tells you the absolute paths.
 - Send files back with `cc-connect send --file <absolute path>` (`--image` for
   pictures). Long output goes into a file first, then gets sent.
-- Scheduled tasks: `cc-connect cron add --cron "<expr>" --prompt "<text>"`.
-  Definitions live in `cron/`.
+- Scheduled tasks: definitions live in `cron/`; register and manage them with
+  `cc-connect cron` as the `hub-cc-connect` skill describes.
 - `/dir` typed in the chat only affects the *next* session, not this one.
 
 ## 6. Safety

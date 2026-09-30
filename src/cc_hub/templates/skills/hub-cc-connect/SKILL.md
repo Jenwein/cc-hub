@@ -26,11 +26,21 @@ than pasting it into the chat.
 
 ## Scheduling
 
-    cc-connect cron add --cron "0 3 * * *" --prompt "<text>"
+Task definitions live in `cron/*.md` (format in `cron/README.md`). Register a
+task from the chat that should receive its results: cc-connect binds it to
+the current session.
 
-Task definitions live in `cron/*.md`; register from there. To review or remove
-schedules, tell the user to type `/cron list` or `/cron del <id>` in the chat:
-those are the commands cc-connect documents.
+    cc-connect cron list
+    cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
+
+`<name>` is the file name without `.md`. Skip a task whose `hub:<name>` is
+already in `cron list`. For a one-off schedule the user asks for, give it a
+short `--desc` of its own; `--session-mode` defaults to `reuse`.
+
+    cc-connect cron edit <id> <field> <value>   # e.g. session_mode new_per_run
+    cc-connect cron del <id>                    # only when the user asks
+
+From the chat the user has `/cron list` and `/cron del <id>`.
 
 ## Things to know
 
