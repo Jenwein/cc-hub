@@ -43,8 +43,10 @@ found. Put the full PATH in `[projects.agent.options.env]` as above.
   cc-connect appends their absolute paths to the prompt.
 - The agent sends files back with `cc-connect send --file <absolute path>`
   (`--image`, `--tts`). 50 MB limit.
-- Scheduled prompts: `cc-connect cron add --cron "<expr>" --prompt "<text>"`.
-  The hub keeps definitions in `cron/*.md`; bootstrap registers the defaults.
+- Scheduled prompts: `cc-connect cron add --cron "<expr>" --prompt "<text>"
+  --session-mode <reuse|new_per_run> --desc "hub:<name>"`. The hub keeps
+  definitions in `cron/*.md`; bootstrap registers the defaults in the chat it
+  runs in, and skips any whose `hub:<name>` is already in `cc-connect cron list`.
 - `/dir <path>` in the chat switches the working directory for the *next*
   session only. Keep `work_dir` on the hub and let the agent `cd` into projects.
 

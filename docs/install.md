@@ -8,14 +8,18 @@
 
 ## Install
 
-cc-hub is not published on PyPI yet; install a released tag from GitHub:
+From PyPI (0.2.1 and later):
 
-    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.0
+    uv tool install cc-hub
     cc-hub version
+
+Or a released tag straight from GitHub:
+
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.1
 
 Or download the wheel attached to the GitHub release and install that file:
 
-    uv tool install ./cc_hub-0.2.0-py3-none-any.whl
+    uv tool install ./cc_hub-0.2.1-py3-none-any.whl
 
 `uv tool install` puts `cc-hub` in `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`).
 Make sure that directory is on your PATH; `uv tool update-shell` can add it.
@@ -54,7 +58,8 @@ conversation. When cc-connect runs as a service, make sure it can find
 
 ## Upgrade
 
-    uv tool install --force git+https://github.com/Jenwein/cc-hub.git@<new tag>
+    uv tool upgrade cc-hub    # installed from PyPI
+    uv tool install --force git+https://github.com/Jenwein/cc-hub.git@<new tag>   # from GitHub
     cc-hub update --dry-run   # see what would change
     cc-hub update
 

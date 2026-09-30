@@ -6,6 +6,8 @@
 
 > **2026-09-29 变更**：总站定位收敛为"规范 + 路由"，不重复 cc-connect 和 agent 运行时已经提供的能力。据此删除 j 安全护栏（`cc-hub hook`：黑名单、审计日志）和 b 后台任务（`cc-hub jobs`、`hub-jobs` skill）。权限交给 cc-connect 的审批模式和 agent 自身的权限设置；长任务交给 agent 运行时自己的后台机制，这些任务随 cc-connect 会话一起结束（`/new`、`/switch`、空闲超时、daemon 重启）。2026-09-28 在原生 Windows 上的实测也显示 hook 在 Claude Code 和 Codex 下都会失效放行。以下第 2 节的 b、j 两项，§6.5、§6.7、§7 的 `hub-jobs` 行、§9 和 §14 的第 6、8 步均已作废；`doctor` 新增 `stale-hooks` 检查，`update` 会备份并移除已退役的框架文件。同一原则下还删除了：`hosts check/run/push/pull`（只保留 `hosts.toml` 和 `hosts list` 作注册表，agent 自己用 ssh）、`memory stats`、`doctor` 的 `daemon-path` 检查与 `ENV.md` 的 daemon 可见性标注、`hub-adapt` 的权限目标（禁读规则与 Codex `writable_roots`）。
 
+> **2026-09-30 变更（v0.2.1）**：§5.2 第 7 步和 §10 的 cron 注册命令改为带 `--session-mode <session> --desc "hub:<name>"`，注册前先查 `cc-connect cron list` 去重，依据见 §15.1 第 6 条。
+
 ---
 
 ## 1. 背景与目标
@@ -568,3 +570,12 @@ cc-hub/
 3. Claude Code 在原生 Windows 上对 junction 形式 `.claude/skills` 的发现是否正常（issue #68318 曾报告问题）；不正常则 Windows 上 `link` 直接复制。
 4. cc-connect 对 `work_dir` 的 `~` 展开在哪个版本发布；发布前文档一律用绝对路径。
 5. rich 在 Windows 旧控制台下的表格渲染是否需要降级为 ASCII 边框。
+
+### 15.1 结论（2026-09-30 回填，v0.2.1）
+
+1. 未验证。0.2.0 起 `hub-adapt` 不再改沙箱设置，`writable_roots` 由用户自己加；`docs/codex-sandbox.md` 给出项目级写法，并注明不被接受时改用 `~/.codex/config.toml`。
+2. 作废。`cc-hub hook` 已在 0.2.0 删除。
+3. 未验证，没有找到验收记录。`link` 维持 junction 优先、复制兜底。
+4. 已查 cc-connect 源码：`work_dir` 的 `~` 展开（`config/config.go` 的 `expandHomeInConfig`）只在 main 分支，截至 v1.5.1-beta.3 没有任何发布版包含。文档继续用绝对路径。
+5. 未验证。
+6. 新增，已对照 cc-connect v1.5.0 源码（`cmd/cc-connect/cron.go`、`core/cron.go`）确认：`cc-connect cron add` 支持 `--cron`、`--prompt`、`--desc`、`--session-mode`（`reuse` 默认，`new_per_run` 与 `new-per-run` 都接受）；在 agent 会话里运行时，project 和 session 取自 `CC_PROJECT`、`CC_SESSION_KEY`，任务绑定到当前聊天；`cron list` 每行显示 id、表达式和 description（没有 description 时显示 prompt 前 60 个字符）；`cron edit <id> session_mode new_per_run` 可以改已注册的任务。据此 bootstrap 注册时传 `--session-mode` 和 `--desc "hub:<name>"`，并先查 `cron list` 去重。

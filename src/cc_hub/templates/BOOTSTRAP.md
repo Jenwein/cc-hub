@@ -19,9 +19,13 @@ where it says you may.
    register each with `cc-hub projects add <path>`. May be skipped.
 6. **Hosts.** Ask whether there are remote machines you should be able to
    reach. Register each in `hosts.toml`. May be skipped.
-7. **Scheduled tasks.** For every file in `cron/` with `default: true`, run
-   `cc-connect cron add --cron "<schedule>" --prompt "<body>"`. If
-   `cc-connect` is not available, log that this is still to do.
+7. **Scheduled tasks.** Run `cc-connect cron list`. For every file in `cron/`
+   with `default: true` whose `hub:<name>` (`<name>` is the file name without
+   `.md`) is not listed yet, run:
+
+       cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
+
+   If `cc-connect` is not available, log that this is still to do.
 8. **Finish.** Write the first entry with
    `cc-hub memory log "Bootstrap completed: <name>, <language>, <projects>"`,
    delete this file, run `cc-hub doctor`, and report the result.

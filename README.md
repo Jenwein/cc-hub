@@ -15,12 +15,12 @@ first run the agent creates the pointers its own ecosystem needs (`hub-adapt`).
 
 ## Quick start
 
-    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.0
+    uv tool install cc-hub
     cc-hub init                     # creates ~/.cc-hub
     cc-hub doctor
 
-cc-hub is not on PyPI yet. Install from a regular terminal; on Windows not
-from a shell inside the Claude desktop app (see [docs/install.md](docs/install.md)).
+Install from a regular terminal; on Windows not from a shell inside the
+Claude desktop app (see [docs/install.md](docs/install.md)).
 
 Point cc-connect at the hub (`work_dir = "/home/you/.cc-hub"`, see
 [docs/cc-connect.md](docs/cc-connect.md)) and send the first message. The agent

@@ -28,5 +28,7 @@ guessing a path.
 
 ## Sandboxed runtimes
 
-After registering a project under Codex, repeat hub-adapt goal 4 so the path
-becomes writable.
+Under Codex's `workspace-write` sandbox a newly registered project stays
+read-only to you until its path is in `writable_roots` (see
+`docs/codex-sandbox.md` in the cc-hub repository). Tell the user after
+`projects add`; do not change sandbox settings yourself.
