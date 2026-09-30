@@ -3,7 +3,8 @@
 ## 0.2.1 - 2026-09-30
 
 Template fixes; no command changes. The cron guidance is now checked against
-the cc-connect 1.5.0 source.
+the cc-connect 1.5.0 source. First release published on PyPI:
+`uv tool install cc-hub`.
 
 ### Fixed
 
