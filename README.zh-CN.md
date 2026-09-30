@@ -8,7 +8,7 @@ cc-connect 把 Claude Code、Codex 等 agent 接到飞书、微信、Telegram �
 
 ## 快速开始
 
-    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.0
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.1
     cc-hub init          # 创建 ~/.cc-hub
     cc-hub doctor
 

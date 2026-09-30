@@ -15,7 +15,7 @@ first run the agent creates the pointers its own ecosystem needs (`hub-adapt`).
 
 ## Quick start
 
-    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.0
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.1
     cc-hub init                     # creates ~/.cc-hub
     cc-hub doctor
 

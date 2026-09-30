@@ -10,12 +10,12 @@
 
 cc-hub is not published on PyPI yet; install a released tag from GitHub:
 
-    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.0
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.1
     cc-hub version
 
 Or download the wheel attached to the GitHub release and install that file:
 
-    uv tool install ./cc_hub-0.2.0-py3-none-any.whl
+    uv tool install ./cc_hub-0.2.1-py3-none-any.whl
 
 `uv tool install` puts `cc-hub` in `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`).
 Make sure that directory is on your PATH; `uv tool update-shell` can add it.

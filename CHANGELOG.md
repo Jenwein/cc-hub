@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.2.1 - 2026-09-30
+
+Template fixes; no command changes. The cron guidance is now checked against
+the cc-connect 1.5.0 source.
+
+### Fixed
+
+- Cron tasks now get the session mode they declare. `BOOTSTRAP.md`,
+  `cron/README.md` and `hub-cc-connect` register a task with
+  `--session-mode <session> --desc "hub:<name>"`, where `<name>` is the file
+  name without `.md`. Bootstrap checks `cc-connect cron list` first and skips
+  tasks that are already registered. Before this, the `session` field was
+  never passed on, so `memory-consolidate` ran inside the reused chat session.
+- `hub-cc-connect` lists and edits schedules with `cc-connect cron list`,
+  `cron edit` and `cron del`. It only deletes a schedule when the user asks.
+  It also says a task belongs to the chat it was registered from.
+- `hub-projects` no longer points at "hub-adapt goal 4", which 0.2.0 removed.
+  After `projects add` under Codex, the agent tells the user to add the path
+  to `writable_roots` (`docs/codex-sandbox.md`) and leaves the sandbox alone.
+- `AGENTS.md` refers to `hub-cc-connect` for scheduling instead of repeating
+  an incomplete command.
+
+### Migration notes
+
+- Run `cc-hub update` to get the fixed `AGENTS.md`, `BOOTSTRAP.md`,
+  `cron/README.md` and skills.
+- A hub bootstrapped with 0.1.0 or 0.2.0 registered `memory-consolidate`
+  without a session mode or description. Ask the agent to fix it, or do it
+  yourself: find the task's id with `cc-connect cron list` (it shows the start
+  of the prompt), then run
+  `cc-connect cron edit <id> session_mode new_per_run` and
+  `cc-connect cron edit <id> description hub:memory-consolidate`.
+
 ## 0.2.0 - 2026-09-29
 
 The hub is a convention and a router. Permissions and background work belong
