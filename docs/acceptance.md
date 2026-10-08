@@ -1,23 +1,20 @@
 # Manual acceptance checklist
 
-Environment: WSL2, cc-connect running as a daemon, Claude Code as the agent,
+Environment: WSL2, cc-connect running as a service, Claude Code as the agent,
 one chat platform (Feishu or any other).
 
 1. Install cc-hub from a regular terminal (see `install.md`), `cc-hub init`,
-   `cc-hub doctor`: everything green
-   except `bootstrap-pending` and `env-stale`.
-2. Configure cc-connect `work_dir` and `env.PATH`, restart the daemon.
+   `cc-hub doctor`: everything green except `bootstrap-pending`.
+2. Configure cc-connect `work_dir` and `env.PATH`, restart cc-connect.
 3. Send the first message. The agent runs bootstrap: asks for a name, writes
    `IDENTITY.md` and `USER.md`, runs `hub-adapt`, registers the cron task,
    deletes `BOOTSTRAP.md`.
 4. `cc-hub doctor`: all green.
 5. Ask the agent to remember something. `memory/` has today's file;
    `cc-hub memory search` finds it.
-6. Ask the agent to run the tests of a registered project by name. It finds
-   the path in `projects.toml`, runs them there, and logs the outcome.
-7. Ask the agent to run a command on a registered remote host by name. It
-   finds the target, port and key in `hosts.toml` and connects with ssh.
-8. Ask the agent to send a file back to the chat. It arrives.
-9. Bump the package version and run `cc-hub update`: `AGENTS.md` changes,
-   `SOUL.md`, `USER.md` and `memory/` do not, and `.cc-hub/backups/` holds
-   the previous version.
+6. Point a Codex bot at the same hub and send `/cron setup` in its chat.
+   `AGENTS.md` ends with cc-connect's instructions block.
+7. Bump the package version and run `cc-hub update`: `AGENTS.md` changes above
+   its closing marker and keeps everything below it (the cc-connect block
+   included); `SOUL.md`, `USER.md` and `memory/` do not change; and
+   `.cc-hub/backups/` holds the previous version.

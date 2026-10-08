@@ -1,7 +1,7 @@
 [project]
 name = "cc-hub"
 dynamic = ["version"]
-description = "A hub directory convention and CLI for coding agents launched by cc-connect"
+description = "The home directory for coding agents launched by cc-connect"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

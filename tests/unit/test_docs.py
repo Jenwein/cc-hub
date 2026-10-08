@@ -19,15 +19,35 @@ def test_readme_command_tables_match_the_cli() -> None:
         assert set(TABLE_ROW.findall(readme)) == _command_names(), name
 
 
+DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md")
+LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
+
+
 def test_docs_exist_and_are_utf8_lf() -> None:
-    for name in ("install.md", "cc-connect.md", "windows.md", "codex-sandbox.md", "acceptance.md"):
+    for name in DOCS:
         raw = (ROOT / "docs" / name).read_bytes()
         assert raw and b"\r\n" not in raw and not raw.startswith(b"\xef\xbb\xbf"), name
     cc_connect_text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
     assert "projects.agent.options.env" in cc_connect_text
-    codex_sandbox_text = (ROOT / "docs" / "codex-sandbox.md").read_text(encoding="utf-8")
-    assert "writable_roots" in codex_sandbox_text
     assert "## 0.1.0" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_relative_links_resolve() -> None:
+    pages = [ROOT / "README.md", ROOT / "README.zh-CN.md"]
+    pages += [ROOT / "docs" / name for name in DOCS]
+    for page in pages:
+        for target in LINK.findall(page.read_text(encoding="utf-8")):
+            if "://" in target:
+                continue
+            assert (page.parent / target).exists(), (page.name, target)
+
+
+def test_cc_connect_doc_explains_the_instructions_block() -> None:
+    from cc_hub.commands.update import CC_CONNECT_MARKER
+
+    text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
+    assert "/cron setup" in text
+    assert CC_CONNECT_MARKER in text
 
 
 def test_docs_explain_cc_hub_dir() -> None:
