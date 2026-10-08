@@ -169,3 +169,33 @@ def test_update_adds_a_missing_table(hub: Path) -> None:
     new = read_text(hub / "hub.toml")
     assert new.startswith("# my hub\n")
     assert "claude" in tomllib.loads(new)["env"]["tools"]
+
+
+CC_BLOCK = "\n<!-- cc-connect-instructions -->\nYou are running inside cc-connect.\n"
+
+
+def test_update_keeps_what_follows_the_tail_marker(hub: Path) -> None:
+    agents = hub / "AGENTS.md"
+    original = "stale framework line\n" + read_text(agents) + CC_BLOCK + "\n- my note\n"
+    agents.write_text(original, encoding="utf-8")
+    result = update_hub(hub, version="9.9.9")
+    assert "AGENTS.md" in result.updated
+    expected = manifest.render("AGENTS.md", name="hub", version="9.9.9")
+    assert read_text(agents) == expected + CC_BLOCK + "\n- my note\n"
+    assert read_text(hub / ".cc-hub" / "backups" / __version__ / "AGENTS.md") == original
+
+
+def test_update_leaves_agents_md_alone_when_only_the_tail_was_added(hub: Path) -> None:
+    agents = hub / "AGENTS.md"
+    agents.write_text(read_text(agents) + CC_BLOCK, encoding="utf-8")
+    result = update_hub(hub)
+    assert "AGENTS.md" in result.skipped
+    assert read_text(agents).endswith(CC_BLOCK)
+
+
+def test_update_keeps_the_cc_connect_block_when_the_tail_marker_is_missing(hub: Path) -> None:
+    agents = hub / "AGENTS.md"
+    agents.write_text("# Older instructions\n" + CC_BLOCK, encoding="utf-8")
+    update_hub(hub, version="9.9.9")
+    expected = manifest.render("AGENTS.md", name="hub", version="9.9.9") + CC_BLOCK
+    assert read_text(agents) == expected

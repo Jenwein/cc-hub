@@ -78,3 +78,5 @@ when cc-connect runs as a daemon. `ENV.md` lists their absolute paths; use those
 ## 8. Local additions
 
 Now read `AGENTS.local.md` and follow it.
+
+<!-- cc-hub: framework content ends here; everything below is kept by cc-hub update -->

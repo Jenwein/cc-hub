@@ -32,6 +32,23 @@ class UpdateError(Exception):
     pass
 
 
+CC_CONNECT_MARKER = "<!-- cc-connect-instructions -->"
+
+
+def merge_tail(new_text: str, current: str) -> str:
+    """Append to `new_text` the part of `current` that belongs to the user and cc-connect.
+
+    That part is everything after manifest.TAIL_MARKER. A file without the marker
+    keeps cc-connect's instructions block, from CC_CONNECT_MARKER to the end.
+    """
+    if manifest.TAIL_MARKER in current:
+        tail = current.split(manifest.TAIL_MARKER, 1)[1]
+        return new_text + tail.removeprefix("\n")
+    if CC_CONNECT_MARKER in current:
+        return new_text + "\n" + current[current.index(CC_CONNECT_MARKER):]
+    return new_text
+
+
 def merge_defaults(current: dict, defaults: dict) -> dict:
     """Return a copy of `current` with keys missing from `defaults` added,
     recursively."""
@@ -120,10 +137,13 @@ def update_hub(
             result.absent.append(rel)
             continue
         new_text = manifest.render(rel, name=name, version=version)
-        if dst.is_file() and read_text(dst) == new_text:
+        current = read_text(dst) if dst.is_file() else None
+        if current is not None and rel in manifest.KEEPS_TAIL:
+            new_text = merge_tail(new_text, current)
+        if current == new_text:
             result.skipped.append(rel)
             continue
-        plan.append((rel, new_text, dst.is_file()))
+        plan.append((rel, new_text, current is not None))
     result.retired = [rel for rel in manifest.RETIRED if (hub / rel).is_file()]
 
     defaults = tomllib.loads(

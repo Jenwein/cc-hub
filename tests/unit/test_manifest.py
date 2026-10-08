@@ -147,3 +147,10 @@ def test_hub_adapt_leaves_permissions_to_the_runtime() -> None:
     for word in ("permissions.deny", "writable_roots", "Deny reads"):
         assert word not in adapt, word
     assert "do not change them here" in adapt
+
+
+def test_agents_md_ends_with_the_tail_marker() -> None:
+    text = manifest.render("AGENTS.md")
+    assert text.endswith(manifest.TAIL_MARKER + "\n")
+    assert text.count(manifest.TAIL_MARKER) == 1
+    assert set(manifest.KEEPS_TAIL) <= set(manifest.FRAMEWORK_OWNED)
