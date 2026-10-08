@@ -12,24 +12,27 @@ from cc_hub.commands.doctor import run_checks
 from cc_hub.commands.init import init_hub
 
 NO_AGENTS = dict(which=lambda name: None)
+CHECK_IDS = [
+    "hub-toml",
+    "required-files",
+    "bootstrap-pending",
+    "memory-budget:MEMORY.md",
+    "memory-budget:USER.md",
+    "memory-files",
+    "pointers",
+    "link-stale",
+    "nested-git",
+]
 
 
 def statuses(checks) -> dict[str, str]:
     return {c.id: c.status for c in checks}
 
 
-def test_fresh_hub_has_no_failures(hub: Path, tmp_path: Path) -> None:
-    s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
-    assert s["hub-toml"] == "ok"
-    assert s["required-files"] == "ok"
-    assert s["bootstrap-pending"] == "warn"
-    assert s["env-stale"] == "warn"
-    assert s["pointers"] == "ok"
-    assert "daemon-path" not in s
-    assert s["nested-git"] == "ok"
-    assert s["stale-hooks"] == "ok"
-    assert "jobs-lost" not in s
-    assert "fail" not in s.values()
+def test_fresh_hub_runs_the_hub_checks(hub: Path, tmp_path: Path) -> None:
+    checks = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
+    assert [c.id for c in checks] == CHECK_IDS
+    assert [c.id for c in checks if c.status != "ok"] == ["bootstrap-pending"]
 
 
 def test_memory_over_budget_fails(hub: Path, tmp_path: Path) -> None:
@@ -41,6 +44,14 @@ def test_memory_over_budget_fails(hub: Path, tmp_path: Path) -> None:
 def test_template_version_mismatch_warns(hub: Path, tmp_path: Path) -> None:
     s = statuses(run_checks(hub, home=tmp_path / "home", package_version="9.9.9", **NO_AGENTS))
     assert s["hub-toml"] == "warn"
+
+
+def test_broken_hub_toml_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
+    (hub / "hub.toml").write_text("[hub\n", encoding="utf-8")
+    s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
+    assert s["hub-toml"] == "fail"
+    assert s["memory-budget:MEMORY.md"] == "ok"
+    assert s["nested-git"] == "ok"
 
 
 def _pointer(hub: Path, home: Path, agent: str):
@@ -80,32 +91,6 @@ def test_codex_pointers(hub: Path, tmp_path: Path) -> None:
     assert check.status == "ok" and "not set up" not in check.message
 
 
-@pytest.mark.parametrize("rel", [".claude/settings.json", ".codex/hooks.json"])
-def test_leftover_cc_hub_hooks_warn(hub: Path, tmp_path: Path, rel: str) -> None:
-    assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["stale-hooks"] == "ok"
-    path = hub / rel
-    path.parent.mkdir(parents=True)
-    path.write_text(
-        '{"hooks": {"PreToolUse": [{"hooks": [{"type": "command", '
-        '"command": "C:\\\\Users\\\\u\\\\.local\\\\bin\\\\cc-hub.EXE hook pre-tool-use"}]}]}}',
-        encoding="utf-8",
-    )
-    check = next(c for c in run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
-                 if c.id == "stale-hooks")
-    assert check.status == "warn"
-    assert rel in check.message
-    assert "hub-adapt" in check.fix
-
-
-def test_other_hooks_are_not_reported_as_stale(hub: Path, tmp_path: Path) -> None:
-    (hub / ".claude").mkdir()
-    (hub / ".claude" / "settings.json").write_text(
-        '{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]}}',
-        encoding="utf-8",
-    )
-    assert statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))["stale-hooks"] == "ok"
-
-
 def test_fix_recreates_missing_user_file_but_not_framework_file(hub: Path, tmp_path: Path) -> None:
     (hub / "USER.md").unlink()
     (hub / "AGENTS.md").unlink()
@@ -123,21 +108,11 @@ def test_nested_git_fails(tmp_path: Path) -> None:
     assert s["nested-git"] == "fail"
 
 
-def test_stale_env_md_warns(hub: Path, tmp_path: Path) -> None:
-    env_md = hub / "ENV.md"
-    env_md.write_text("# env", encoding="utf-8")
-    fresh = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
-    assert fresh["env-stale"] == "ok"
-    future = env_md.stat().st_mtime + 8 * 86400
-    old = statuses(run_checks(hub, home=tmp_path / "home", now=future, **NO_AGENTS))
-    assert old["env-stale"] == "warn"
-
-
 def test_doctor_cli_json(hub: Path) -> None:
     result = CliRunner().invoke(app, ["--hub", str(hub), "doctor", "--json"])
     assert result.exit_code == 0, result.output
     ids = {c["id"] for c in json.loads(result.output)}
-    assert {"hub-toml", "required-files", "stale-hooks"} <= ids
+    assert {"hub-toml", "required-files", "nested-git"} <= ids
 
 
 def test_doctor_cli_exit_1_on_fail(hub: Path) -> None:
@@ -151,23 +126,6 @@ def test_doctor_cli_table_escapes_rich_markup(hub: Path) -> None:
     result = CliRunner().invoke(app, ["--hub", str(hub), "doctor"])
     assert result.exit_code == 0, result.output
     assert "[note].md" in result.output
-
-
-def test_unreadable_projects_toml_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
-    (hub / "projects.toml").write_bytes(b"\xff\xfe[[project]]\n")
-    s = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
-    ids = statuses(s)
-    assert ids["projects"] == "fail"
-    assert "nested-git" in ids
-    assert "stale-hooks" in ids
-
-
-def test_invalid_toml_syntax_in_hosts_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
-    (hub / "hosts.toml").write_text("[[host]\nname = \n", encoding="utf-8")
-    s = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
-    ids = statuses(s)
-    assert ids["hosts"] == "fail"
-    assert "nested-git" in ids
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX file modes")
