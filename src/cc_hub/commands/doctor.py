@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import time
 import tomllib
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -33,8 +32,6 @@ class Check:
 
 
 DATE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
-ENV_MAX_AGE_DAYS = 7
-VALID_SHELLS = ("bash", "pwsh", "powershell")
 AGENT_MARKERS = {"claude": ("claude", ".claude"), "codex": ("codex", ".codex")}
 # agent -> [(relative path, "exists" | "if-present-contains", needle)]
 # A CLAUDE.md is optional (Claude Code reads AGENTS.md when there is none), but
@@ -48,14 +45,6 @@ POINTER_RULES: dict[str, list[tuple[str, str, str]]] = {
         (".agents/skills", "exists", ""),
     ],
 }
-# Hook configs that cc-hub 0.1.0's hub-adapt wrote into; `cc-hub hook` no longer exists.
-HOOK_CONFIGS = (
-    ".claude/settings.json",
-    ".claude/settings.local.json",
-    ".codex/hooks.json",
-    ".codex/config.toml",
-)
-CC_HUB_HOOK = re.compile(r"\bhook (?:pre|post)-tool-use\b")
 _READ_ERRORS = (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError)
 
 
@@ -67,24 +56,16 @@ def _ok(id_: str, message: str) -> Check:
     return Check(id_, "ok", message)
 
 
-def _load_table(path: Path, key: str) -> list[dict]:
-    if not path.is_file():
-        return []
-    return list(tomllib.loads(read_text(path)).get(key, []))
-
-
 def run_checks(
     hub: Path,
     *,
     fix: bool = False,
     home: Path | None = None,
     which: Which = shutil.which,
-    now: float | None = None,
     package_version: str = __version__,
 ) -> list[Check]:
     hub = Path(hub)
     home = home or Path.home()
-    now = time.time() if now is None else now
     checks: list[Check] = []
 
     # hub-toml
@@ -195,61 +176,6 @@ def run_checks(
     else:
         checks.append(_ok("memory-files", "names ok"))
 
-    # projects
-    try:
-        projects = _load_table(hub / "projects.toml", "project")
-        gone = [
-            str(p.get("name", "?"))
-            for p in projects
-            if not Path(str(p.get("path", ""))).expanduser().is_dir()
-        ]
-        if gone:
-            checks.append(
-                Check(
-                    "projects",
-                    "warn",
-                    "paths missing: " + ", ".join(gone),
-                    "cc-hub projects remove <name>",
-                )
-            )
-        else:
-            checks.append(_ok("projects", f"{len(projects)} registered"))
-    except _READ_ERRORS as exc:
-        checks.append(Check("projects", "fail", f"projects.toml: {exc}", "fix the TOML"))
-
-    # hosts
-    try:
-        hosts = _load_table(hub / "hosts.toml", "host")
-        bad_shell = [
-            str(h.get("name", "?")) for h in hosts if h.get("shell", "bash") not in VALID_SHELLS
-        ]
-        if bad_shell:
-            checks.append(
-                Check(
-                    "hosts",
-                    "fail",
-                    "invalid shell for: " + ", ".join(bad_shell),
-                    "shell must be bash | pwsh | powershell",
-                )
-            )
-        else:
-            checks.append(_ok("hosts", f"{len(hosts)} registered"))
-    except _READ_ERRORS as exc:
-        checks.append(Check("hosts", "fail", f"hosts.toml: {exc}", "fix the TOML"))
-
-    # env-stale
-    env_md = hub / "ENV.md"
-    if not env_md.is_file():
-        checks.append(Check("env-stale", "warn", "ENV.md missing", "run `cc-hub env`"))
-    else:
-        age = (now - env_md.stat().st_mtime) / 86400
-        if age <= ENV_MAX_AGE_DAYS:
-            checks.append(_ok("env-stale", f"ENV.md is {age:.0f} days old"))
-        else:
-            checks.append(
-                Check("env-stale", "warn", f"ENV.md is {age:.0f} days old", "run `cc-hub env`")
-            )
-
     # pointers
     agents = detect_agents(home=home, which=which)
     if not agents:
@@ -289,27 +215,6 @@ def run_checks(
             )
         else:
             checks.append(_ok(f"pointers:{agent}", "pointers present"))
-
-    # stale-hooks
-    leftover = []
-    for rel in HOOK_CONFIGS:
-        p = hub / rel
-        try:
-            if p.is_file() and CC_HUB_HOOK.search(read_text(p)):
-                leftover.append(rel)
-        except _READ_ERRORS:
-            continue
-    if leftover:
-        checks.append(
-            Check(
-                "stale-hooks",
-                "warn",
-                "cc-hub hook entries left in: " + ", ".join(leftover),
-                "remove them (the command no longer exists); the hub-adapt skill does this",
-            )
-        )
-    else:
-        checks.append(_ok("stale-hooks", "no leftover cc-hub hooks"))
 
     # link-stale
     skills = hub / "skills"

@@ -3,23 +3,22 @@
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/) (single binary; installs Python 3.11+ itself if needed)
-- OpenSSH client if you use `cc-hub hosts`
 - git (optional; `cc-hub init` initializes a repository in the hub)
 
 ## Install
 
-From PyPI (0.2.1 and later):
+From PyPI:
 
     uv tool install cc-hub
     cc-hub version
 
 Or a released tag straight from GitHub:
 
-    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.2.1
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.3.0
 
 Or download the wheel attached to the GitHub release and install that file:
 
-    uv tool install ./cc_hub-0.2.1-py3-none-any.whl
+    uv tool install ./cc_hub-0.3.0-py3-none-any.whl
 
 `uv tool install` puts `cc-hub` in `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`).
 Make sure that directory is on your PATH; `uv tool update-shell` can add it.
@@ -42,7 +41,7 @@ root of one either; `init` refuses both. If the hub is not `~/.cc-hub`, set
 `[projects.agent.options.env]` so every `cc-hub` call finds it from any
 working directory.
 Treat the hub as private data: commit it to a private repository if you want
-backups. `secrets/`, generated files and agent pointers are already gitignored.
+backups. Credentials, generated files and agent pointers are gitignored.
 
 ## Connect cc-connect
 
@@ -52,9 +51,9 @@ See [cc-connect.md](cc-connect.md). Then send the agent its first message.
 
     cc-hub doctor
 
-Warnings about `bootstrap-pending` and `env-stale` disappear after the first
-conversation. When cc-connect runs as a service, make sure it can find
-`cc-hub` and `uv`; see the PATH notes in [cc-connect.md](cc-connect.md).
+The `bootstrap-pending` warning disappears after the first conversation. When
+cc-connect runs as a service, make sure it can find `cc-hub`; see the PATH
+notes in [cc-connect.md](cc-connect.md).
 
 ## Upgrade
 
@@ -63,8 +62,9 @@ conversation. When cc-connect runs as a service, make sure it can find
     cc-hub update --dry-run   # see what would change
     cc-hub update
 
-`update` replaces only framework-owned files (`AGENTS.md`, `BOOTSTRAP.md`,
-`skills/hub-*`, `cron/README.md`, `cron/memory-consolidate.md`, `.gitignore`)
-and merges new keys into `hub.toml`. Previous versions are copied to
-`.cc-hub/backups/<old version>/`. Read the migration notes in `CHANGELOG.md`
+`update` replaces only framework-owned files (`AGENTS.md` above its closing
+marker, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`,
+`cron/memory-consolidate.md`, `.gitignore`), removes framework files the
+package no longer ships, and merges new keys into `hub.toml`. Previous
+versions are copied to `.cc-hub/backups/<old version>/`. Read `CHANGELOG.md`
 before upgrading across minor versions.

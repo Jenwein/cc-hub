@@ -20,8 +20,6 @@ def test_init_creates_all_templates_and_dirs(tmp_path: Path) -> None:
         assert (tmp_path / "h" / rel).is_file(), rel
     for d in manifest.USER_DIRS:
         assert (tmp_path / "h" / d).is_dir(), d
-    for d in ("jobs", "logs"):
-        assert not (tmp_path / "h" / d).exists(), d
     cfg = load_config(tmp_path / "h")
     assert cfg["hub"]["template_version"] == __version__
     assert cfg["hub"]["name"] == "h"

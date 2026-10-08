@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.0 - 2026-10-08
+
+### Removed
+
+- `cc-hub env`, and the `ENV.md` and `env.json` it wrote.
+- `cc-hub projects` with `projects.toml`, and `cc-hub hosts` with `hosts.toml`.
+- The `hub-projects`, `hub-hosts` and `hub-cc-connect` skills.
+- `doctor` checks `projects`, `hosts`, `env-stale` and `stale-hooks`.
+- The `secrets/` directory is no longer created; it stays in `.gitignore`.
+- Dependencies `psutil` and `charset-normalizer`.
+
+### Changed
+
+- `AGENTS.md` ends with a closing marker. `update` replaces only what is above
+  it and keeps everything below, such as the block cc-connect appends for
+  Codex after `/cron setup`. In a file without the marker, `update` keeps
+  cc-connect's `<!-- cc-connect-instructions -->` block.
+- `BOOTSTRAP.md` has six steps and asks only for a name, how to address the
+  user, and the reply language.
+- `hub.toml` has no `[env]` table.
+
+### Migration notes
+
+- `cc-hub update` backs up and removes the three skills, `ENV.md` and
+  `env.json`; the backups are in `.cc-hub/backups/0.2.1/`.
+- `cc-hub update` does not touch `projects.toml`, `hosts.toml`, `secrets/` or
+  the `[env]` table in `hub.toml`; nothing reads them any more.
+
 ## 0.2.1 - 2026-09-30
 
 Template fixes; no command changes. The cron guidance is now checked against

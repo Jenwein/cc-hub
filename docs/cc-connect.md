@@ -10,7 +10,7 @@ Minimal `[[projects]]` entry pointing a Claude Code bot at the hub:
     type = "claudecode"
 
     [projects.agent.options]
-    work_dir = "/home/you/.cc-hub"     # absolute path; ~ expansion needs cc-connect > 1.5.1
+    work_dir = "/home/you/.cc-hub"     # absolute path
     mode = "default"                    # approvals are relayed to the chat
 
     [projects.agent.options.env]
@@ -26,39 +26,36 @@ Minimal `[[projects]]` entry pointing a Claude Code bot at the hub:
     app_secret = "${FEISHU_APP_SECRET}"
     allow_from = "*"
 
-For Codex use `type = "codex"` with the same `work_dir` and `env`, and read
-[codex-sandbox.md](codex-sandbox.md).
+For Codex use `type = "codex"` with the same `work_dir` and `env`.
 
-## PATH under a daemon
+## PATH under a service
 
 `cc-connect daemon install` runs cc-connect from systemd, launchd or the
 Windows Task Scheduler. Those do not read your shell profile, so PATH is often
-just the system directories and `cc-hub`, `uv`, `claude` or `codex` are not
-found. Put the full PATH in `[projects.agent.options.env]` as above.
-`ENV.md` lists absolute paths the agent can fall back to.
+just the system directories and `cc-hub` is not found. Put the full PATH in
+`[projects.agent.options.env]` as above.
 
-## What the agent uses
+## What cc-connect tells the agent
 
-- Attachments you send land in `<hub>/.cc-connect/attachments/<message id>/`;
-  cc-connect appends their absolute paths to the prompt.
-- The agent sends files back with `cc-connect send --file <absolute path>`
-  (`--image`, `--tts`). 50 MB limit.
-- Scheduled prompts: `cc-connect cron add --cron "<expr>" --prompt "<text>"
-  --session-mode <reuse|new_per_run> --desc "hub:<name>"`. The hub keeps
-  definitions in `cron/*.md`; bootstrap registers the defaults in the chat it
-  runs in, and skips any whose `hub:<name>` is already in `cc-connect cron list`.
-- `/dir <path>` in the chat switches the working directory for the *next*
-  session only. Keep `work_dir` on the hub and let the agent `cd` into projects.
+cc-connect explains its own commands to the agent: sending files back
+(`cc-connect send`), scheduled tasks (`cc-connect cron`), timers and relays.
 
-## Approvals
+- Claude Code gets this in its system prompt automatically.
+- Codex and other agents without system-prompt support get it once you send
+  `/cron setup` in the chat: cc-connect appends a block marked
+  `<!-- cc-connect-instructions -->` to the hub's `AGENTS.md`. The block sits
+  below the hub's closing marker, so `cc-hub update` keeps it.
 
-`mode = "default"` relays every tool approval to the chat. With `/mode yolo`
-or "allow all" the decision rests with the agent runtime's own permission
-settings; the hub adds no enforcement of its own.
+## Scheduled tasks
 
-## Sessions and background work
+The hub keeps task definitions in `cron/*.md`. Bootstrap registers the
+default ones from the chat it runs in:
 
-cc-connect keeps one agent process per chat session and ends it, together
-with everything it started, on `/new`, `/switch`, a turn that stays silent
-longer than `idle_timeout_mins`, or a daemon restart. Background tasks and
-subagents the agent starts therefore live as long as that session.
+    cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
+
+and skips any whose `hub:<name>` is already in `cc-connect cron list`.
+
+## Working directory
+
+`/dir <path>` in the chat switches the working directory for the *next*
+session only. Keep `work_dir` on the hub.

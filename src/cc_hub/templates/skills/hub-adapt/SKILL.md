@@ -1,6 +1,6 @@
 ---
 name: hub-adapt
-description: Make your own agent ecosystem discover this hub's instructions and skills. Run on first use, after switching agents, or when `cc-hub doctor` reports missing pointers or leftover hooks.
+description: Make your own agent ecosystem discover this hub's instructions and skills. Run on first use, after switching agents, or when `cc-hub doctor` reports missing pointers.
 ---
 
 # hub-adapt
@@ -16,16 +16,14 @@ step is idempotent: re-running must not duplicate anything.
    do nothing. Otherwise create the smallest pointer file your runtime
    supports (an import line, not a copy).
 2. **Skills.** Your skills discovery path must reach the hub's `skills/`
-   directory. Create it with `cc-hub link skills <your skills path>`; the
-   command picks symlink, junction or copy for this platform and says which.
-3. **Leftovers.** cc-hub 0.1.0 installed `cc-hub hook pre-tool-use` and
-   `cc-hub hook post-tool-use` entries in the hook configuration. That command
-   no longer exists: remove those entries and keep every other hook.
-4. **Trust.** If your runtime needs a one-time interactive trust step before
+   directory. Any mechanism works: a link, a copy, or a pointer your runtime
+   supports. `cc-hub link skills <your skills path>` makes a link, picking
+   symlink, junction or copy for this platform, and says which.
+3. **Trust.** If your runtime needs a one-time interactive trust step before
    it reads this directory's instructions or skills, tell the user exactly
    what to run and why.
 
-Permissions and sandbox settings are the user's and your runtime's business;
+Permissions and sandbox settings belong to the user and your runtime;
 do not change them here.
 
 Finish with `cc-hub doctor`, fix what it reports, then
@@ -38,5 +36,4 @@ Finish with `cc-hub doctor`, fix what it reports, then
 | Claude Code | `CLAUDE.md` containing `@AGENTS.md` (2.1.277+ reads `AGENTS.md` natively when no CLAUDE.md exists) | `.claude/skills` | none needed for instructions and skills |
 | Codex CLI | none needed, reads `AGENTS.md` | `.agents/skills` | mark the directory trusted if Codex asks |
 
-Leftover hook entries live in `.claude/settings.json` (Claude Code) and
-`.codex/hooks.json` (Codex). All of these pointer files are gitignored by the hub.
+All of these pointer files are gitignored by the hub.

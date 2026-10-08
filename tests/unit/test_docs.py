@@ -1,43 +1,53 @@
 # -*- coding: utf-8 -*-
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMANDS = ("init", "doctor", "update", "env", "memory", "hosts", "projects", "link")
-REMOVED = ("jobs", "hook")
-REMOVED_SUBCOMMANDS = ("hosts run", "hosts check", "hosts push", "hosts pull",
-                       "memory stats", "hosts list|check", "log|search|recent|stats")
+TABLE_ROW = re.compile(r"^\| `cc-hub ([a-z-]+)", re.M)
 
 
-def test_readme_mentions_every_command() -> None:
-    for name in ("README.md", "README.zh-CN.md"):
-        readme = (ROOT / name).read_text(encoding="utf-8")
-        for cmd in COMMANDS:
-            assert f"cc-hub {cmd}" in readme, (name, cmd)
-        for cmd in REMOVED:
-            assert f"cc-hub {cmd}" not in readme, (name, cmd)
-        for sub in REMOVED_SUBCOMMANDS:
-            assert sub not in readme.replace("\\|", "|"), (name, sub)
-
-
-def test_cli_has_no_removed_commands() -> None:
+def _command_names() -> set[str]:
     from cc_hub.cli import app
 
-    names = {c.name for c in app.registered_commands} | {
-        g.name for g in app.registered_groups
-    }
-    assert set(COMMANDS) <= names
-    assert not set(REMOVED) & names
+    names = {c.name or c.callback.__name__ for c in app.registered_commands}
+    return names | {g.name for g in app.registered_groups}
+
+
+def test_readme_command_tables_match_the_cli() -> None:
+    for name in ("README.md", "README.zh-CN.md"):
+        readme = (ROOT / name).read_text(encoding="utf-8")
+        assert set(TABLE_ROW.findall(readme)) == _command_names(), name
+
+
+DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md")
+LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
 def test_docs_exist_and_are_utf8_lf() -> None:
-    for name in ("install.md", "cc-connect.md", "windows.md", "codex-sandbox.md", "acceptance.md"):
+    for name in DOCS:
         raw = (ROOT / "docs" / name).read_bytes()
         assert raw and b"\r\n" not in raw and not raw.startswith(b"\xef\xbb\xbf"), name
     cc_connect_text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
     assert "projects.agent.options.env" in cc_connect_text
-    codex_sandbox_text = (ROOT / "docs" / "codex-sandbox.md").read_text(encoding="utf-8")
-    assert "writable_roots" in codex_sandbox_text
     assert "## 0.1.0" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_relative_links_resolve() -> None:
+    pages = [ROOT / "README.md", ROOT / "README.zh-CN.md"]
+    pages += [ROOT / "docs" / name for name in DOCS]
+    for page in pages:
+        for target in LINK.findall(page.read_text(encoding="utf-8")):
+            if "://" in target:
+                continue
+            assert (page.parent / target).exists(), (page.name, target)
+
+
+def test_cc_connect_doc_explains_the_instructions_block() -> None:
+    from cc_hub.commands.update import CC_CONNECT_MARKER
+
+    text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
+    assert "/cron setup" in text
+    assert CC_CONNECT_MARKER in text
 
 
 def test_docs_explain_cc_hub_dir() -> None:

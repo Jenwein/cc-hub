@@ -14,7 +14,6 @@ cc-hub works natively, with these differences:
   shell inside the Claude desktop app. That app is packaged (MSIX), and new
   folders its shells create under `%APPDATA%` land in its private storage,
   where cc-connect and the agents it starts cannot see them.
-
 - **Links.** Creating symlinks needs Developer Mode or administrator rights,
   so `cc-hub link` creates a directory junction instead; if that fails it
   copies and leaves a `.cc-hub-copied` marker. `cc-hub doctor` reports
@@ -25,5 +24,4 @@ cc-hub works natively, with these differences:
 - **Encoding.** All cc-hub output is UTF-8.
 - **Line endings.** Keep hub files LF. Some skill loaders silently drop
   frontmatter when a `SKILL.md` has CRLF endings.
-- **Paths.** The hub defaults to `%USERPROFILE%\.cc-hub`. cc-connect's
-  `run_as_user` is not available on Windows; use `mode = "default"` approvals.
+- **Paths.** The hub defaults to `%USERPROFILE%\.cc-hub`.

@@ -20,9 +20,6 @@ FRAMEWORK_OWNED: tuple[str, ...] = (
     "cron/memory-consolidate.md",
     "skills/hub-adapt/SKILL.md",
     "skills/hub-memory/SKILL.md",
-    "skills/hub-hosts/SKILL.md",
-    "skills/hub-projects/SKILL.md",
-    "skills/hub-cc-connect/SKILL.md",
 )
 # Seeded once by `cc-hub init`, never touched afterwards.
 USER_OWNED: tuple[str, ...] = (
@@ -31,16 +28,28 @@ USER_OWNED: tuple[str, ...] = (
     "IDENTITY.md",
     "USER.md",
     "MEMORY.md",
-    "projects.toml",
-    "hosts.toml",
 )
 # Framework-owned files that `update` must not recreate once the agent removed them.
 ONE_TIME: tuple[str, ...] = ("BOOTSTRAP.md",)
-# Formerly framework-owned; `update` backs them up and removes them from older hubs.
-RETIRED: tuple[str, ...] = ("skills/hub-jobs/SKILL.md",)
+# Framework-owned files whose content below TAIL_MARKER belongs to the user and
+# cc-connect; `update` replaces only what is above it.
+KEEPS_TAIL: tuple[str, ...] = ("AGENTS.md",)
+TAIL_MARKER = (
+    "<!-- cc-hub: framework content ends here; everything below is kept by cc-hub update -->"
+)
+# Files a hub may hold that this package no longer ships; `update` backs them up
+# and removes them.
+RETIRED: tuple[str, ...] = (
+    "skills/hub-jobs/SKILL.md",
+    "skills/hub-hosts/SKILL.md",
+    "skills/hub-projects/SKILL.md",
+    "skills/hub-cc-connect/SKILL.md",
+    "ENV.md",
+    "env.json",
+)
 # Structure owned by the framework, values owned by the user: merged, never overwritten.
 HUB_TOML = "hub.toml"
-USER_DIRS: tuple[str, ...] = ("memory", "scripts", "secrets")
+USER_DIRS: tuple[str, ...] = ("memory", "scripts")
 
 _SOURCE_NAMES = {".gitignore": "_gitignore"}
 

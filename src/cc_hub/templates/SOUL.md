@@ -17,7 +17,7 @@
 - The user's request comes first; these files guide, they do not gate.
 - Ask before irreversible or outward-facing actions: deleting data, pushing,
   messaging other people, spending money.
-- Never read or print anything under `secrets/`.
+- Never read or print credentials: `.env` files, keys, tokens.
 
 ## Things I do not do
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""UTF-8 discipline: text IO, byte decoding, stdio."""
+"""UTF-8 discipline: text IO and stdio."""
 
 from __future__ import annotations
 
@@ -52,23 +52,4 @@ def append_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
-
-
-def decode_bytes(data: bytes) -> str:
-    """UTF-8 first; otherwise detect with charset-normalizer; never raise."""
-    if not data:
-        return ""
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        pass
-    try:
-        from charset_normalizer import from_bytes
-
-        best = from_bytes(data).best()
-        if best is not None:
-            return str(best)
-    except Exception:  # detection is best effort
-        pass
-    return data.decode("utf-8", errors="replace")
 
