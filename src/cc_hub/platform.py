@@ -15,13 +15,6 @@ def is_windows() -> bool:
     return sys.platform.startswith("win")
 
 
-def is_wsl(proc_version: Path = Path("/proc/version")) -> bool:
-    try:
-        return "microsoft" in proc_version.read_text(encoding="utf-8", errors="ignore").lower()
-    except OSError:
-        return False
-
-
 class LinkError(Exception):
     pass
 

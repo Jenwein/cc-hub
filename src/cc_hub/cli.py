@@ -56,22 +56,16 @@ def where(ctx: typer.Context) -> None:
 
 
 from cc_hub.commands import doctor as _doctor  # noqa: E402
-from cc_hub.commands import env as _env  # noqa: E402
-from cc_hub.commands import hosts as _hosts  # noqa: E402
 from cc_hub.commands import init as _init  # noqa: E402
 from cc_hub.commands import link as _link  # noqa: E402
 from cc_hub.commands import memory as _memory  # noqa: E402
-from cc_hub.commands import projects as _projects  # noqa: E402
 from cc_hub.commands import update as _update  # noqa: E402
 
 _init.register(app)
 _doctor.register(app)
 _update.register(app)
-_env.register(app)
 _memory.register(app)
-_projects.register(app)
 _link.register(app)
-_hosts.register(app)
 
 
 def main() -> None:

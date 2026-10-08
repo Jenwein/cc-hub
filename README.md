@@ -32,13 +32,12 @@ adapts to its runtime, and deletes the bootstrap file.
 | Command | Purpose |
 |---|---|
 | `cc-hub init [dir]` | Seed a hub. Existing files are never overwritten. |
-| `cc-hub doctor [--fix] [--json]` | Health checks: budgets, pointers, leftover hooks. |
+| `cc-hub doctor [--fix] [--json]` | Health checks: required files, memory budgets, pointers. |
 | `cc-hub update [--dry-run]` | Refresh framework-owned files; user files untouched; backups kept. |
-| `cc-hub env` | Probe the machine and write `ENV.md` / `env.json`. |
 | `cc-hub memory log\|search\|recent` | Daily logs and long-term memory. |
-| `cc-hub projects list\|show\|add\|remove` | Registry of local project directories. |
-| `cc-hub hosts list` | Registry of remote machines; the agent connects with ssh itself. |
 | `cc-hub link <src> <dst>` | Symlink, junction or copy (platform decides). |
+| `cc-hub where` | Print the hub directory and the package location. |
+| `cc-hub version` | Print the cc-hub version. |
 
 ## Hub layout
 

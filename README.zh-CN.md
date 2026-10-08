@@ -21,13 +21,12 @@ cc-connect 把 Claude Code、Codex 等 agent 接到飞书、微信、Telegram �
 | 命令 | 用途 |
 |---|---|
 | `cc-hub init [dir]` | 播种总站，已有文件不覆盖 |
-| `cc-hub doctor [--fix] [--json]` | 体检：预算、指针、残留钩子 |
+| `cc-hub doctor [--fix] [--json]` | 体检：必需文件、记忆预算、指针 |
 | `cc-hub update [--dry-run]` | 只更新框架拥有的文件，用户文件不动，旧版本有备份 |
-| `cc-hub env` | 探测机器，写 `ENV.md` 和 `env.json` |
 | `cc-hub memory log\|search\|recent` | 日志与长期记忆 |
-| `cc-hub projects list\|show\|add\|remove` | 本机项目注册表 |
-| `cc-hub hosts list` | 远程主机注册表，agent 自己用 ssh 连接 |
 | `cc-hub link <src> <dst>` | symlink / junction / 复制，按平台自动选 |
+| `cc-hub where` | 打印总站目录和包的安装位置 |
+| `cc-hub version` | 打印版本号 |
 
 其余文档见英文 README 的链接。
 

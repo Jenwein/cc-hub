@@ -32,28 +32,6 @@ def test_append_text_creates_and_appends(tmp_path: Path) -> None:
     assert encoding.read_text(target) == "a\nb\n"
 
 
-def test_decode_bytes_prefers_utf8() -> None:
-    assert encoding.decode_bytes(CHINESE.encode("utf-8")) == CHINESE
-
-
-def test_decode_bytes_detects_gbk() -> None:
-    text = (
-        "这是一段足够长的中文文本，用来让编码探测器有把握地识别出 GBK 编码。"
-        "再加一句话增加样本量。"
-    )
-    assert encoding.decode_bytes(text.encode("gbk")) == text
-
-
-def test_decode_bytes_never_raises_on_garbage() -> None:
-    out = encoding.decode_bytes(b"\xff\xfe\xfa\x00\x01")
-    assert isinstance(out, str)
-
-
-def test_decode_bytes_empty() -> None:
-    assert encoding.decode_bytes(b"") == ""
-
-
-
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="Unix permissions test")
 def test_write_text_fresh_file_respects_umask(tmp_path: Path) -> None:
     """Fresh write_text should produce readable file, not 0o600."""

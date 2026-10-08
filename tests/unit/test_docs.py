@@ -1,32 +1,22 @@
 # -*- coding: utf-8 -*-
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMANDS = ("init", "doctor", "update", "env", "memory", "hosts", "projects", "link")
-REMOVED = ("jobs", "hook")
-REMOVED_SUBCOMMANDS = ("hosts run", "hosts check", "hosts push", "hosts pull",
-                       "memory stats", "hosts list|check", "log|search|recent|stats")
+TABLE_ROW = re.compile(r"^\| `cc-hub ([a-z-]+)", re.M)
 
 
-def test_readme_mentions_every_command() -> None:
-    for name in ("README.md", "README.zh-CN.md"):
-        readme = (ROOT / name).read_text(encoding="utf-8")
-        for cmd in COMMANDS:
-            assert f"cc-hub {cmd}" in readme, (name, cmd)
-        for cmd in REMOVED:
-            assert f"cc-hub {cmd}" not in readme, (name, cmd)
-        for sub in REMOVED_SUBCOMMANDS:
-            assert sub not in readme.replace("\\|", "|"), (name, sub)
-
-
-def test_cli_has_no_removed_commands() -> None:
+def _command_names() -> set[str]:
     from cc_hub.cli import app
 
-    names = {c.name for c in app.registered_commands} | {
-        g.name for g in app.registered_groups
-    }
-    assert set(COMMANDS) <= names
-    assert not set(REMOVED) & names
+    names = {c.name or c.callback.__name__ for c in app.registered_commands}
+    return names | {g.name for g in app.registered_groups}
+
+
+def test_readme_command_tables_match_the_cli() -> None:
+    for name in ("README.md", "README.zh-CN.md"):
+        readme = (ROOT / name).read_text(encoding="utf-8")
+        assert set(TABLE_ROW.findall(readme)) == _command_names(), name
 
 
 def test_docs_exist_and_are_utf8_lf() -> None:

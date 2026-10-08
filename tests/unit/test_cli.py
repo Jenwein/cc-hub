@@ -31,3 +31,12 @@ def test_where_without_hub_still_prints_package(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 1
     assert "package:" in result.stdout
     assert "hub: not found" in result.stdout
+
+
+def _command_names() -> set[str]:
+    names = {c.name or c.callback.__name__ for c in app.registered_commands}
+    return names | {g.name for g in app.registered_groups}
+
+
+def test_cli_exposes_exactly_the_hub_commands() -> None:
+    assert _command_names() == {"init", "doctor", "update", "memory", "link", "where", "version"}
