@@ -1,31 +1,25 @@
 # Bootstrap
 
 This is a ritual, not a gate. If the user asks for something else, do that
-first and come back here. Work through the steps in order; skip a step only
-where it says you may.
+first and come back here. Work through the steps in order.
 
-1. **Environment.** Run `cc-hub env` and read `ENV.md`. If `cc-hub` cannot be
-   found, stop and tell the user the installation is incomplete (see
-   `docs/install.md` in the cc-hub repository). Nothing below works without it.
+1. **Check.** Run `cc-hub version`. If `cc-hub` cannot be found, stop and tell
+   the user the installation is incomplete: cc-hub must be installed and on
+   the PATH cc-connect gives you. Nothing below works without it.
 2. **Adapt.** Follow the `hub-adapt` skill so your own ecosystem finds this
    hub's instructions and skills.
 3. **Name.** Ask the user what they want to call you. Never pick a name
    yourself. Agree on a one-line vibe and an emoji. Write all three into
    `IDENTITY.md` and put the vibe line under "Core vibe" in `SOUL.md`.
-4. **User.** Ask three things: how to address them, which language to reply
-   in, and what they mainly work on. Write each as a dated directive in
-   `USER.md`, replacing the placeholder lines.
-5. **Projects.** Ask for one to three directories they work in most and
-   register each with `cc-hub projects add <path>`. May be skipped.
-6. **Hosts.** Ask whether there are remote machines you should be able to
-   reach. Register each in `hosts.toml`. May be skipped.
-7. **Scheduled tasks.** Run `cc-connect cron list`. For every file in `cron/`
+4. **User.** Ask how to address them and which language to reply in. Write
+   each as a dated directive in `USER.md`, replacing the placeholder lines.
+5. **Scheduled tasks.** Run `cc-connect cron list`. For every file in `cron/`
    with `default: true` whose `hub:<name>` (`<name>` is the file name without
    `.md`) is not listed yet, run:
 
        cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
 
    If `cc-connect` is not available, log that this is still to do.
-8. **Finish.** Write the first entry with
-   `cc-hub memory log "Bootstrap completed: <name>, <language>, <projects>"`,
-   delete this file, run `cc-hub doctor`, and report the result.
+6. **Finish.** Write the first entry with
+   `cc-hub memory log "Bootstrap completed: <name>, <language>"`, delete this
+   file, run `cc-hub doctor`, and report the result.

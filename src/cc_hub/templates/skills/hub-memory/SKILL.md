@@ -15,7 +15,7 @@ Log when you:
 
 - finish a task with a concrete result (what, where, outcome);
 - make or receive a decision;
-- learn something about this machine or a project (paths, commands, quirks);
+- learn something about this machine or the code you work on (paths, commands, quirks);
 - are about to lose context (compaction, end of a long task).
 
 Write facts, not feelings. One entry per event. Include paths and commands.
@@ -33,9 +33,8 @@ Write facts, not feelings. One entry per event. Include paths and commands.
 2. For each entry still true and useful beyond the day it was written, add or
    merge a line in the matching `MEMORY.md` section: Decisions, Facts,
    Environment & tools, Pitfalls. Format: `- YYYY-MM-DD: text`.
-3. Keep `MEMORY.md` under 200 lines. Merge duplicates, delete entries that
-   later entries contradict, drop environment facts that `cc-hub env` has
-   since changed.
+3. Keep `MEMORY.md` under 200 lines. Merge duplicates, and delete entries
+   that later entries contradict or that are no longer true.
 4. In `USER.md`, mark directives contradicted by newer observations with
    `<!-- superseded: YYYY-MM-DD -->` instead of deleting them.
 5. `cc-hub memory log "consolidation: <n> entries promoted, <m> removed"`.

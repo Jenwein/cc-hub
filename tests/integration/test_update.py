@@ -18,12 +18,12 @@ def test_merge_defaults_adds_missing_keys_only() -> None:
     defaults = {
         "hub": {"name": "hub", "template_version": "1"},
         "memory": {"max_lines": 200, "recent_days": 2},
-        "env": {"tools": []},
+        "extra": {"items": []},
     }
     merged = merge_defaults(current, defaults)
     assert merged["memory"] == {"max_lines": 123, "recent_days": 2}
     assert merged["hub"] == {"name": "x", "template_version": "1"}
-    assert merged["env"] == {"tools": []}
+    assert merged["extra"] == {"items": []}
     assert current["memory"] == {"max_lines": 123}
 
 
@@ -63,13 +63,12 @@ def test_update_does_not_recreate_deleted_bootstrap(hub: Path) -> None:
 def test_update_merges_hub_toml_keeping_user_values(hub: Path) -> None:
     cfg = load_config(hub)
     cfg["memory"]["max_lines"] = 123
-    del cfg["env"]
+    del cfg["memory"]["recent_days"]
     save_config(hub, cfg)
     result = update_hub(hub, version="9.9.9")
     assert result.config_changed
     new = load_config(hub)
-    assert new["memory"]["max_lines"] == 123
-    assert "claude" in new["env"]["tools"]
+    assert new["memory"] == {"max_lines": 123, "recent_days": 2}
     assert new["hub"]["template_version"] == "9.9.9"
 
 
@@ -155,20 +154,18 @@ def test_update_edits_hub_toml_in_place(hub: Path) -> None:
     data = tomllib.loads(new)
     assert data["memory"] == {"max_lines": 120, "recent_days": 2}
     assert data["hub"]["template_version"] == "9.9.9"
-    tools_line = next(line for line in new.splitlines() if line.startswith("tools"))
-    assert tools_line.endswith('"cc-connect"]')  # the one-line list is not reflowed
 
 
 def test_update_adds_a_missing_table(hub: Path) -> None:
     import tomllib
 
     text = read_text(hub / "hub.toml")
-    start = text.index("[env]")
+    start = text.index("[memory]")
     (hub / "hub.toml").write_text("# my hub\n" + text[:start], encoding="utf-8")
     update_hub(hub, version="9.9.9")
     new = read_text(hub / "hub.toml")
     assert new.startswith("# my hub\n")
-    assert "claude" in tomllib.loads(new)["env"]["tools"]
+    assert tomllib.loads(new)["memory"] == {"max_lines": 200, "recent_days": 2}
 
 
 CC_BLOCK = "\n<!-- cc-connect-instructions -->\nYou are running inside cc-connect.\n"
@@ -199,3 +196,16 @@ def test_update_keeps_the_cc_connect_block_when_the_tail_marker_is_missing(hub: 
     update_hub(hub, version="9.9.9")
     expected = manifest.render("AGENTS.md", name="hub", version="9.9.9") + CC_BLOCK
     assert read_text(agents) == expected
+
+
+def test_update_removes_every_retired_file(hub: Path) -> None:
+    for rel in manifest.RETIRED:
+        path = hub / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"old {rel}", encoding="utf-8")
+    result = update_hub(hub, version="9.9.9")
+    assert result.retired == list(manifest.RETIRED)
+    backups = hub / ".cc-hub" / "backups" / __version__
+    for rel in manifest.RETIRED:
+        assert not (hub / rel).exists(), rel
+        assert read_text(backups / rel) == f"old {rel}"

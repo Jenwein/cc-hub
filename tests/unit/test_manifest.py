@@ -8,6 +8,22 @@ from cc_hub import __version__, manifest
 FRONTMATTER = re.compile(
     r"^---\nname: (?P<name>[a-z0-9-]+)\ndescription: (?P<desc>.+)\n---\n", re.S
 )
+CLI_REF = re.compile(r"`cc-hub ([a-z][a-z-]*)")
+SKILL_REF = re.compile(r"(?<!cc-)\bhub-[a-z][a-z-]*")
+CRON_FRONTMATTER = re.compile(r"^---\n(?P<body>.*?)\n---\n", re.S)
+# Values `cc-connect cron add --session-mode` accepts (core/cron.go, 1.5.0).
+SESSION_MODES = ("reuse", "new_per_run")
+
+
+def _command_names() -> set[str]:
+    from cc_hub.cli import app
+
+    names = {c.name or c.callback.__name__ for c in app.registered_commands}
+    return names | {g.name for g in app.registered_groups}
+
+
+def _skill_names() -> set[str]:
+    return {rel.split("/")[1] for rel in manifest.FRAMEWORK_OWNED if rel.startswith("skills/")}
 
 
 def test_every_manifest_entry_has_a_template_file() -> None:
@@ -22,30 +38,31 @@ def test_templates_are_lf_and_have_no_bom() -> None:
         assert b"\r\n" not in raw, rel
 
 
-def test_agents_md_within_budget() -> None:
+def test_agents_md_within_budget_and_ends_with_the_tail_marker() -> None:
     text = manifest.render("AGENTS.md")
     assert len(text.splitlines()) <= 150
+    assert text.endswith(manifest.TAIL_MARKER + "\n")
+    assert text.count(manifest.TAIL_MARKER) == 1
+    assert set(manifest.KEEPS_TAIL) <= set(manifest.FRAMEWORK_OWNED)
 
 
-def test_agents_md_leaves_background_work_to_the_runtime() -> None:
-    text = manifest.render("AGENTS.md")
-    assert "your own runtime's background facilities" in text
-    assert "`/new`" in text
+def test_agents_md_points_at_the_cron_readme() -> None:
+    assert "cron/README.md" in manifest.render("AGENTS.md")
 
 
 def test_user_md_has_a_placeholder_for_each_bootstrap_question() -> None:
-    """BOOTSTRAP.md step 4 asks three things; USER.md must have a line for each."""
+    """BOOTSTRAP.md asks how to address the user and which language to use."""
     text = manifest.render("USER.md")
     assert "- Address the user as" in text
     assert "- Reply in" in text
-    assert "- Mainly works on" in text
-    assert text.count("<!-- observed:") == 3
+    assert text.count("<!-- observed:") == 2
 
 
 def test_skills_have_valid_frontmatter_and_budget() -> None:
-    skills = [rel for rel in manifest.FRAMEWORK_OWNED if rel.startswith("skills/")]
-    assert len(skills) == 5
-    for rel in skills:
+    assert _skill_names() == {"hub-adapt", "hub-memory"}
+    for rel in manifest.FRAMEWORK_OWNED:
+        if not rel.startswith("skills/"):
+            continue
         text = manifest.render(rel)
         m = FRONTMATTER.match(text)
         assert m, rel
@@ -56,59 +73,35 @@ def test_skills_have_valid_frontmatter_and_budget() -> None:
 def test_hub_toml_renders_with_version_and_created() -> None:
     text = manifest.render("hub.toml", name="my-hub", created=date(2026, 9, 22))
     data = tomllib.loads(text)
+    assert set(data) == {"hub", "memory"}
     assert data["hub"]["name"] == "my-hub"
     assert data["hub"]["template_version"] == __version__
     assert data["hub"]["created"] == date(2026, 9, 22)
-    assert data["memory"]["max_lines"] == 200
-    assert "claude" in data["env"]["tools"]
-    assert "hooks" not in data
-
-
-def test_toml_templates_parse() -> None:
-    for rel in ("projects.toml", "hosts.toml"):
-        assert tomllib.loads(manifest.render(rel)) == {}
+    assert data["memory"] == {"max_lines": 200, "recent_days": 2}
 
 
 def test_gitignore_maps_to_underscore_source() -> None:
     assert manifest.template_source(".gitignore").name == "_gitignore"
-    assert "secrets/" in manifest.render(".gitignore")
+    text = manifest.render(".gitignore")
+    for line in (".env", "secrets/", ".cc-hub/", ".cc-connect/", "CLAUDE.md", ".claude/"):
+        assert line in text.splitlines(), line
 
 
 def test_ownership_sets_are_disjoint() -> None:
     assert not set(manifest.FRAMEWORK_OWNED) & set(manifest.USER_OWNED)
     assert manifest.HUB_TOML not in manifest.FRAMEWORK_OWNED + manifest.USER_OWNED
     assert set(manifest.ONE_TIME) <= set(manifest.FRAMEWORK_OWNED)
-    assert not set(manifest.RETIRED) & set(manifest.FRAMEWORK_OWNED + manifest.USER_OWNED)
-    assert "skills/hub-jobs/SKILL.md" in manifest.RETIRED
+    assert not set(manifest.RETIRED) & set(manifest.all_templates())
+    for rel in manifest.RETIRED:
+        assert not manifest.template_source(rel).exists(), rel
 
 
-def test_templates_do_not_mention_removed_commands() -> None:
+def test_templates_reference_only_existing_commands_and_skills() -> None:
+    commands, skills = _command_names(), _skill_names()
     for rel in manifest.all_templates():
         text = manifest.render(rel)
-        assert "cc-hub jobs" not in text, rel
-        assert "hub-jobs" not in text, rel
-        assert "hook snippet" not in text and "hook test" not in text, rel
-        assert "blocklist" not in text, rel
-        for sub in ("hosts run", "hosts check", "hosts push", "hosts pull", "memory stats"):
-            assert f"cc-hub {sub}" not in text, (rel, sub)
-
-
-def test_skill_guidance_matches_verified_behaviour() -> None:
-    adapt = manifest.render("skills/hub-adapt/SKILL.md")
-    assert "cc-hub hook" in adapt  # only as the leftover to remove
-    cc_connect = manifest.render("skills/hub-cc-connect/SKILL.md")
-    # cc-connect 1.5.0 has `cron list|edit|del` on its CLI (cmd/cc-connect/cron.go).
-    assert "cc-connect cron list" in cc_connect
-    assert "cc-connect cron del <id>" in cc_connect
-    assert "/cron list" in cc_connect  # what the user types in the chat
-    hosts = manifest.render("skills/hub-hosts/SKILL.md")
-    assert "ssh -o BatchMode=yes" in hosts
-    assert "There is no `hosts add` yet; edit `hosts.toml` by hand." in hosts
-
-
-CRON_FRONTMATTER = re.compile(r"^---\n(?P<body>.*?)\n---\n", re.S)
-# Values `cc-connect cron add --session-mode` accepts (core/cron.go, 1.5.0).
-SESSION_MODES = ("reuse", "new_per_run")
+        assert set(CLI_REF.findall(text)) <= commands, rel
+        assert set(SKILL_REF.findall(text)) <= skills, rel
 
 
 def test_cron_definitions_have_schedule_default_and_session() -> None:
@@ -127,7 +120,7 @@ def test_cron_definitions_have_schedule_default_and_session() -> None:
 
 def test_cron_registration_passes_session_mode_and_desc() -> None:
     """A task's `session` only takes effect when the registration command passes it."""
-    for rel in ("BOOTSTRAP.md", "cron/README.md", "skills/hub-cc-connect/SKILL.md"):
+    for rel in ("BOOTSTRAP.md", "cron/README.md"):
         text = manifest.render(rel)
         assert "--session-mode <session>" in text, rel
         assert '--desc "hub:<name>"' in text, rel
@@ -135,22 +128,5 @@ def test_cron_registration_passes_session_mode_and_desc() -> None:
     assert "cc-connect cron list" in manifest.render("BOOTSTRAP.md")
 
 
-def test_templates_do_not_cite_hub_adapt_goals_by_number() -> None:
-    for rel in manifest.all_templates():
-        assert not re.search(r"hub-adapt goal \d", manifest.render(rel)), rel
-    projects = manifest.render("skills/hub-projects/SKILL.md")
-    assert "writable_roots" in projects and "docs/codex-sandbox.md" in projects
-
-
 def test_hub_adapt_leaves_permissions_to_the_runtime() -> None:
-    adapt = manifest.render("skills/hub-adapt/SKILL.md")
-    for word in ("permissions.deny", "writable_roots", "Deny reads"):
-        assert word not in adapt, word
-    assert "do not change them here" in adapt
-
-
-def test_agents_md_ends_with_the_tail_marker() -> None:
-    text = manifest.render("AGENTS.md")
-    assert text.endswith(manifest.TAIL_MARKER + "\n")
-    assert text.count(manifest.TAIL_MARKER) == 1
-    assert set(manifest.KEEPS_TAIL) <= set(manifest.FRAMEWORK_OWNED)
+    assert "do not change them here" in manifest.render("skills/hub-adapt/SKILL.md")
