@@ -65,6 +65,18 @@ def test_parse_manifest_reads_every_field() -> None:
         (HEAD + '[[requires]]\nname = "x"\n', "name and bin"),
         (HEAD + '[data]\ndirs = ["a", "a/b"]\n', "overlap"),
         (HEAD + '[data]\ndirs = ["memory"]\n', "belongs to the hub"),
+        # Top-level keys must come before the [app] header, or they land inside [app].
+        ("data = 1\n" + HEAD, r"\[data\] must be a table"),
+        (HEAD + "[[data]]\nx = 1\n", r"\[data\] must be a table"),
+        ("requires = 5\n" + HEAD, r"\[\[requires\]\] must be a list of tables"),
+        (HEAD + '[[requires]]\nname = ""\nbin = "x"\n', "name must not be empty"),
+        (HEAD + '[[requires]]\nname = "x"\nbin = ""\n', "bin must not be empty"),
+        (HEAD + '[[requires]]\nname = "x"\nbin = "x"\ninstall = ""\n',
+         "install must be a non-empty string or a table"),
+        (HEAD + '[[requires]]\nname = "x"\nbin = "x"\n[requires.install]\nlinux = 5\n',
+         "install.linux must be a non-empty string"),
+        (HEAD + '[[requires]]\nname = "x"\nbin = "x"\n[requires.install]\nbeos = "y"\n',
+         "install keys must be linux, macos or windows"),
     ],
 )
 def test_parse_manifest_rejects(text: str, message: str) -> None:
@@ -89,7 +101,8 @@ def test_versions() -> None:
 @pytest.mark.parametrize(
     "raw",
     ["memory", "Skills/x", ".secret", "apps", "apps.lock", "USER.md", "/abs", "a/../b",
-     "a\\b", "C:/x", "secrets/k", ""],
+     "a\\b", "C:/x", "secrets/k", "", "memory.", "memory ", "ledger/con", "ledger/nul.txt",
+     "led\x01ger"],
 )
 def test_data_dir_rejects(raw: str) -> None:
     with pytest.raises(AppError):
@@ -98,13 +111,16 @@ def test_data_dir_rejects(raw: str) -> None:
 
 def test_data_dir_relations() -> None:
     assert normalize_data_dir("ledger/2026") == "ledger/2026"
+    assert normalize_data_dir("console/nulled") == "console/nulled"
     assert overlaps("ledger", "Ledger/x") and not overlaps("ledger", "ledgers")
     assert inside("ledger/main.beancount", "ledger") and not inside("ledger", "ledger")
 
 
 def test_entry_paths() -> None:
     check_entry_path("skills/ledger/SKILL.md")
-    for bad in ("../x", "a/./b", ".git/config", "a\\b", "c:x"):
+    check_entry_path("seed/ledger/main.beancount")
+    for bad in ("../x", "a/./b", ".git/config", "a\\b", "c:x",
+                ".GIT/config", ".git./x", "a/b ", "a/CON", "a/\x07b"):
         with pytest.raises(AppError):
             check_entry_path(bad)
 

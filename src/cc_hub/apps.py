@@ -74,16 +74,36 @@ def reserved_names() -> set[str]:
     return {name.casefold() for name in firsts | extra}
 
 
+_WINDOWS_DEVICE = re.compile(
+    r"\s*(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\s*(?:\.|\Z)", re.IGNORECASE
+)
+
+
+def _windows_unsafe(part: str) -> bool:
+    """True for a path part Windows would strip, refuse, or read as a device."""
+    return (
+        part.endswith((".", " "))
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in part)
+        or _WINDOWS_DEVICE.match(part) is not None
+    )
+
+
 def normalize_data_dir(raw: str) -> str:
     path = PurePosixPath(raw)
+    parts = raw.split("/")
     if (
         not raw
         or "\\" in raw
         or re.search(r'[:*?"<>|]', raw)
         or path.is_absolute()
-        or any(part in ("", ".", "..") for part in raw.split("/"))
+        or any(part in ("", ".", "..") for part in parts)
     ):
         raise AppError(f"data dir {raw!r}: use a relative path inside the hub, with / separators")
+    if any(_windows_unsafe(part) for part in parts):
+        raise AppError(
+            f"data dir {raw!r}: no part may end with a dot or space, hold a control "
+            "character, or be a Windows device name"
+        )
     first = path.parts[0]
     if first.startswith(".") or first.casefold() in reserved_names():
         raise AppError(f"data dir {raw!r}: {first!r} belongs to the hub itself")
@@ -107,8 +127,52 @@ def inside(rel: str, directory: str) -> bool:
 
 def check_entry_path(rel: str) -> None:
     parts = rel.split("/")
-    if "\\" in rel or ":" in rel or any(p in ("", ".", "..", ".git") for p in parts):
+    if (
+        "\\" in rel
+        or ":" in rel
+        or any(p in ("", ".", "..") or p.casefold() == ".git" for p in parts)
+        or any(_windows_unsafe(p) for p in parts)
+    ):
         raise AppError(f"unsafe path in the app: {rel!r}")
+
+
+PLATFORMS = ("linux", "macos", "windows")
+
+
+def _install(value: object, *, label: str, where: str) -> str | dict[str, str] | None:
+    if value is None:
+        return None
+    shape = f"{where}: {label}: install must be a non-empty string or a table"
+    if isinstance(value, str):
+        if not value.strip():
+            raise AppError(shape)
+        return value.strip()
+    if not isinstance(value, dict):
+        raise AppError(shape)
+    unknown = sorted(set(value) - set(PLATFORMS))
+    if unknown:
+        raise AppError(
+            f"{where}: {label}: install keys must be linux, macos or windows, not {unknown}"
+        )
+    for key, line in value.items():
+        if not isinstance(line, str) or not line.strip():
+            raise AppError(f"{where}: {label}: install.{key} must be a non-empty string")
+    return {key: line.strip() for key, line in value.items()}
+
+
+def _requirement(item: object, *, where: str, number: int) -> Requirement:
+    if not (
+        isinstance(item, dict)
+        and isinstance(item.get("name"), str)
+        and isinstance(item.get("bin"), str)
+    ):
+        raise AppError(f"{where}: every [[requires]] needs name and bin")
+    name, bin_ = item["name"].strip(), item["bin"].strip()
+    label = f"requirement {name!r}" if name else f"requirement #{number}"
+    for field_name, value in (("name", name), ("bin", bin_)):
+        if not value:
+            raise AppError(f"{where}: {label}: {field_name} must not be empty")
+    return Requirement(name, bin_, _install(item.get("install"), label=label, where=where))
 
 
 def parse_manifest(text: str, *, dirname: str) -> AppManifest:
@@ -129,21 +193,18 @@ def parse_manifest(text: str, *, dirname: str) -> AppManifest:
     min_hub = app.get("min_hub")
     if min_hub is not None:
         version_tuple(str(min_hub))
-    dirs = data.get("data", {}).get("dirs", [])
+    data_table = data.get("data", {})
+    if not isinstance(data_table, dict):
+        raise AppError(f"{where}: [data] must be a table")
+    dirs = data_table.get("dirs", [])
     if not isinstance(dirs, list) or not all(isinstance(d, str) for d in dirs):
         raise AppError(f"{where}: [data] dirs must be a list of paths")
-    requires = []
-    for item in data.get("requires", []):
-        if not (
-            isinstance(item, dict)
-            and isinstance(item.get("name"), str)
-            and isinstance(item.get("bin"), str)
-        ):
-            raise AppError(f"{where}: every [[requires]] needs name and bin")
-        install = item.get("install")
-        if install is not None and not isinstance(install, (str, dict)):
-            raise AppError(f"{where}: install of {item['name']} must be a string or a table")
-        requires.append(Requirement(item["name"], item["bin"], install))
+    raw_requires = data.get("requires", [])
+    if not isinstance(raw_requires, list):
+        raise AppError(f"{where}: [[requires]] must be a list of tables")
+    requires = [
+        _requirement(item, where=where, number=i) for i, item in enumerate(raw_requires, 1)
+    ]
     data_dirs = [normalize_data_dir(d) for d in dirs]
     for i, a in enumerate(data_dirs):
         for b in data_dirs[i + 1 :]:
