@@ -86,5 +86,8 @@ def test_apps_doc_covers_writing_and_publishing() -> None:
     assert "cc-hub app sync" in backup
     restore = backup.split("## Restore on another machine", 1)[1].split("\n## ", 1)[0]
     assert "core.sshCommand" in restore
+    # the clone itself needs the key, so the key goes into the clone command
+    assert 'git clone -c core.sshCommand="ssh -i ~/.ssh/cc-hub-backup' in restore
+    assert "repository-local git identity" in restore
     for readme in ("README.md", "README.zh-CN.md"):
         assert "apps.lock" in (ROOT / readme).read_text(encoding="utf-8"), readme

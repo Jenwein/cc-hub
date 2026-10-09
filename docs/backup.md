@@ -29,13 +29,19 @@ remote must be a **private** repository.
 
 ## Restore on another machine
 
-The new machine needs its own access to the repository: add a new deploy key with write access for it (as above), or use your own GitHub credentials. With a deploy key, set `core.sshCommand` in the cloned hub again, as in step 3 above.
+The clone itself needs access to the private repository. With your own GitHub
+credentials a plain `git clone git@github.com:you/my-hub.git ~/.cc-hub`
+works. With a deploy key, the new machine needs its own: create a key there
+and add it to the repository as in step 2 above (with write access if the
+machine will push), then clone with it:
 
-    git clone git@github.com:you/my-hub.git ~/.cc-hub
+    git clone -c core.sshCommand="ssh -i ~/.ssh/cc-hub-backup -o IdentitiesOnly=yes" git@github.com:you/my-hub.git ~/.cc-hub
     cc-hub app sync
 
-`cc-hub app sync` also sets a repository-local git identity when the machine
-has none, so the restored hub can commit.
+The `-c` option stores `core.sshCommand` in the cloned hub, so later pushes
+use the key too. `cc-hub app sync` restores the apps that `apps.lock` lists
+and also sets a repository-local git identity when the machine has none, so
+the restored hub can commit.
 
 Point cc-connect at the hub and send a message: the agent re-creates its
 pointers, registers the scheduled tasks on this machine and sets the apps up
