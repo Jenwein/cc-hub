@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from typer.testing import CliRunner
 from cc_hub.cli import app
 from cc_hub.commands.doctor import run_checks
 from cc_hub.commands.init import init_hub
+from cc_hub.commands.link import sync_skill_links
 
 NO_AGENTS = dict(which=lambda name: None)
 CHECK_IDS = [
@@ -20,7 +22,6 @@ CHECK_IDS = [
     "memory-budget:USER.md",
     "memory-files",
     "pointers",
-    "link-stale",
     "nested-git",
 ]
 
@@ -71,24 +72,34 @@ def test_runtime_not_set_up_here_is_not_a_warning(hub: Path, tmp_path: Path) -> 
 def test_claude_pointers(hub: Path, tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".claude").mkdir(parents=True)
-    (hub / ".claude" / "skills").mkdir(parents=True)
-    assert _pointer(hub, home, "claude").status == "ok"  # AGENTS.md is read natively
+    sync_skill_links(hub, hub / ".claude" / "skills")
+    check = _pointer(hub, home, "claude")
+    assert check.status == "warn" and "CLAUDE.md missing" in check.message
     (hub / "CLAUDE.md").write_text("# my notes\n", encoding="utf-8")
     check = _pointer(hub, home, "claude")
     assert check.status == "warn" and "@AGENTS.md" in check.message
-    (hub / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    (hub / "CLAUDE.md").write_text("@AGENTS.md\n\n- a note from /memory add\n", encoding="utf-8")
     assert _pointer(hub, home, "claude").status == "ok"
-    (hub / ".claude" / "skills").rmdir()
-    check = _pointer(hub, home, "claude")
-    assert check.status == "warn" and ".claude/skills" in check.message
 
 
-def test_codex_pointers(hub: Path, tmp_path: Path) -> None:
+def test_skill_links_are_checked_per_skill(hub: Path, tmp_path: Path) -> None:
     home = tmp_path / "home"
     (home / ".codex").mkdir(parents=True)
-    (hub / ".agents" / "skills").mkdir(parents=True)
+    target = hub / ".agents" / "skills"
+    target.mkdir(parents=True)
     check = _pointer(hub, home, "codex")
-    assert check.status == "ok" and "not set up" not in check.message
+    assert check.status == "warn"
+    assert "not linked: hub-adapt, hub-memory" in check.message
+    assert "hub-adapt" in check.fix
+    sync_skill_links(hub, target)
+    assert _pointer(hub, home, "codex").status == "ok"
+    mine = hub / "skills" / "mine"
+    mine.mkdir()
+    (mine / "SKILL.md").write_text("---\nname: mine\n---\n", encoding="utf-8")
+    assert "not linked: mine" in _pointer(hub, home, "codex").message
+    sync_skill_links(hub, target)
+    shutil.rmtree(mine)
+    assert "dangling: mine" in _pointer(hub, home, "codex").message
 
 
 def test_fix_recreates_missing_user_file_but_not_framework_file(hub: Path, tmp_path: Path) -> None:

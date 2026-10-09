@@ -16,9 +16,9 @@ from rich.table import Table
 
 from cc_hub import __version__, manifest
 from cc_hub.commands.init import enclosing_git_repo
+from cc_hub.commands.link import inspect_skill_links
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import load_config
-from cc_hub.platform import COPY_MARKER
 
 Which = Callable[[str], "str | None"]
 
@@ -33,18 +33,12 @@ class Check:
 
 DATE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 AGENT_MARKERS = {"claude": ("claude", ".claude"), "codex": ("codex", ".codex")}
-# agent -> [(relative path, "exists" | "if-present-contains", needle)]
-# A CLAUDE.md is optional (Claude Code reads AGENTS.md when there is none), but
-# one without the import would shadow AGENTS.md.
-POINTER_RULES: dict[str, list[tuple[str, str, str]]] = {
-    "claude": [
-        (".claude/skills", "exists", ""),
-        ("CLAUDE.md", "if-present-contains", "@AGENTS.md"),
-    ],
-    "codex": [
-        (".agents/skills", "exists", ""),
-    ],
+# agent -> (instruction file that must import AGENTS.md, or None; skills directory)
+POINTERS: dict[str, tuple[str | None, str]] = {
+    "claude": ("CLAUDE.md", ".claude/skills"),
+    "codex": (None, ".agents/skills"),
 }
+IMPORT_LINE = "@AGENTS.md"
 _READ_ERRORS = (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError)
 
 
@@ -181,29 +175,30 @@ def run_checks(
     if not agents:
         checks.append(_ok("pointers", "no agent runtimes detected on this machine"))
     for agent in agents:
-        rules = POINTER_RULES[agent]
-        if not any((hub / rel).exists() for rel, _, _ in rules):
+        instructions, skills_dir = POINTERS[agent]
+        if not any((hub / rel).exists() for rel in (instructions, skills_dir) if rel):
             checks.append(_ok(
                 f"pointers:{agent}",
                 "not set up here; the hub-adapt skill does it when this runtime runs here",
             ))
             continue
         problems = []
-        for rel, kind, needle in rules:
-            p = hub / rel
-            if not p.exists():
-                if kind == "exists":
-                    problems.append(f"{rel} missing")
-                continue
-            if kind == "exists":
-                continue
+        if instructions:
+            p = hub / instructions
             try:
-                found = needle in read_text(p)
+                if not p.is_file():
+                    problems.append(f"{instructions} missing")
+                elif IMPORT_LINE not in read_text(p):
+                    problems.append(f"{instructions} lacks '{IMPORT_LINE}' and hides AGENTS.md")
             except _READ_ERRORS as exc:
-                problems.append(f"{rel} unreadable: {exc}")
-                continue
-            if not found:
-                problems.append(f"{rel} lacks '{needle}' and hides AGENTS.md")
+                problems.append(f"{instructions} unreadable: {exc}")
+        links = inspect_skill_links(hub, hub / skills_dir)
+        if links.missing or links.blocked:
+            problems.append(
+                f"{skills_dir} not linked: " + ", ".join(sorted(links.missing + links.blocked))
+            )
+        if links.dangling:
+            problems.append(f"{skills_dir} dangling: " + ", ".join(links.dangling))
         if problems:
             checks.append(
                 Check(
@@ -215,26 +210,6 @@ def run_checks(
             )
         else:
             checks.append(_ok(f"pointers:{agent}", "pointers present"))
-
-    # link-stale
-    skills = hub / "skills"
-    src_mtime = max((p.stat().st_mtime for p in skills.rglob("*") if p.is_file()), default=0.0)
-    stale = [
-        str(m.parent.relative_to(hub))
-        for m in hub.glob(f".*/skills/{COPY_MARKER}")
-        if m.stat().st_mtime < src_mtime
-    ]
-    if stale:
-        checks.append(
-            Check(
-                "link-stale",
-                "warn",
-                "stale copies: " + ", ".join(stale),
-                "re-run the hub-adapt skill (cc-hub link)",
-            )
-        )
-    else:
-        checks.append(_ok("link-stale", "no stale copies"))
 
     # nested-git
     repo = enclosing_git_repo(hub.parent)
