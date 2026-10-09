@@ -1,0 +1,121 @@
+# -*- coding: utf-8 -*-
+import pytest
+
+from cc_hub.apps import (
+    AppError,
+    Requirement,
+    check_entry_path,
+    check_name,
+    inside,
+    normalize_data_dir,
+    overlaps,
+    parse_cron,
+    parse_manifest,
+    version_tuple,
+)
+
+GOOD = """
+[app]
+name = "ledger"
+version = "0.1.0"
+description = "Bookkeeping"
+min_hub = "0.4"
+issues = "https://github.com/you/my-apps/issues"
+
+[data]
+dirs = ["ledger", "reports/ledger"]
+
+[[requires]]
+name = "beancount"
+bin = "bean-check"
+install = "uv tool install beancount"
+
+[[requires]]
+name = "hledger"
+bin = "hledger"
+
+[requires.install]
+linux = "sudo apt install hledger"
+macos = "brew install hledger"
+"""
+
+HEAD = '[app]\nname = "ledger"\nversion = "1"\ndescription = "d"\n'
+
+
+def test_parse_manifest_reads_every_field() -> None:
+    m = parse_manifest(GOOD, dirname="ledger")
+    assert (m.name, m.version, m.description, m.min_hub) == (
+        "ledger", "0.1.0", "Bookkeeping", "0.4",
+    )
+    assert m.issues == "https://github.com/you/my-apps/issues"
+    assert m.data_dirs == ["ledger", "reports/ledger"]
+    assert m.requires[0] == Requirement("beancount", "bean-check", "uv tool install beancount")
+    assert m.requires[0].install_line("windows") == "uv tool install beancount"
+    assert m.requires[1].install_line("linux") == "sudo apt install hledger"
+    assert m.requires[1].install_line("windows") is None
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("[app\n", "app.toml"),
+        ('[app]\nname = "ledger"\nversion = "1"\n', "description is required"),
+        (HEAD.replace('"ledger"', '"other"'), "directory name"),
+        (HEAD + 'min_hub = "next"\n', "version"),
+        (HEAD + '[[requires]]\nname = "x"\n', "name and bin"),
+        (HEAD + '[data]\ndirs = ["a", "a/b"]\n', "overlap"),
+        (HEAD + '[data]\ndirs = ["memory"]\n', "belongs to the hub"),
+    ],
+)
+def test_parse_manifest_rejects(text: str, message: str) -> None:
+    with pytest.raises(AppError, match=message):
+        parse_manifest(text, dirname="ledger")
+
+
+def test_names() -> None:
+    assert check_name("hub-apps", "tap name") == "hub-apps"
+    for bad in ("Ledger", "-x", "a_b", "x" * 65, ""):
+        with pytest.raises(AppError):
+            check_name(bad, "app name")
+    with pytest.raises(AppError, match="hub-"):
+        check_name("hub-ledger", "skill name", skill=True)
+
+
+def test_versions() -> None:
+    assert version_tuple("0.4") == (0, 4, 0)
+    assert version_tuple("1.2.3") > version_tuple("1.2")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["memory", "Skills/x", ".secret", "apps", "apps.lock", "USER.md", "/abs", "a/../b",
+     "a\\b", "C:/x", "secrets/k", ""],
+)
+def test_data_dir_rejects(raw: str) -> None:
+    with pytest.raises(AppError):
+        normalize_data_dir(raw)
+
+
+def test_data_dir_relations() -> None:
+    assert normalize_data_dir("ledger/2026") == "ledger/2026"
+    assert overlaps("ledger", "Ledger/x") and not overlaps("ledger", "ledgers")
+    assert inside("ledger/main.beancount", "ledger") and not inside("ledger", "ledger")
+
+
+def test_entry_paths() -> None:
+    check_entry_path("skills/ledger/SKILL.md")
+    for bad in ("../x", "a/./b", ".git/config", "a\\b", "c:x"):
+        with pytest.raises(AppError):
+            check_entry_path(bad)
+
+
+def test_parse_cron() -> None:
+    text = (
+        '---\nschedule: "0 9 1 * *"  # monthly\ndefault: true\nsession: new_per_run\n---\n'
+        "Summarise.\n"
+    )
+    assert parse_cron(text, where="x") == {
+        "schedule": "0 9 1 * *", "default": True, "session": "new_per_run",
+    }
+    with pytest.raises(AppError):
+        parse_cron("no frontmatter", where="x")
