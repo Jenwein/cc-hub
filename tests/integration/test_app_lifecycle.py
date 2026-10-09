@@ -268,3 +268,31 @@ def test_an_ssh_tap_url_without_a_password_is_allowed(
         with pytest.raises(taps.TapError, match="stop here"):
             apps.add_tap(hub, url, name="over-ssh")
     assert cloned == ["git@github.com:a/b.git", "ssh://git@github.com/a/b.git"]
+
+
+def test_a_tap_clone_without_git_is_cloned_again(git_hub: Path, ledger_tap: Path) -> None:
+    from cc_hub.platform import rmtree
+
+    apps.add_tap(git_hub, ledger_tap.as_uri(), name="my-apps")
+    clone = git_hub / ".cc-hub" / "taps" / "my-apps"
+    for fetch in (True, False):
+        rmtree(clone / ".git")  # git would now walk up to the hub's own repository
+        plan = apps.plan_install(git_hub, "my-apps/ledger", fetch=fetch)
+        assert plan.manifest.name == "ledger"
+        assert (clone / ".git").exists()
+    assert git(clone, "rev-parse", "--show-toplevel").strip() != git(
+        git_hub, "rev-parse", "--show-toplevel"
+    ).strip()
+
+
+def test_sync_clones_a_tap_without_git_again(git_hub: Path, ledger_tap: Path) -> None:
+    from cc_hub.platform import rmtree
+
+    installed(git_hub, ledger_tap)
+    clone = git_hub / ".cc-hub" / "taps" / "my-apps"
+    rmtree(clone / ".git")
+    rmtree(git_hub / "apps" / "ledger")
+    report = apps.sync(git_hub)
+    assert report.restored == ["ledger"] and report.failed == []
+    assert (clone / ".git").exists()
+    assert (git_hub / "apps" / "ledger" / "SETUP.md").is_file()

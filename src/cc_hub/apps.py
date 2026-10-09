@@ -295,6 +295,7 @@ class GitSource:
         return taps.read_blob(self.repo, self._sha[rel])
 
     def validate(self) -> None:
+        seen: dict[str, str] = {}
         for e in self.entries:
             if e.kind != "blob" or e.mode == "120000":
                 raise AppError(
@@ -302,6 +303,12 @@ class GitSource:
                     "(no symlinks or submodules)"
                 )
             check_entry_path(e.path)
+            other = seen.setdefault(e.path.casefold(), e.path)
+            if other != e.path:
+                raise AppError(
+                    f"{self.app}: {other!r} and {e.path!r} differ only in case; "
+                    "they would overwrite each other on Windows and macOS"
+                )
 
     def write_to(self, dest: Path) -> None:
         for e in self.entries:
@@ -428,7 +435,7 @@ def tap_source(
         raise AppError(f"no tap named {tap!r}; add it with `cc-hub tap add`")
     repo = taps.repo_path(hub, tap, entry)
     if "url" in entry:
-        if not repo.exists():
+        if not taps.is_clone(repo):
             taps.clone(entry["url"], repo)
         elif fetch:
             taps.fetch(repo, entry["url"])
@@ -963,7 +970,7 @@ def _restore(hub: Path, lock: Lock, name: str, entry: dict, dest: Path) -> None:
         raise AppError(f"tap {entry.get('tap')!r} is not registered")
     repo = taps.repo_path(hub, entry["tap"], tap_entry)
     if "url" in tap_entry:
-        if not repo.exists():
+        if not taps.is_clone(repo):
             taps.clone(tap_entry["url"], repo)
         elif not taps.has_commit(repo, entry["commit"]):
             taps.fetch(repo, tap_entry["url"])

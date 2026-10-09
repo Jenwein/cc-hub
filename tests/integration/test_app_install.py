@@ -253,3 +253,40 @@ def test_seeding_refuses_a_data_dir_that_resolves_elsewhere(
     assert not os.path.lexists(tapped / "apps" / "ledger")
     assert "ledger" not in load_lock(tapped).apps
     assert not (tapped / "ledger" / "main.beancount").exists()
+
+
+def _tap_with_names_differing_in_case(root: Path) -> None:
+    """Commit two files that differ only in case without touching the file system."""
+
+    def git(*args: str, data: str | None = None) -> str:
+        # bytes in and out: text mode would end the input lines with CRLF on Windows
+        return subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, check=True,
+            input=data.encode("utf-8") if data is not None else None,
+        ).stdout.decode("utf-8").strip()
+
+    toml = (
+        '[app]\nname = "notes"\nversion = "0.1.0"\ndescription = "Notes"\n'
+    )
+    blobs = {
+        name: git("hash-object", "-w", "--stdin", data=text)
+        for name, text in (("app.toml", toml), ("Notes.md", "one\n"), ("notes.md", "two\n"))
+    }
+    app_tree = git("mktree", data="".join(
+        f"100644 blob {sha}\t{name}\n" for name, sha in blobs.items()
+    ))
+    root_tree = git("mktree", data=f"040000 tree {app_tree}\tnotes\n")
+    commit = git("commit-tree", root_tree, "-m", "case clash")
+    git("update-ref", "HEAD", commit)
+
+
+def test_two_files_differing_only_in_case_are_refused(
+    hub: Path, tmp_path: Path, git_env: Path, register_tap
+) -> None:
+    root = tmp_path / "taps" / "clash"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    _tap_with_names_differing_in_case(root)
+    register_tap(hub, "clash", root)
+    with pytest.raises(apps.AppError, match="'Notes.md' and 'notes.md'.*differ only in case"):
+        apps.plan_install(hub, "clash/notes")

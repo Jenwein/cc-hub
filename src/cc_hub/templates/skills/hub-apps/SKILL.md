@@ -37,9 +37,12 @@ fresh clone of the hub), run `cc-hub app sync` first.
    `cc-hub app setup-state <name> waiting --note "<what is left>"` and stop.
 2. **App steps.** Follow `apps/<name>/SETUP.md` if it exists. Personal
    settings go into the app's data directory, never into `apps/`.
-3. **Scheduled tasks.** Run `cc-connect cron list`. For every
-   `apps/<name>/cron/<task>.md` with `default: true` whose
-   `hub:<name>/<task>` is not listed, run:
+3. **Scheduled tasks.** Run `cc-connect cron list`. A registered
+   `hub:<name>/<task>` whose schedule or prompt differs from
+   `apps/<name>/cron/<task>.md`, or whose file no longer exists, is deleted
+   with `cc-connect cron del <id>`, and added again when the file exists and
+   has `default: true`. Then, for every `apps/<name>/cron/<task>.md` with
+   `default: true` whose `hub:<name>/<task>` is not listed, run:
 
        cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>/<task>"
 

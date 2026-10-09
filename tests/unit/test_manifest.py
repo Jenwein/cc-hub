@@ -213,3 +213,12 @@ def test_agents_md_undo_recipe_restores_the_version_before_the_change() -> None:
     assert "where `<commit>` is the change to undo" in text
     assert "--source <commit> --" not in text
 
+
+
+def test_hub_apps_setup_replaces_stale_scheduled_tasks() -> None:
+    skill = manifest.render("skills/hub-apps/SKILL.md")
+    setup = " ".join(skill.split("## Set up", 1)[1].split("\n## ", 1)[0].split())
+    assert "whose schedule or prompt differs from `apps/<name>/cron/<task>.md`" in setup
+    assert "or whose file no longer exists" in setup
+    assert "is deleted with `cc-connect cron del <id>`" in setup
+    assert "added again when the file exists and has `default: true`" in setup

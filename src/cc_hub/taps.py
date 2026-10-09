@@ -89,6 +89,12 @@ def repo_path(hub: Path, name: str, entry: dict) -> Path:
     return from_tilde(entry["path"]) if "path" in entry else clone_dir(hub, name)
 
 
+def is_clone(repo: Path) -> bool:
+    """A usable clone has its own .git; a directory without one would make git walk up to
+    the hub's repository."""
+    return (Path(repo) / ".git").exists()
+
+
 def default_ref(entry: dict) -> str:
     return "HEAD" if "path" in entry else "origin/HEAD"
 
