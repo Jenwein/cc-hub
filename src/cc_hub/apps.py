@@ -20,7 +20,15 @@ from pathlib import Path, PurePosixPath
 import tomli_w
 
 from cc_hub import __version__, gitops, manifest, taps
-from cc_hub.applock import LOCK_FILE, Lock, LockError, load_lock, save_lock, to_tilde
+from cc_hub.applock import (
+    LOCK_FILE,
+    Lock,
+    LockError,
+    from_tilde,
+    load_lock,
+    save_lock,
+    to_tilde,
+)
 from cc_hub.commands.link import POINTERS, sync_skill_links
 from cc_hub.encoding import read_text, write_text
 from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link, rmtree
@@ -668,3 +676,287 @@ def app_statuses(hub: Path, *, which=shutil.which) -> list[AppStatus]:
             missing, _update_available(hub, lock, name, entry), min_ok,
         ))
     return rows
+
+
+def add_tap(
+    hub: Path, source: str, *, name: str | None = None, cwd: Path | None = None
+) -> tuple[str, dict, int, str | None]:
+    entry = taps.normalize_source(source, cwd=cwd)
+    name = check_name(name or taps.default_name(entry), "tap name")
+    hub = Path(hub)
+    with hub_lock(hub):
+        lock = load_lock(hub)
+        if name in lock.taps:
+            raise AppError(f"a tap named {name!r} is already registered")
+        repo = taps.repo_path(hub, name, entry)
+        if "url" in entry:
+            taps.clone(entry["url"], repo)
+        head = taps.resolve(repo, taps.default_ref(entry), remote="url" in entry)
+        count = len(taps.list_apps(repo, head))
+        lock.taps[name] = entry
+        save_lock(hub, lock)
+        warning = gitops.commit_paths(hub, [LOCK_FILE], f"cc-hub: tap add {name}")
+    return name, entry, count, warning
+
+
+def remove_tap(hub: Path, name: str) -> str | None:
+    hub = Path(hub)
+    with hub_lock(hub):
+        lock = load_lock(hub)
+        if name not in lock.taps:
+            raise AppError(f"no tap named {name!r}")
+        users = sorted(a for a, e in lock.apps.items() if e.get("tap") == name)
+        if users:
+            raise AppError(f"apps installed from {name}: {', '.join(users)}; remove them first")
+        entry = lock.taps.pop(name)
+        clone = taps.clone_dir(hub, name)
+        if "url" in entry and clone.exists():
+            rmtree(clone)
+        save_lock(hub, lock)
+        return gitops.commit_paths(hub, [LOCK_FILE], f"cc-hub: tap remove {name}")
+
+
+def tap_infos(hub: Path) -> list[dict]:
+    lock = load_lock(hub)
+    rows = []
+    for name, entry in sorted(lock.taps.items()):
+        repo = taps.repo_path(hub, name, entry)
+        try:
+            head = taps.resolve(repo, taps.default_ref(entry), remote="url" in entry)
+            count = len(taps.list_apps(repo, head))
+        except (taps.TapError, gitops.GitError, OSError):
+            count = 0
+        rows.append({"name": name, "source": taps.describe(entry), "apps": count})
+    return rows
+
+
+def search_apps(hub: Path, words: str = "") -> list[dict]:
+    lock = load_lock(hub)
+    needle = words.casefold().strip()
+    rows = []
+    for tap, entry in sorted(lock.taps.items()):
+        repo = taps.repo_path(hub, tap, entry)
+        try:
+            commit = taps.resolve(repo, taps.default_ref(entry), remote="url" in entry)
+            names = taps.list_apps(repo, commit)
+        except (taps.TapError, gitops.GitError, OSError):
+            continue
+        for app in names:
+            try:
+                text = taps.read_blob(repo, f"{commit}:{app}/app.toml").decode("utf-8")
+                m = parse_manifest(text, dirname=app)
+            except (AppError, gitops.GitError, UnicodeDecodeError):
+                continue
+            if needle and needle not in f"{app} {m.description}".casefold():
+                continue
+            rows.append({
+                "app": f"{tap}/{app}", "version": m.version,
+                "description": m.description, "installed": app in lock.apps,
+            })
+    return rows
+
+
+STEERING = ("app.toml", "SETUP.md", "REMOVE.md")
+STEERING_DIRS = ("skills/", "scripts/", "cron/")
+
+
+@dataclass
+class UpdatePreview:
+    name: str
+    old: str
+    new: str
+    changed: list[tuple[str, str]]
+    diff: str
+    new_requires: list[str]
+    local_changes: list[str]
+    history_missing: bool
+    plan: AppPlan
+
+
+def local_changes(hub: Path, name: str, repo: Path, commit: str) -> list[str]:
+    """Files under apps/<name>/ that differ from the app at `commit`."""
+    app_dir = Path(hub) / "apps" / name
+    expected = {e.path: e.sha for e in taps.ls_app(repo, commit, name)}
+    actual = {p.relative_to(app_dir).as_posix(): p for p in app_dir.rglob("*") if p.is_file()}
+    changed = {
+        rel for rel, sha in expected.items()
+        if rel not in actual or taps.blob_sha(actual[rel].read_bytes()) != sha
+    }
+    return sorted(changed | (set(actual) - set(expected)))
+
+
+def preview_update(
+    hub: Path, name: str, *, ref: str | None = None, fetch: bool = True
+) -> UpdatePreview | None:
+    """What `app update` would change, changing nothing; None for a linked app."""
+    hub = Path(hub)
+    lock = load_lock(hub)
+    entry = lock.apps.get(name)
+    if entry is None:
+        raise AppError(f"{name} is not installed")
+    if "link" in entry:
+        return None
+    source = tap_source(hub, lock, entry["tap"], name, ref, fetch=fetch)
+    plan = build_plan(hub, lock, source, replacing=name)
+    old, new = entry["commit"], source.commit
+    current = read_installed(hub, name)
+    old_requires = {r.name for r in current.requires} if current else set()
+    history = taps.has_commit(source.repo, old)
+    if history:
+        changed = taps.changed_files(source.repo, old, new, name)
+        steering = [p for _, p in changed if p in STEERING or p.startswith(STEERING_DIRS)]
+        diff = taps.diff_text(source.repo, old, new, name, steering)
+        app_dir = hub / "apps" / name
+        local = local_changes(hub, name, source.repo, old) if app_dir.is_dir() else []
+    else:
+        changed, diff, local = [("A", p) for p in source.paths()], "", []
+    new_requires = [r.name for r in plan.manifest.requires if r.name not in old_requires]
+    return UpdatePreview(name, old, new, changed, diff, new_requires, local, not history, plan)
+
+
+def apply_update(hub: Path, preview: UpdatePreview) -> InstallResult:
+    hub = Path(hub)
+    name, plan = preview.name, preview.plan
+    with hub_lock(hub):
+        lock = load_lock(hub)
+        entry = lock.apps.get(name)
+        if entry is None or entry.get("commit") != preview.old:
+            raise AppError(
+                f"{name} changed since the preview; run `cc-hub app update {name}` again"
+            )
+        app_dir = hub / "apps" / name
+        backup = hub / ".cc-hub" / "backups" / "apps" / name / preview.old[:7]
+        try:
+            if backup.exists():
+                rmtree(backup)
+            if app_dir.exists():
+                shutil.copytree(app_dir, backup)
+        except OSError as exc:
+            raise AppError(f"backup failed, nothing was changed: {exc}") from exc
+        seed_dir = app_dir / "seed"
+        old_seed = (
+            {p.relative_to(seed_dir).as_posix() for p in seed_dir.rglob("*") if p.is_file()}
+            if seed_dir.is_dir() else set()
+        )
+        retired = _staging(hub, f"{name}-old")
+        if app_dir.exists():
+            os.rename(app_dir, retired)
+        try:
+            _materialize(hub, plan.source, app_dir)
+        except BaseException:
+            if retired.exists():
+                os.rename(retired, app_dir)
+            raise
+        if retired.exists():
+            rmtree(retired)
+        seeded = _seed(hub, plan, only=set(plan.seed) - old_seed)
+        entry.update(commit=preview.new, version=plan.manifest.version)
+        save_lock(hub, lock)
+        warnings = relink(hub)
+        warning = gitops.commit_paths(
+            hub, [LOCK_FILE, *seeded],
+            f"cc-hub: app update {name} ({preview.old[:7]}..{preview.new[:7]})",
+        )
+    return InstallResult(
+        name, plan.manifest.version, plan.source.describe(), seeded,
+        missing_requirements(plan.manifest), warnings + ([warning] if warning else []),
+    )
+
+
+@dataclass
+class RemovePlan:
+    name: str
+    linked: bool
+    data_dirs: list[str]
+    cron_tasks: list[str]
+    software: list[Requirement]
+    remove_md: str
+
+
+def plan_remove(hub: Path, name: str) -> RemovePlan:
+    hub = Path(hub)
+    entry = load_lock(hub).apps.get(name)
+    if entry is None:
+        raise AppError(f"{name} is not installed")
+    app_dir = hub / "apps" / name
+    m = read_installed(hub, name)
+    cron = app_dir / "cron"
+    tasks = sorted(p.stem for p in cron.glob("*.md")) if cron.is_dir() else []
+    remove_md = app_dir / "REMOVE.md"
+    return RemovePlan(
+        name, "link" in entry, m.data_dirs if m else [], [f"hub:{name}/{t}" for t in tasks],
+        m.requires if m else [], read_text(remove_md) if remove_md.is_file() else "",
+    )
+
+
+def apply_remove(hub: Path, name: str) -> list[str]:
+    hub = Path(hub)
+    with hub_lock(hub):
+        lock = load_lock(hub)
+        if lock.apps.pop(name, None) is None:
+            raise AppError(f"{name} is not installed")
+        app_dir = hub / "apps" / name
+        if is_link(app_dir):
+            remove_link(app_dir)
+        elif app_dir.exists():
+            rmtree(app_dir)
+        save_lock(hub, lock)
+        states = load_state(hub)
+        if states.pop(name, None) is not None:
+            save_state(hub, states)
+        warnings = relink(hub)
+        warning = gitops.commit_paths(hub, [LOCK_FILE], f"cc-hub: app remove {name}")
+    return warnings + ([warning] if warning else [])
+
+
+@dataclass
+class SyncReport:
+    restored: list[str] = field(default_factory=list)
+    present: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+    strays: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def _restore(hub: Path, lock: Lock, name: str, entry: dict, dest: Path) -> None:
+    if "link" in entry:
+        src = from_tilde(entry["link"])
+        if not src.is_dir():
+            raise AppError(f"link source {entry['link']} does not exist on this machine")
+        link_dir(src, dest)
+        return
+    tap_entry = lock.taps.get(entry.get("tap", ""))
+    if tap_entry is None:
+        raise AppError(f"tap {entry.get('tap')!r} is not registered")
+    repo = taps.repo_path(hub, entry["tap"], tap_entry)
+    if "url" in tap_entry:
+        if not repo.exists():
+            taps.clone(tap_entry["url"], repo)
+        elif not taps.has_commit(repo, entry["commit"]):
+            taps.fetch(repo, tap_entry["url"])
+    if not taps.has_commit(repo, entry["commit"]):
+        raise AppError(f"commit {entry['commit'][:7]} is no longer in tap {entry['tap']}")
+    _materialize(hub, GitSource(entry["tap"], repo, entry["commit"], name), dest)
+
+
+def sync(hub: Path) -> SyncReport:
+    """Make apps/ match apps.lock: restore what is missing, upgrade nothing."""
+    hub = Path(hub)
+    report = SyncReport()
+    with hub_lock(hub):
+        lock = load_lock(hub)
+        apps_dir = hub / "apps"
+        apps_dir.mkdir(exist_ok=True)
+        for name, entry in sorted(lock.apps.items()):
+            dest = apps_dir / name
+            if os.path.lexists(dest):
+                report.present.append(name)
+                continue
+            try:
+                _restore(hub, lock, name, entry, dest)
+                report.restored.append(name)
+            except HUB_ERRORS as exc:
+                report.failed.append((name, str(exc)))
+        report.strays = sorted(p.name for p in apps_dir.iterdir() if p.name not in lock.apps)
+        report.warnings = relink(hub)
+    return report
