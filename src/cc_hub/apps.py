@@ -23,7 +23,7 @@ from cc_hub import __version__, gitops, manifest, taps
 from cc_hub.applock import LOCK_FILE, Lock, LockError, load_lock, save_lock, to_tilde
 from cc_hub.commands.link import POINTERS, sync_skill_links
 from cc_hub.encoding import read_text, write_text
-from cc_hub.platform import LinkError, is_windows, link_dir, rmtree
+from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link, rmtree
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 VERSION = re.compile(r"^\d+(?:\.\d+){0,2}$")
@@ -388,7 +388,11 @@ def build_plan(hub: Path, lock: Lock, source, *, replacing: str | None = None) -
         if re.fullmatch(r"cron/[^/]+\.md", p):
             task = p[len("cron/") : -len(".md")]
             check_name(task, "cron task")
-            crons[task] = parse_cron(source.read(p).decode("utf-8"), where=f"{m.name}/{p}")
+            try:
+                cron_text = source.read(p).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise AppError(f"{m.name}/{p} is not UTF-8") from exc
+            crons[task] = parse_cron(cron_text, where=f"{m.name}/{p}")
     scripts = [p for p in paths if p.startswith("scripts/")]
     return AppPlan(
         m, source, skills, crons, scripts, seed, "SETUP.md" in paths, "REMOVE.md" in paths
@@ -518,6 +522,17 @@ def missing_requirements(m: AppManifest, which=shutil.which) -> list[Requirement
     return [r for r in m.requires if which(r.bin) is None]
 
 
+def _discard(dest: Path) -> None:
+    """Remove an app directory (or only the link to a linked one); never hides the real error."""
+    try:
+        if is_link(dest):
+            remove_link(dest)
+        elif os.path.lexists(dest):
+            rmtree(dest)
+    except (OSError, LinkError):
+        pass
+
+
 def install(hub: Path, plan: AppPlan) -> InstallResult:
     hub = Path(hub)
     m, source = plan.manifest, plan.source
@@ -531,12 +546,17 @@ def install(hub: Path, plan: AppPlan) -> InstallResult:
         dest.parent.mkdir(exist_ok=True)
         if isinstance(source, DirSource):
             link_dir(source.root, dest)
-            lock.apps[m.name] = {"link": to_tilde(source.root), "version": m.version}
+            entry = {"link": to_tilde(source.root), "version": m.version}
         else:
             _materialize(hub, source, dest)
-            lock.apps[m.name] = {"tap": source.tap, "commit": source.commit, "version": m.version}
-        seeded = _seed(hub, plan)
-        save_lock(hub, lock)
+            entry = {"tap": source.tap, "commit": source.commit, "version": m.version}
+        try:
+            lock.apps[m.name] = entry
+            seeded = _seed(hub, plan)
+            save_lock(hub, lock)
+        except BaseException:
+            _discard(dest)  # no half-installed app; seeded data files stay, they are data
+            raise
         warnings = relink(hub)
         warning = gitops.commit_paths(
             hub, [LOCK_FILE, *seeded], f"cc-hub: app install {m.name} ({source.describe()})"
@@ -591,10 +611,12 @@ def set_setup_state(hub: Path, name: str, state: str, note: str = "") -> None:
         raise AppError("state must be done or waiting")
     if name not in load_lock(hub).apps:
         raise AppError(f"{name} is not installed")
+    try:
+        current = fingerprint(Path(hub) / "apps" / name)
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise AppError(f"{name}: cannot read the installed app: {exc}") from exc
     states = load_state(hub)
-    states[name] = {
-        "state": state, "note": note, "fingerprint": fingerprint(Path(hub) / "apps" / name),
-    }
+    states[name] = {"state": state, "note": note, "fingerprint": current}
     save_state(hub, states)
 
 

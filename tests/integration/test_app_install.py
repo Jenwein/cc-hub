@@ -170,3 +170,52 @@ def test_install_commits_the_lock_and_the_seeds(git_hub: Path, ledger_tap: Path,
     ).stdout.split("\n")
     assert out[0] == f"cc-hub: app install ledger (my-apps@{plan.source.commit[:7]})"
     assert set(filter(None, out[1:])) == {"apps.lock", "ledger/main.beancount"}
+
+
+def test_a_failed_install_leaves_nothing_to_move_away(tapped: Path) -> None:
+    (tapped / "ledger").write_text("a file where the data dir should be", encoding="utf-8")
+    plan = apps.plan_install(tapped, "my-apps/ledger")
+    with pytest.raises((apps.AppError, OSError)):
+        apps.install(tapped, plan)
+    assert not os.path.lexists(tapped / "apps" / "ledger")
+    assert "ledger" not in load_lock(tapped).apps
+    (tapped / "ledger").unlink()
+    result = apps.install(tapped, apps.plan_install(tapped, "my-apps/ledger"))
+    assert result.name == "ledger"
+    assert (tapped / "apps" / "ledger" / "app.toml").is_file()
+    assert "ledger" in load_lock(tapped).apps
+
+
+def test_a_failed_link_install_removes_only_the_link(hub: Path, tmp_path: Path) -> None:
+    dev = tmp_path / "dev" / "notes"
+    dev.mkdir(parents=True)
+    (dev / "app.toml").write_text(
+        '[app]\nname = "notes"\nversion = "0.2.0"\ndescription = "Notes"\n\n'
+        '[data]\ndirs = ["notes-data"]\n',
+        encoding="utf-8",
+    )
+    (hub / "notes-data").write_text("in the way", encoding="utf-8")
+    plan = apps.plan_install(hub, str(dev), link=True)
+    with pytest.raises((apps.AppError, OSError)):
+        apps.install(hub, plan)
+    assert not os.path.lexists(hub / "apps" / "notes")
+    assert (dev / "app.toml").is_file()
+    assert "notes" not in load_lock(hub).apps
+
+
+def test_a_cron_file_that_is_not_utf8_is_an_app_error(hub: Path, make_tap, register_tap,
+                                                      tap_commit, ledger_files: dict) -> None:
+    root = make_tap("badcron", ledger_files)
+    (root / "ledger" / "cron" / "monthly.md").write_bytes(b"---\nschedule: \xff\xfe\n---\nx\n")
+    tap_commit(root, {})
+    register_tap(hub, "badcron", root)
+    with pytest.raises(apps.AppError, match="not UTF-8"):
+        apps.plan_install(hub, "badcron/ledger")
+
+
+def test_setup_state_of_a_broken_app_toml_is_an_app_error(tapped: Path) -> None:
+    apps.install(tapped, apps.plan_install(tapped, "my-apps/ledger"))
+    (tapped / "apps" / "ledger" / "app.toml").write_text("[app\n", encoding="utf-8")
+    assert apps.setup_status(tapped, "ledger") == ("pending", "")
+    with pytest.raises(apps.AppError, match="cannot read the installed app"):
+        apps.set_setup_state(tapped, "ledger", "done")
