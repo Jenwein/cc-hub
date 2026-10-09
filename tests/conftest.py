@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -42,3 +43,90 @@ def git_hub(tmp_path: Path, git_env: Path) -> Path:
     target = tmp_path / "中文 hub"
     init_hub(target, git=True)
     return target
+
+
+LEDGER_APP = {
+    "ledger/app.toml": (
+        '[app]\nname = "ledger"\nversion = "0.1.0"\ndescription = "Plain-text bookkeeping"\n\n'
+        '[data]\ndirs = ["ledger"]\n\n'
+        '[[requires]]\nname = "beancount"\nbin = "cc-hub-test-no-such-bin"\n'
+        'install = "uv tool install beancount"\n'
+    ),
+    "ledger/SETUP.md": "# Setup\n\nAsk the user for the currency.\n",
+    "ledger/skills/ledger/SKILL.md": (
+        "---\nname: ledger\ndescription: Record expenses.\n---\nRun bean-check after each change.\n"
+    ),
+    "ledger/cron/monthly.md": (
+        '---\nschedule: "0 9 1 * *"\ndefault: true\nsession: new_per_run\n---\n'
+        "Summarise last month.\n"
+    ),
+    "ledger/scripts/check.sh": "#!/bin/sh\nbean-check ledger/main.beancount\n",
+    "ledger/seed/ledger/main.beancount": 'option "title" "Ledger"\n',
+}
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True,
+        encoding="utf-8", check=True,
+    ).stdout
+
+
+def _write_and_commit(root: Path, files: dict[str, str], remove, message: str) -> str:
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+    for rel in remove:
+        (root / rel).unlink()
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", message)
+    return _git(root, "rev-parse", "HEAD").strip()
+
+
+@pytest.fixture
+def ledger_files() -> dict[str, str]:
+    return dict(LEDGER_APP)
+
+
+@pytest.fixture
+def make_tap(tmp_path: Path, git_env: Path):
+    """make_tap(name, {path: text}) -> a new git repository with one commit."""
+
+    def _make(name: str, files: dict[str, str]) -> Path:
+        root = tmp_path / "taps" / name
+        root.mkdir(parents=True)
+        _git(root, "init", "-q")
+        _write_and_commit(root, files, (), "initial")
+        return root
+
+    return _make
+
+
+@pytest.fixture
+def tap_commit(git_env: Path):
+    """tap_commit(root, {path: text}, remove=(...)) -> sha of the new commit."""
+
+    def _commit(root: Path, files: dict[str, str], remove=(), message: str = "change") -> str:
+        return _write_and_commit(root, files, remove, message)
+
+    return _commit
+
+
+@pytest.fixture
+def ledger_tap(make_tap, ledger_files) -> Path:
+    return make_tap("my-apps", {**ledger_files, "README.md": "Apps for tests.\n"})
+
+
+@pytest.fixture
+def register_tap():
+    """register_tap(hub, name, repo): add a local tap to apps.lock directly."""
+
+    def _register(hub: Path, name: str, repo: Path) -> None:
+        from cc_hub.applock import load_lock, save_lock
+
+        lock = load_lock(hub)
+        lock.taps[name] = {"path": str(repo)}
+        save_lock(hub, lock)
+
+    return _register
