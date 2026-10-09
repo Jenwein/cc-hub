@@ -152,6 +152,19 @@ def _print_preview(p: apps.UpdatePreview) -> None:
     typer.echo(f"  cc-hub app update {p.name} --ref {p.new} --yes")
 
 
+def _update_one(hub, name: str, ref: str | None, yes: bool) -> None:
+    preview = apps.preview_update(hub, name, ref=ref, fetch=not yes)
+    if preview is None:
+        typer.echo(f"{name}: linked from a local directory; nothing to update")
+    elif preview.old == preview.new or not (preview.changed or preview.history_missing):
+        # a tap holds many apps: a commit that leaves this app's files alone is no update
+        typer.echo(f"{name} is up to date ({preview.old[:7]})")
+    elif not yes:
+        _print_preview(preview)
+    else:
+        _report(apps.apply_update(hub, preview), hub, "updated")
+
+
 @app_app.command("update")
 def update_cmd(
     ctx: typer.Context,
@@ -168,18 +181,19 @@ def update_cmd(
         fail("--ref needs a single app")
     try:
         names = [name] if name else sorted(apps.load_lock(hub).apps)
-        for one in names:
-            preview = apps.preview_update(hub, one, ref=ref, fetch=not yes)
-            if preview is None:
-                typer.echo(f"{one}: linked from a local directory; nothing to update")
-            elif preview.old == preview.new:
-                typer.echo(f"{one} is up to date ({preview.old[:7]})")
-            elif not yes:
-                _print_preview(preview)
-            else:
-                _report(apps.apply_update(hub, preview), hub, "updated")
     except apps.HUB_ERRORS as exc:
         fail(exc)
+    failed = False
+    for one in names:
+        try:
+            _update_one(hub, one, ref, yes)
+        except apps.HUB_ERRORS as exc:
+            if not every:
+                fail(exc)
+            typer.echo(f"{one}: {exc}", err=True)
+            failed = True
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @app_app.command("remove")

@@ -68,3 +68,54 @@ def test_sync_exits_1_when_an_app_cannot_be_restored(hub: Path) -> None:
     r = run(hub, "app", "sync")
     assert r.exit_code == 1
     assert "failed\tghost" in r.output
+
+
+def test_update_ignores_tap_commits_that_do_not_touch_the_app(
+    hub: Path, ledger_tap: Path, tap_commit
+) -> None:
+    from cc_hub.applock import load_lock
+
+    assert run(hub, "tap", "add", ledger_tap.as_uri(), "--name", "my-apps").exit_code == 0
+    assert run(hub, "app", "install", "my-apps/ledger", "--yes").exit_code == 0
+    installed = load_lock(hub).apps["ledger"]["commit"]
+
+    tap_commit(ledger_tap, {"README.md": "only the readme\n"})
+    r = run(hub, "app", "update", "ledger")
+    assert r.exit_code == 0, r.output
+    assert f"ledger is up to date ({installed[:7]})" in r.output
+    assert "changed files:" not in r.output
+
+    r = run(hub, "app", "update", "ledger", "--yes")
+    assert r.exit_code == 0, r.output
+    assert f"ledger is up to date ({installed[:7]})" in r.output
+    assert "updated" not in r.output
+    assert load_lock(hub).apps["ledger"]["commit"] == installed
+    assert not (hub / ".cc-hub" / "backups" / "apps").exists()
+
+
+def test_update_all_continues_past_a_failing_app(
+    hub: Path, ledger_tap: Path, make_tap, tmp_path: Path
+) -> None:
+    from cc_hub.applock import load_lock, save_lock
+
+    agenda = make_tap(
+        "agenda-apps",
+        {"agenda/app.toml": '[app]\nname = "agenda"\nversion = "1.0.0"\ndescription = "Agenda"\n'},
+    )
+    assert run(hub, "tap", "add", ledger_tap.as_uri(), "--name", "my-apps").exit_code == 0
+    assert run(hub, "tap", "add", agenda.as_uri(), "--name", "agenda-apps").exit_code == 0
+    assert run(hub, "app", "install", "my-apps/ledger", "--yes").exit_code == 0
+    assert run(hub, "app", "install", "agenda-apps/agenda", "--yes").exit_code == 0
+
+    lock = load_lock(hub)
+    lock.taps["agenda-apps"] = {"path": str(tmp_path / "gone")}
+    save_lock(hub, lock)
+
+    r = run(hub, "app", "update", "--all")
+    assert r.exit_code == 1
+    assert "agenda: tap agenda-apps:" in r.output and "does not exist" in r.output
+    assert "ledger is up to date" in r.output
+
+    r = run(hub, "app", "update", "agenda")
+    assert r.exit_code == 1
+    assert "tap agenda-apps:" in r.output
