@@ -59,9 +59,9 @@ def test_user_md_has_a_placeholder_for_each_bootstrap_question() -> None:
 
 
 def test_skills_have_valid_frontmatter_and_budget() -> None:
-    assert _skill_names() == {"hub-adapt", "hub-memory"}
+    assert _skill_names() == {"hub-adapt", "hub-apps", "hub-memory"}
     for rel in manifest.FRAMEWORK_OWNED:
-        if not rel.startswith("skills/"):
+        if not (rel.startswith("skills/") and rel.endswith("/SKILL.md")):
             continue
         text = manifest.render(rel)
         m = FRONTMATTER.match(text)
@@ -83,7 +83,7 @@ def test_hub_toml_renders_with_version_and_created() -> None:
 def test_gitignore_maps_to_underscore_source() -> None:
     assert manifest.template_source(".gitignore").name == "_gitignore"
     text = manifest.render(".gitignore")
-    for line in (".env", "secrets/", ".cc-hub/", ".cc-connect/", "CLAUDE.md", ".claude/"):
+    for line in (".env", "secrets/", "apps/", ".cc-hub/", ".cc-connect/", "CLAUDE.md", ".claude/"):
         assert line in text.splitlines(), line
 
 
@@ -163,3 +163,26 @@ def test_hub_adapt_routes_through_one_line_imports_and_per_skill_links() -> None
 def test_bootstrap_names_the_hub_adapt_file() -> None:
     """Skills are not routed yet during bootstrap, so the agent opens the file by path."""
     assert "`skills/hub-adapt/SKILL.md`" in manifest.render("BOOTSTRAP.md")
+
+
+def test_agents_md_routes_to_apps() -> None:
+    text = manifest.render("AGENTS.md")
+    for phrase in ("`apps/<name>/`", "`apps.lock`", "cc-hub app list", "`hub-apps`",
+                   "never override"):
+        assert phrase in text, phrase
+
+
+def test_hub_apps_skill_covers_the_lifecycle() -> None:
+    skill = manifest.render("skills/hub-apps/SKILL.md")
+    for phrase in ("--yes", "setup-state", '--desc "hub:<name>/<task>"', "cc-connect cron del",
+                   "direct chat", "authoring.md"):
+        assert phrase in skill, phrase
+    authoring = manifest.render("skills/hub-apps/authoring.md")
+    for phrase in ("app.toml", "[[requires]]", "--link", "cc-hub-tap", "seed/"):
+        assert phrase in authoring, phrase
+
+
+def test_hub_adapt_and_cron_readme_mention_app_tasks() -> None:
+    adapt = manifest.render("skills/hub-adapt/SKILL.md")
+    assert "installed apps" in adapt and "hub-apps" in adapt
+    assert "hub:<app>/<task>" in manifest.render("cron/README.md")

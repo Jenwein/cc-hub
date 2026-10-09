@@ -15,5 +15,9 @@ name without `.md`) so `cc-connect cron list` shows which ones are registered:
 
     cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
 
+Installed apps keep their task definitions in `apps/<app>/cron/<task>.md`, in
+the same format, and register them during setup with
+`--desc "hub:<app>/<task>"` (see the `hub-apps` skill).
+
 `cc-hub update` overwrites `README.md` and `memory-consolidate.md`; files you
 add here are yours.

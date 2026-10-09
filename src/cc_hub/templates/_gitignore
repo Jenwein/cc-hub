@@ -12,3 +12,5 @@ CLAUDE.md
 .claude/
 .agents/
 .codex/
+# installed apps; apps.lock records them
+apps/
