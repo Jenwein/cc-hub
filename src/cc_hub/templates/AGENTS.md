@@ -8,7 +8,8 @@ File map:
 
 - `IDENTITY.md`, `SOUL.md`: who you are. `USER.md`: who the user is.
 - `MEMORY.md`: curated long-term memory. `memory/YYYY-MM-DD.md`: daily logs.
-- `skills/`: how-to guides. The `hub-*` ones are built in.
+- `skills/<name>/`: how-to guides, one directory per skill. The `hub-*` ones
+  are built in. New skills go here too; `hub-adapt` links them for you.
 - `cron/`: scheduled task definitions.
 - `scripts/`: scripts you or the user wrote.
 - `AGENTS.local.md`: additions to these instructions. Read it last.

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.1 - 2026-10-09
+
+### Changed
+
+- `cc-hub link <skills-dir>` replaces `cc-hub link <src> <dst>`. It gives
+  every skill in `skills/` its own directory link in an agent's skills
+  directory (a symlink, or a junction on Windows), removes links to skills
+  that are gone, and leaves other entries alone. It no longer copies when a
+  link cannot be made.
+- `hub-adapt` creates `CLAUDE.md` containing only `@AGENTS.md` for Claude
+  Code, links skills with `cc-hub link`, and runs it again after a skill is
+  added or removed.
+- `doctor` `pointers` reports a missing `CLAUDE.md`, skills that are not
+  linked, and links to skills that are gone. The `link-stale` check is
+  removed.
+- `BOOTSTRAP.md` names `skills/hub-adapt/SKILL.md`; `AGENTS.md` says new
+  skills go in `skills/<name>/`.
+
+### Migration notes
+
+- Run `cc-hub update`, then have the agent run `hub-adapt`; `cc-hub doctor`
+  lists what is missing.
+- A skills directory that links to the whole `skills/` directory keeps
+  working. A copied one has to be deleted before `cc-hub link`.
+
 ## 0.3.0 - 2026-10-08
 
 ### Removed

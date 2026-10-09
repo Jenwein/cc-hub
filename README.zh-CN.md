@@ -24,7 +24,7 @@
 | `cc-hub doctor [--fix] [--json]` | 体检：必需文件、记忆预算、指针 |
 | `cc-hub update [--dry-run]` | 只更新框架拥有的文件，用户文件不动，旧版本有备份 |
 | `cc-hub memory log\|search\|recent` | 日志与长期记忆 |
-| `cc-hub link <src> <dst>` | symlink / junction / 复制，按平台自动选 |
+| `cc-hub link <skills-dir>` | 把总站的每个 skill 链接进 agent 的 skills 目录 |
 | `cc-hub where` | 打印总站目录和包的安装位置 |
 | `cc-hub version` | 打印版本号 |
 

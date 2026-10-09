@@ -87,7 +87,7 @@ cc-hub 的职责只有两件：
 开头一句：这是仪式不是门槛，用户的请求永远优先。6 步：
 
 1. **检查**：跑 `cc-hub version`；找不到 `cc-hub` 就告诉用户安装不完整并停下。
-2. **适配**：执行 `hub-adapt`。
+2. **适配**：读 `skills/hub-adapt/SKILL.md` 并照做（这时 skills 还没接通，只能按路径找）。
 3. **起名**：问用户怎么称呼你，不许自己起名；商定一句气质和一个 emoji。三者写进 `IDENTITY.md`，气质写进 `SOUL.md` 的 "Core vibe"。
 4. **认识用户**：问怎么称呼对方、用什么语言回复，各写成 `USER.md` 里一条带日期的指令，替换占位行。
 5. **定时任务**：跑 `cc-connect cron list`；`cron/` 下每个 `default: true` 且 `hub:<name>` 尚未登记的任务（`<name>` 为去掉 `.md` 的文件名），执行
@@ -180,8 +180,7 @@ Prompt text the agent receives when the task fires.
 | bootstrap-pending | `BOOTSTRAP.md` 仍存在，首次仪式未完成 |
 | memory-budget | `MEMORY.md` ≤ `max_lines`，`USER.md` ≤ 100 行 |
 | memory-files | `memory/` 下文件名符合 `YYYY-MM-DD.md` |
-| pointers | 对本机装了的、且已在总站里设置过的 agent，检查指针（表见 §7） |
-| link-stale | 带 `.cc-hub-copied` 标记的复制件比 `skills/` 旧 |
+| pointers | 对本机装了的、且已在总站里设置过的 agent，检查指令文件和每个 skill 的链接（见 §7） |
 | nested-git | 总站是否在别的 git 仓库内 |
 
 `--fix` 只做安全的事：重写 `.gitignore`、补建 `memory/` 和 `scripts/`、补建缺失的用户文件。指针不由它生成。
@@ -205,12 +204,12 @@ Prompt text the agent receives when the task fires.
 
 ### 5.6 link
 
-`link <src> <dst>`，相对路径以总站为基准。
+`link <skills-dir>`，把总站 `skills/` 下每个 skill（含 `SKILL.md` 的子目录）链接进一个 agent 的 skills 目录；`<skills-dir>` 相对路径以总站为基准，不存在就创建。
 
-- Linux、macOS：symlink。
-- Windows：先试 junction；失败则复制，并在目标里留标记文件 `.cc-hub-copied`。
-- 目标已指向源时报告 `existing`；目标是 cc-hub 留下的复制件时替换它；目标是别的东西时拒绝。
-- 打印实际采用的方式。`doctor` 的 `link-stale` 依赖复制标记。
+- 每个 skill 一个目录链接：`<skills-dir>/<name>` → `<hub>/skills/<name>`。Linux、macOS 用 symlink，Windows 用 junction。链接建不出来就报错退出。
+- 已经指向总站对应 skill 的项报 `existing`；新建的报 `linked`；指向总站里已不存在的 skill 的链接删除并报 `removed`；同名但不是指向该 skill 的项不碰，报 `blocked`，命令退出 1。
+- 不是总站 skill 的其它项（agent 自己生态里的 skill 等）不碰。
+- 每行输出状态和 skill 名，用制表符分隔。重复运行结果不变；新增或删除 skill 后再跑一次。
 
 ### 5.7 where / version
 
@@ -222,19 +221,19 @@ Prompt text the agent receives when the task fires.
 
 | skill | 触发场景 | 内容 |
 |---|---|---|
-| `hub-adapt` | 首次运行、换 agent、`doctor` 报指针缺失 | 见 §7 |
+| `hub-adapt` | 首次运行、换 agent、增删 skill 后、`doctor` 报指针缺失 | 见 §7 |
 | `hub-memory` | 记东西、找东西、整理记忆 | 何时 `memory log`；`memory search`、`memory recent` 用法；整理流程 |
 
 `hub-memory` 的整理流程：读近 7 天日志；把仍然成立、跨天有用的条目并入 `MEMORY.md` 四节；超预算时合并同类、删去被后来条目推翻或已不成立的条目；`USER.md` 里被新观察取代的行标 `superseded`；最后写一条 memory log 记录本次整理。任何记忆文件里都不写凭据。
 
 ## 7. hub-adapt 与生态路由
 
-agent 知道自己是谁、自己的生态在哪里找指令和 skills。`hub-adapt` 只列目标，由 agent 选择具体文件和做法。每一步幂等，重跑无副作用。
+总站是指令（`AGENTS.md`）和 skills（`skills/<name>/`）的唯一事实源，各生态通过指针到达它们。agent 知道自己是谁、自己的生态在哪里找指令和 skills；`hub-adapt` 列目标，agent 按参考表落到具体文件。每一步幂等，重跑无副作用。
 
 目标：
 
-1. **指令**：自己生态的指令文件要通向总站根目录的 `AGENTS.md`。原生读 `AGENTS.md` 就什么都不用做；否则建最小的指针文件（导入一行，不复制内容）。
-2. **skills**：自己生态的 skills 发现路径要通到总站的 `skills/`。做法不限：链接、复制，或运行时支持的指针都可以。`cc-hub link skills <路径>` 是现成的工具，会按平台选 symlink、junction 或复制。
+1. **指令**：生态有自己的指令文件，就建它，内容只有导入 `AGENTS.md` 的一行；只读 `AGENTS.md` 的生态什么都不用做。
+2. **skills**：运行 `cc-hub link <自己的 skills 目录>`（§5.6）。skills 靠 frontmatter 被发现、正文按需加载，每个 skill 一个目录链接能让 frontmatter、正文和辅助文件都从总站读到。新 skill 一律建在 `skills/<name>/`，增删 skill 后重跑。本次会话开始时 skills 目录还不存在的话，运行时可能要重新加载或开新会话才看得到，告诉用户。
 3. **信任**：运行时若需要一次交互式信任才读这个目录的指令或 skills，明确告诉用户怎么做。
 
 做完跑 `cc-hub doctor`，修好它报的问题，再写一条 memory log。
@@ -243,10 +242,12 @@ agent 知道自己是谁、自己的生态在哪里找指令和 skills。`hub-ad
 
 | 生态 | 指令指针 | skills 路径 | 信任 |
 |---|---|---|---|
-| Claude Code | `CLAUDE.md` 内容为 `@AGENTS.md`；没有 `CLAUDE.md` 时原生读 `AGENTS.md`（2.1.277 起） | `.claude/skills` | 读指令和 skills 不需要 |
+| Claude Code | `CLAUDE.md`，内容只有 `@AGENTS.md` | `.claude/skills`（重新加载：`/reload-skills`） | 读指令和 skills 不需要 |
 | Codex CLI | 不需要，原生读 `AGENTS.md` | `.agents/skills` | Codex 要求时把目录标为 trusted |
 
-`pointers` 检查：`.claude/skills` 或 `.agents/skills` 要存在；`CLAUDE.md` 可以没有，有的话必须含 `@AGENTS.md`，否则它会遮住 `AGENTS.md`。只评判已在总站里设置过的生态（任一指针路径存在），本机装了但没在这里用过的 agent 不算问题。
+Claude Code 只在没有 `CLAUDE.md` 时才读 `AGENTS.md`，而 cc-connect 的 `/memory add` 会创建 `CLAUDE.md` 并追加内容。所以 Claude Code 下一律建带导入行的 `CLAUDE.md`，之后追加的内容都在导入行下面。
+
+`pointers` 检查：只评判已在总站里设置过的生态（指令文件或 skills 目录任一存在），本机装了但没在这里用过的 agent 不算问题。对设置过的生态，指令文件要存在且含 `@AGENTS.md`；`skills/` 里每个 skill 在该生态的 skills 目录里都要有指向总站的链接，没有指向已删除 skill 的失效链接。
 
 ## 8. 与 cc-connect 的配合
 
@@ -287,7 +288,7 @@ Python 代码：
 平台：
 
 - 仓库 `.gitattributes` 设 `* text=auto eol=lf`；模板全部 LF、无 BOM（有些 skill 加载器遇到 CRLF 会静默丢掉 frontmatter）。
-- Windows 上建 symlink 需要开发者模式或管理员权限，所以 `link` 用 junction，失败再复制。
+- Windows 上建 symlink 需要开发者模式或管理员权限，所以 `link` 用 junction（目录连接点），不需要特殊权限。
 - 给人看的表格由 rich 渲染；在旧版 Windows 控制台下 rich 自动换用能显示的边框，agent 读的是纯文本或 `--json`。
 - WSL 下总站放 Linux 文件系统，不放 `/mnt/c`。
 - Windows 上在普通终端安装 cc-hub，不在 Claude 桌面版内的 shell 里装：桌面版是 MSIX 打包应用，它的 shell 在 `%APPDATA%` 下新建的目录落在应用私有存储里，cc-connect 看不到。
@@ -306,7 +307,7 @@ cc-hub/
 │   ├── console.py            定位总站、JSON 输出、rich console
 │   ├── hub.py                定位总站、读写 hub.toml
 │   ├── manifest.py           文件所有权清单、模板渲染
-│   ├── platform.py           平台判断、link/junction/copy
+│   ├── platform.py           平台判断、目录链接（symlink / junction）
 │   ├── encoding.py           UTF-8 读写、原子写、stdio
 │   ├── commands/             init doctor update memory link
 │   └── templates/            AGENTS.md BOOTSTRAP.md SOUL.md IDENTITY.md USER.md MEMORY.md
@@ -319,7 +320,7 @@ cc-hub/
 ### 10.2 测试
 
 - 单元测试测纯函数：总站定位、清单与模板一致、模板渲染、记忆日志与检索、`hub.toml` 原地编辑、尾部保留的三种情况。
-- 集成测试用 typer 的 CliRunner 或子进程真跑命令，在临时目录里，路径带中文和空格：`init` 后 `doctor` 只剩 `bootstrap-pending`；`update` 备份并覆盖框架文件，用户文件不动，`BOOTSTRAP.md` 删除后不重建，退役文件被备份并删除，`AGENTS.md` 尾部保留；`link` 在 Windows 上 junction 失败回退到复制并留标记。
+- 集成测试用 typer 的 CliRunner 或子进程真跑命令，在临时目录里，路径带中文和空格：`init` 后 `doctor` 只剩 `bootstrap-pending`；`update` 备份并覆盖框架文件，用户文件不动，`BOOTSTRAP.md` 删除后不重建，退役文件被备份并删除，`AGENTS.md` 尾部保留；`link` 为每个 skill 建链接、重复运行不变、删除失效链接、不碰别的项；`doctor` 按 skill 报告缺失和失效的链接。
 - 模板检查：`AGENTS.md` ≤ 150 行并以分界标记结尾；每个 `SKILL.md` ≤ 100 行、frontmatter 合法且 `name` 与目录名一致；全部 LF、无 BOM；README 提到每个命令。
 - CI 矩阵：ubuntu、macos、windows × Python 3.11、3.12；ruff；pytest；`uv build` 后用 wheel 跑 `version`、`init`、`doctor --json` 冒烟。
 - 端到端不自动化，写成 `docs/acceptance.md` 手工验收清单。

@@ -1,24 +1,27 @@
 ---
 name: hub-adapt
-description: Make your own agent ecosystem discover this hub's instructions and skills. Run on first use, after switching agents, or when `cc-hub doctor` reports missing pointers.
+description: Make your own agent ecosystem discover this hub's instructions and skills. Run on first use, after switching agents, after adding or removing a skill, or when `cc-hub doctor` reports missing pointers.
 ---
 
 # hub-adapt
 
-You know which agent runtime you are and where it looks for instruction
-files and skills. This skill lists the goals; you choose the files. Every
-step is idempotent: re-running must not duplicate anything.
+The hub holds the only copy of its instructions (`AGENTS.md`) and of its
+skills (`skills/<name>/`). Your ecosystem reaches them through pointers you
+create here. Every step is idempotent: re-running must not duplicate anything.
 
 ## Goals
 
-1. **Instructions.** Your ecosystem's instruction file must lead to
-   `AGENTS.md` in the hub root. If your runtime reads `AGENTS.md` natively,
-   do nothing. Otherwise create the smallest pointer file your runtime
-   supports (an import line, not a copy).
-2. **Skills.** Your skills discovery path must reach the hub's `skills/`
-   directory. Any mechanism works: a link, a copy, or a pointer your runtime
-   supports. `cc-hub link skills <your skills path>` makes a link, picking
-   symlink, junction or copy for this platform, and says which.
+1. **Instructions.** If your ecosystem has an instruction file of its own,
+   create it with the single line that imports `AGENTS.md` (see the table)
+   and nothing else of yours. If your runtime only reads `AGENTS.md`, do
+   nothing.
+2. **Skills.** Run `cc-hub link <your skills directory>` with the directory
+   relative to the hub (see the table). It gives every skill in `skills/` one
+   directory link there and removes links to skills that are gone. New skills
+   go in `skills/<name>/`; run the command again after adding or removing
+   one. If your skills directory did not exist when this session started,
+   your runtime may need a reload or a new session to see the skills; tell
+   the user.
 3. **Trust.** If your runtime needs a one-time interactive trust step before
    it reads this directory's instructions or skills, tell the user exactly
    what to run and why.
@@ -31,9 +34,13 @@ Finish with `cc-hub doctor`, fix what it reports, then
 
 ## Known ecosystems (may be outdated; your own documentation wins)
 
-| Runtime | Instruction pointer | Skills path | Trust step |
+| Runtime | Instruction file | Skills directory | Trust step |
 |---|---|---|---|
-| Claude Code | `CLAUDE.md` containing `@AGENTS.md` (2.1.277+ reads `AGENTS.md` natively when no CLAUDE.md exists) | `.claude/skills` | none needed for instructions and skills |
-| Codex CLI | none needed, reads `AGENTS.md` | `.agents/skills` | mark the directory trusted if Codex asks |
+| Claude Code | `CLAUDE.md` containing only `@AGENTS.md` | `.claude/skills` (reload: `/reload-skills`) | none needed for instructions and skills |
+| Codex CLI | none, reads `AGENTS.md` | `.agents/skills` | mark the directory trusted if Codex asks |
+
+Claude Code reads `AGENTS.md` only while no `CLAUDE.md` exists, and
+cc-connect's `/memory add` creates `CLAUDE.md`. Creating it with the import
+line keeps `AGENTS.md` loaded; anything added later goes below that line.
 
 All of these pointer files are gitignored by the hub.

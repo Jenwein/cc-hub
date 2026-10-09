@@ -35,7 +35,7 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
 | `cc-hub doctor [--fix] [--json]` | Health checks: required files, memory budgets, pointers. |
 | `cc-hub update [--dry-run]` | Refresh framework-owned files; user files untouched; backups kept. |
 | `cc-hub memory log\|search\|recent` | Daily logs and long-term memory. |
-| `cc-hub link <src> <dst>` | Symlink, junction or copy (platform decides). |
+| `cc-hub link <skills-dir>` | Link every hub skill into an agent's skills directory. |
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |
 
