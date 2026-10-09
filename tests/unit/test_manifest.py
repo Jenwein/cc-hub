@@ -175,7 +175,7 @@ def test_agents_md_routes_to_apps() -> None:
 def test_hub_apps_skill_covers_the_lifecycle() -> None:
     skill = manifest.render("skills/hub-apps/SKILL.md")
     for phrase in ("--yes", "setup-state", '--desc "hub:<name>/<task>"', "cc-connect cron del",
-                   "direct chat", "authoring.md"):
+                   "direct chat", "authoring.md", "cc-hub app sync"):
         assert phrase in skill, phrase
     authoring = manifest.render("skills/hub-apps/authoring.md")
     for phrase in ("app.toml", "[[requires]]", "--link", "cc-hub-tap", "seed/"):

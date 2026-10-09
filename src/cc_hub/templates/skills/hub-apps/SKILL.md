@@ -27,6 +27,9 @@ Do this for every app that `cc-hub app list` marks `pending`, and only in a
 direct chat with the user: setup asks questions, needs approvals and writes
 private data. Every step checks before acting, so running it again is safe.
 
+If `cc-hub app list` says an app is missing from `apps/` (for example in a
+fresh clone of the hub), run `cc-hub app sync` first.
+
 1. **Software.** `cc-hub app list --json` lists `missing` software with this
    platform's install line. Say what each command does and ask. If approved,
    run it and check again. If declined or impossible (for example it needs
@@ -40,8 +43,9 @@ private data. Every step checks before acting, so running it again is safe.
 
        cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>/<task>"
 
-4. **Finish.** `cc-hub app setup-state <name> done`, commit the changes to
-   the data directory, and `cc-hub memory log "app <name> set up"`.
+4. **Finish.** `cc-hub app setup-state <name> done`, then
+   `cc-hub memory log "app <name> set up"`, then commit the changes to the
+   data directory and today's log.
 
 An app marked `waiting` is not retried at session start. Run setup again when
 the user says the missing part is done, or when `cc-hub app list` no longer
