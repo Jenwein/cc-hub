@@ -56,17 +56,20 @@ def feedback_info(
         if entry is None:
             raise apps.AppError(f"{app} is not installed")
         m = apps.read_installed(hub, app)
-        target = m.issues if m and m.issues else None
+        target = taps.strip_credentials(m.issues) if m and m.issues else None
         url = lock.taps.get(entry.get("tap", ""), {}).get("url")
         if "link" in entry:
-            source = "linked from a local directory"
+            kind, source = "link", "linked from a local directory"
+        elif url:
+            kind, source = "remote tap", taps.strip_credentials(url)
         else:
-            source = taps.strip_credentials(url) if url else "a local tap"
+            kind, source = "local tap", "a local tap"
         if target is None and url and (repo := taps.github_repo(url)):
             target = f"https://github.com/{repo}/issues"
         env["app"] = {
             "name": app,
             "version": entry.get("version"),
+            "kind": kind,
             "source": source,
             "commit": entry.get("commit"),
             "setup": apps.setup_status(hub, app)[0],
@@ -74,7 +77,7 @@ def feedback_info(
     repo = taps.github_repo(target.rstrip("/").removesuffix("/issues")) if target else None
     return {
         "target": target,
-        "new_issue_url": f"{target.rstrip('/')}/new" if target and repo else None,
+        "new_issue_url": f"https://github.com/{repo}/issues/new" if repo else None,
         "github_repo": repo,
         "environment": env,
     }
@@ -91,9 +94,13 @@ def _print(info: dict, app: str | None) -> None:
                 '--title "<title>" --body-file <file>'
             )
     elif app:
-        typer.echo(
-            f"no issue tracker: {app} comes from a local tap or directory; it is the user's own"
-        )
+        app_env = info["environment"]["app"]
+        if app_env["kind"] == "remote tap":
+            typer.echo(f"no issue tracker known for {app}; its tap is {app_env['source']}")
+        else:
+            typer.echo(
+                f"no issue tracker: {app} is the user's own (a linked directory or a local tap)"
+            )
     else:
         typer.echo("no issue tracker: this cc-hub build does not name one")
     typer.echo("environment:")
