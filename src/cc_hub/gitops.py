@@ -63,13 +63,19 @@ def ensure_identity(hub: Path, name: str) -> list[str]:
     return set_keys
 
 
+def _literal(rel: str) -> str:
+    """A pathspec that matches exactly this path: no glob characters such as [ ] * ?."""
+    return f":(literal){rel}"
+
+
 def _committable(hub: Path, rel: str) -> bool:
     """Present or tracked, and not ignored."""
+    # check-ignore takes plain paths and rejects pathspec magic, so it gets rel as is.
     if run_git(hub, "check-ignore", "-q", "--", rel, check=False).returncode == 0:
         return False
     if (Path(hub) / rel).exists():
         return True
-    return bool(run_git(hub, "ls-files", "--", rel, check=False).stdout.strip())
+    return bool(run_git(hub, "ls-files", "--", _literal(rel), check=False).stdout.strip())
 
 
 def commit_paths(hub: Path, paths: list[str], message: str, *, wait: float = 0.5) -> str | None:
@@ -84,13 +90,14 @@ def commit_paths(hub: Path, paths: list[str], message: str, *, wait: float = 0.5
     rels = sorted({p for p in paths if _committable(hub, p)})
     if not rels:
         return None
+    specs = [_literal(rel) for rel in rels]
     for attempt in (0, 1):
         try:
-            run_git(hub, "add", "-A", "--", *rels)
-            staged = run_git(hub, "diff", "--cached", "--quiet", "--", *rels, check=False)
+            run_git(hub, "add", "-A", "--", *specs)
+            staged = run_git(hub, "diff", "--cached", "--quiet", "--", *specs, check=False)
             if staged.returncode == 0:
                 return None
-            run_git(hub, "commit", "-q", "-m", message, "--", *rels)
+            run_git(hub, "commit", "-q", "-m", message, "--", *specs)
             return None
         except GitError as exc:
             if attempt == 0 and _INDEX_LOCK in str(exc):

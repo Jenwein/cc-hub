@@ -40,6 +40,16 @@ def test_commit_paths_records_a_deletion(tmp_path: Path, git_env: Path) -> None:
     assert "old.txt" not in git(repo, "ls-tree", "-r", "--name-only", "HEAD")
 
 
+def test_commit_paths_treats_names_literally(tmp_path: Path, git_env: Path) -> None:
+    repo = fresh_repo(tmp_path)
+    (repo / "a1.txt").write_text("1", encoding="utf-8")
+    (repo / "a[1].txt").write_text("[1]", encoding="utf-8")
+    (repo / "ab.txt").write_text("b", encoding="utf-8")
+    assert gitops.commit_paths(repo, ["a[1].txt"], "bracket") is None
+    assert git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() == ["a[1].txt"]
+    assert sorted(git(repo, "status", "--porcelain").split()) == ["??", "??", "a1.txt", "ab.txt"]
+
+
 def test_commit_paths_with_nothing_to_commit(tmp_path: Path, git_env: Path) -> None:
     repo = fresh_repo(tmp_path)
     (repo / "a.txt").write_text("a", encoding="utf-8")
