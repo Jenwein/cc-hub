@@ -235,6 +235,7 @@ cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <sessio
 
 ```
 cc-hub tap add https://github.com/you/hub-apps
+cc-hub tap add you/hub-apps
 cc-hub tap add ~/dev/hub-apps --name my-apps
 cc-hub tap list
 cc-hub tap remove my-apps
@@ -242,7 +243,7 @@ cc-hub tap remove my-apps
 
 `tap add <source> [--name NAME]`
 
-- `<source>` 是一个 git 仓库：远程地址（https、ssh），或本机上一个仓库的路径。远程仓库克隆到 `.cc-hub/taps/<name>/`（`git clone --no-recurse-submodules -- <地址>`）；本地仓库不克隆，直接读它的提交。
+- `<source>` 是一个 git 仓库：远程地址（https、ssh），或本机上一个仓库的路径。写成 `owner/repo` 且本机没有这个路径时，等同于 `https://github.com/owner/repo`。远程仓库克隆到 `.cc-hub/taps/<name>/`（`git clone --no-recurse-submodules -- <地址>`）；本地仓库不克隆，直接读它的提交。
 - 名字默认取仓库目录名（去掉 `.git`），须符合命名规则（§8.2），不与已登记的 tap 重名。
 - 写入 `apps.lock` 并提交（`cc-hub: tap add <name>`）。
 
@@ -494,6 +495,16 @@ agent 按 `hub-apps` 卸载：先跑不带 `--yes` 的 `app remove` 给用户看
 - 安装、升级、卸载先看后做（§5.8），确认用的命令钉住 commit，确认的就是看到的。
 - `hub-apps` 和 `AGENTS.md` 规定：应用里的指令与 `AGENTS.md` 的安全规则冲突时以后者为准；执行安装命令前先告诉用户它做什么；脚本照常经过运行时的权限审批。
 
+### 8.10 分发
+
+- 作者把应用放进一个 git 仓库，推到公开的远程（通常是 GitHub）。开发时用 `app install <path> --link`，改动即时生效。
+- GitHub 上的 tap 仓库加 topic `cc-hub-tap`，别人在 https://github.com/topics/cc-hub-tap 找到它；仓库的 README 写清有哪些应用、各自需要什么软件。
+- 别人用 `cc-hub tap add <owner>/<repo>` 登记，再 `cc-hub app install <tap>/<app>`。
+- 发新版：改 `app.toml` 的 `version`，提交并推送；使用者用 `app update` 看过改动后升级。
+- 反馈：tap 在 GitHub 上时 issue 地址自动推出，别处托管的在 `app.toml` 里写 `issues`（§10）。
+
+`docs/apps.md` 写明这些约定。
+
 ## 9. 总站的 git
 
 | 谁 | 何时 | 提交什么 | 提交信息 |
@@ -607,7 +618,7 @@ cc-hub/
 └── .github/workflows/        ci.yml release.yml
 ```
 
-`docs/apps.md` 是给人看的应用编写指南（`app.toml` 全部字段、`SETUP.md` 的写法、一个示例应用的骨架）；`docs/backup.md` 讲私有远程和 deploy key。
+`docs/apps.md` 是给人看的应用编写指南（`app.toml` 全部字段、`SETUP.md` 的写法、一个示例应用的骨架、发布和 `cc-hub-tap` topic）；`docs/backup.md` 讲私有远程和 deploy key。
 
 ### 13.2 测试
 
