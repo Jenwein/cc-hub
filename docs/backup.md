@@ -29,6 +29,8 @@ remote must be a **private** repository.
 
 ## Restore on another machine
 
+The new machine needs its own access to the repository: add a new deploy key with write access for it (as above), or use your own GitHub credentials. With a deploy key, set `core.sshCommand` in the cloned hub again, as in step 3 above.
+
     git clone git@github.com:you/my-hub.git ~/.cc-hub
     cc-hub app sync
 

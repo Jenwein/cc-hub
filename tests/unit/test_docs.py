@@ -81,6 +81,10 @@ def test_apps_doc_covers_writing_and_publishing() -> None:
     for phrase in ("app.toml", "SETUP.md", "--link", "cc-hub-tap", "cc-hub tap add",
                    "cc-hub app install", "--yes"):
         assert phrase in text, phrase
-    assert "cc-hub app sync" in (ROOT / "docs" / "backup.md").read_text(encoding="utf-8")
+    assert "cc-hub app update <app>" in text
+    backup = (ROOT / "docs" / "backup.md").read_text(encoding="utf-8")
+    assert "cc-hub app sync" in backup
+    restore = backup.split("## Restore on another machine", 1)[1].split("\n## ", 1)[0]
+    assert "core.sshCommand" in restore
     for readme in ("README.md", "README.zh-CN.md"):
         assert "apps.lock" in (ROOT / readme).read_text(encoding="utf-8"), readme

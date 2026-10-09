@@ -87,4 +87,4 @@ While developing, link your working copy so edits apply at once:
 3. Others run `cc-hub tap add <owner>/<repo>` and
    `cc-hub app install <repo>/<app>`.
 4. Release a new version by raising `version` in `app.toml`, committing and
-   pushing; users update with `cc-hub app update`.
+   pushing; users update with `cc-hub app update <app>`.
