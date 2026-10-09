@@ -34,6 +34,8 @@
 - `cc-hub link` replaces an agent skills directory that is itself a link to
   the hub's `skills/` with a real directory of per-skill links.
 - `.gitignore` ignores `apps/`.
+- The hub has a framework-owned `.gitattributes` (`* -text`), so a clone keeps LF line
+  endings; `update` rewrites framework files that have CRLF line endings.
 
 ### Migration notes
 

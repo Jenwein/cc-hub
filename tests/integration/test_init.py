@@ -57,7 +57,9 @@ def test_init_runs_git_init_and_commits(tmp_path: Path, git_env: Path) -> None:
     assert result.git_warning is None
     assert _git(target, "log", "--format=%s").strip() == "cc-hub: init"
     tracked = set(_git(target, "ls-files").split("\n"))
-    assert {"AGENTS.md", "hub.toml", ".gitignore", "skills/hub-adapt/SKILL.md"} <= tracked
+    assert {
+        "AGENTS.md", "hub.toml", ".gitignore", ".gitattributes", "skills/hub-adapt/SKILL.md",
+    } <= tracked
 
 
 def test_init_sets_a_local_identity_only_when_git_has_none(

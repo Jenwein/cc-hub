@@ -41,7 +41,7 @@
     ├── apps/  apps.lock                              已安装的应用及其记录
     └── hub.toml                                      配置
 
-`cc-hub update` 只替换框架拥有的文件：`AGENTS.md` 结尾标记以上的部分、`BOOTSTRAP.md`、`skills/hub-*`、`cron/README.md`、`cron/memory-consolidate.md` 和 `.gitignore`。`apps/` 和 `apps.lock` 由 `cc-hub app` 管理；应用声明的数据目录归你。其余都归你，包括你或 cc-connect 写在 `AGENTS.md` 结尾标记以下的内容。
+`cc-hub update` 只替换框架拥有的文件：`AGENTS.md` 结尾标记以上的部分、`BOOTSTRAP.md`、`skills/hub-*`、`cron/README.md`、`cron/memory-consolidate.md`、`.gitignore` 和 `.gitattributes`。`apps/` 和 `apps.lock` 由 `cc-hub app` 管理；应用声明的数据目录归你。其余都归你，包括你或 cc-connect 写在 `AGENTS.md` 结尾标记以下的内容。
 
 总站是一个 git 仓库：cc-hub 提交它的命令改动的文件，agent 每做完一件事提交一次。备份到私有远程见 [docs/backup.md](docs/backup.md)。
 

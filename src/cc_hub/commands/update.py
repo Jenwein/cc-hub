@@ -138,9 +138,10 @@ def update_hub(
             result.absent.append(rel)
             continue
         new_text = manifest.render(rel, name=name, version=version)
-        current = read_text(dst) if dst.is_file() else None
+        # read_text would turn CRLF into LF, hiding the line endings a Windows clone gets
+        current = dst.read_bytes().decode("utf-8") if dst.is_file() else None
         if current is not None and rel in manifest.KEEPS_TAIL:
-            new_text = merge_tail(new_text, current)
+            new_text = merge_tail(new_text, current.replace("\r\n", "\n"))
         if current == new_text:
             result.skipped.append(rel)
             continue

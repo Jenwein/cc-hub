@@ -197,3 +197,11 @@ def test_hub_feedback_asks_before_filing() -> None:
     agents = manifest.render("AGENTS.md")
     assert "`hub-feedback`" in agents and "publishes" in agents
     assert "commenting" in agents
+
+
+def test_gitattributes_keeps_line_endings() -> None:
+    assert manifest.template_source(".gitattributes").name == "_gitattributes"
+    assert ".gitattributes" in manifest.FRAMEWORK_OWNED
+    text = manifest.render(".gitattributes")
+    assert "* -text" in text.splitlines()
+    assert "\r" not in text

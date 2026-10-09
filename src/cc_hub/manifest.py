@@ -16,6 +16,7 @@ FRAMEWORK_OWNED: tuple[str, ...] = (
     "AGENTS.md",
     "BOOTSTRAP.md",
     ".gitignore",
+    ".gitattributes",
     "cron/README.md",
     "cron/memory-consolidate.md",
     "skills/hub-adapt/SKILL.md",
@@ -54,7 +55,7 @@ RETIRED: tuple[str, ...] = (
 HUB_TOML = "hub.toml"
 USER_DIRS: tuple[str, ...] = ("memory", "scripts")
 
-_SOURCE_NAMES = {".gitignore": "_gitignore"}
+_SOURCE_NAMES = {".gitignore": "_gitignore", ".gitattributes": "_gitattributes"}
 
 
 def template_source(rel: str) -> Path:

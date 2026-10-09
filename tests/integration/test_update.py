@@ -184,7 +184,7 @@ def test_update_keeps_what_follows_the_tail_marker(hub: Path) -> None:
 
 def test_update_leaves_agents_md_alone_when_only_the_tail_was_added(hub: Path) -> None:
     agents = hub / "AGENTS.md"
-    agents.write_text(read_text(agents) + CC_BLOCK, encoding="utf-8")
+    agents.write_text(read_text(agents) + CC_BLOCK, encoding="utf-8", newline="\n")
     result = update_hub(hub)
     assert "AGENTS.md" in result.skipped
     assert read_text(agents).endswith(CC_BLOCK)
@@ -259,3 +259,50 @@ def test_update_dry_run_does_not_commit(git_hub: Path) -> None:
     before = _git(git_hub, "rev-parse", "HEAD")
     update_hub(git_hub, version="9.9.9", dry_run=True)
     assert _git(git_hub, "rev-parse", "HEAD") == before
+
+
+def test_a_clone_with_autocrlf_keeps_lf_line_endings(git_hub: Path, tmp_path: Path) -> None:
+    import subprocess
+
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", "-c", "core.autocrlf=true", str(git_hub), str(clone)], check=True
+    )
+    for rel in ("AGENTS.md", "skills/hub-apps/SKILL.md", "hub.toml"):
+        assert b"\r\n" not in (clone / rel).read_bytes(), rel
+
+
+def test_update_adds_and_commits_a_missing_gitattributes(git_hub: Path) -> None:
+    (git_hub / ".gitattributes").unlink()
+    _git(git_hub, "commit", "-qam", "drop .gitattributes")
+    result = update_hub(git_hub)
+    assert result.updated == [".gitattributes"]
+    assert (git_hub / ".gitattributes").read_bytes() == (
+        b"# hub files keep the line endings they were written with\n* -text\n"
+    )
+    assert _git(git_hub, "show", "--name-only", "--format=", "HEAD").split() == [".gitattributes"]
+
+
+def test_update_rewrites_framework_files_that_have_crlf_endings(hub: Path) -> None:
+    rels = ("AGENTS.md", "skills/hub-apps/SKILL.md", ".gitignore")
+    for rel in rels:
+        path = hub / rel
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    result = update_hub(hub)
+    assert set(rels) <= set(result.updated)
+    backups = hub / ".cc-hub" / "backups" / __version__
+    for rel in rels:
+        assert b"\r" not in (hub / rel).read_bytes(), rel
+        assert b"\r\n" in (backups / rel).read_bytes(), rel
+    assert update_hub(hub).updated == []
+
+
+def test_update_repairs_crlf_in_agents_md_and_keeps_its_tail(hub: Path) -> None:
+    agents = hub / "AGENTS.md"
+    mine = read_text(agents) + CC_BLOCK + "\n- my note\n"
+    agents.write_bytes(mine.replace("\n", "\r\n").encode("utf-8"))
+    result = update_hub(hub)
+    assert "AGENTS.md" in result.updated
+    assert agents.read_bytes() == (
+        manifest.render("AGENTS.md", name="hub") + CC_BLOCK + "\n- my note\n"
+    ).encode("utf-8")

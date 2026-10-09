@@ -54,8 +54,9 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
 
 `cc-hub update` replaces only framework-owned files: `AGENTS.md` above its
 closing marker, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`,
-`cron/memory-consolidate.md` and `.gitignore`. `cc-hub app` manages `apps/`
-and `apps.lock`; an app's data, in the directories it declares, is yours.
+`cron/memory-consolidate.md`, `.gitignore` and `.gitattributes`. `cc-hub app`
+manages `apps/` and `apps.lock`; an app's data, in the directories it
+declares, is yours.
 Everything else is yours too, including whatever you or cc-connect add below
 the closing marker of `AGENTS.md`.
 
