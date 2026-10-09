@@ -14,7 +14,7 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
-from cc_hub import __version__, manifest
+from cc_hub import __version__, gitops, manifest
 from cc_hub.commands.init import enclosing_git_repo
 from cc_hub.commands.link import inspect_skill_links
 from cc_hub.encoding import read_text, write_text
@@ -48,6 +48,33 @@ def detect_agents(*, home: Path, which: Which) -> list[str]:
 
 def _ok(id_: str, message: str) -> Check:
     return Check(id_, "ok", message)
+
+
+def git_check(hub: Path) -> Check:
+    if not gitops.git_available() or not (hub / ".git").exists():
+        return Check(
+            "git",
+            "warn",
+            "the hub is not a git repository: no history and no backup",
+            f'install git, then run `cc-hub init "{hub}"`',
+        )
+    problems = []
+    if not gitops.has_identity(hub):
+        problems.append("no git identity (user.name, user.email)")
+    n = gitops.uncommitted(hub)
+    if n:
+        problems.append(f"{n} uncommitted change(s)")
+    names = gitops.remotes(hub)
+    if not names:
+        problems.append("no remote: the hub is not backed up")
+    if problems:
+        return Check(
+            "git",
+            "warn",
+            "; ".join(problems),
+            "the agent commits after each task; docs/backup.md sets up a private remote",
+        )
+    return _ok("git", "committed; remote: " + ", ".join(names))
 
 
 def run_checks(
@@ -86,6 +113,7 @@ def run_checks(
 
     # required-files (fix: user files and .gitignore only)
     if fix:
+        restored = [".gitignore"]
         write_text(
             hub / ".gitignore", manifest.render(".gitignore", name=name, version=package_version)
         )
@@ -94,6 +122,8 @@ def run_checks(
         for rel in manifest.USER_OWNED:
             if not (hub / rel).is_file():
                 write_text(hub / rel, manifest.render(rel, name=name, version=package_version))
+                restored.append(rel)
+        gitops.commit_paths(hub, restored, "cc-hub: doctor --fix")
     missing = [
         rel
         for rel in manifest.FRAMEWORK_OWNED + manifest.USER_OWNED
@@ -210,6 +240,9 @@ def run_checks(
             )
         else:
             checks.append(_ok(f"pointers:{agent}", "pointers present"))
+
+    # git
+    checks.append(git_check(hub))
 
     # nested-git
     repo = enclosing_git_repo(hub.parent)

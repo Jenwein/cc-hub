@@ -22,6 +22,7 @@ CHECK_IDS = [
     "memory-budget:USER.md",
     "memory-files",
     "pointers",
+    "git",
     "nested-git",
 ]
 
@@ -33,7 +34,7 @@ def statuses(checks) -> dict[str, str]:
 def test_fresh_hub_runs_the_hub_checks(hub: Path, tmp_path: Path) -> None:
     checks = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
     assert [c.id for c in checks] == CHECK_IDS
-    assert [c.id for c in checks if c.status != "ok"] == ["bootstrap-pending"]
+    assert [c.id for c in checks if c.status != "ok"] == ["bootstrap-pending", "git"]
 
 
 def test_memory_over_budget_fails(hub: Path, tmp_path: Path) -> None:
@@ -163,3 +164,45 @@ def test_unreadable_pointer_file_warns(hub: Path, tmp_path: Path) -> None:
     finally:
         (hub / "CLAUDE.md").chmod(0o644)
     assert ids["pointers:claude"] == "warn"
+
+
+def _git_check(hub: Path, tmp_path: Path):
+    return next(c for c in run_checks(hub, home=tmp_path / "home", **NO_AGENTS) if c.id == "git")
+
+
+def test_git_check_without_a_repository(hub: Path, tmp_path: Path) -> None:
+    check = _git_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "not a git repository" in check.message
+    assert "cc-hub init" in check.fix
+
+
+def test_git_check_reports_uncommitted_changes_and_a_missing_remote(
+    git_hub: Path, tmp_path: Path
+) -> None:
+    check = _git_check(git_hub, tmp_path)
+    assert check.status == "warn"
+    assert check.message == "no remote: the hub is not backed up"
+    (git_hub / "SOUL.md").write_text("changed", encoding="utf-8")
+    assert "1 uncommitted change(s)" in _git_check(git_hub, tmp_path).message
+
+
+def test_git_check_ok_with_a_remote(git_hub: Path, tmp_path: Path) -> None:
+    from cc_hub.gitops import run_git
+
+    run_git(git_hub, "remote", "add", "origin", "https://example.invalid/hub.git")
+    check = _git_check(git_hub, tmp_path)
+    assert check.status == "ok"
+    assert "origin" in check.message
+
+
+def test_fix_commits_what_it_restored(git_hub: Path, tmp_path: Path) -> None:
+    from cc_hub.gitops import run_git
+
+    (git_hub / "USER.md").unlink()
+    run_git(git_hub, "commit", "-qam", "lose USER.md")
+    run_checks(git_hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    log = run_git(git_hub, "log", "-1", "--format=%s").stdout.strip()
+    assert log == "cc-hub: doctor --fix"
+    shown = run_git(git_hub, "show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert shown == ["USER.md"]
