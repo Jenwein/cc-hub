@@ -387,7 +387,7 @@ macos = "brew install hledger"
 windows = "winget install hledger"
 ```
 
-**命名规则**：应用名、skill 名、tap 名只用小写字母、数字和连字符，以字母或数字开头，最长 64 个字符，不以 `hub-` 开头。
+**命名规则**：应用名、skill 名、定时任务名、tap 名只用小写字母、数字和连字符，以字母或数字开头，最长 64 个字符；skill 名还不能以 `hub-` 开头（框架 skills 的命名空间）。
 
 **数据目录**：总站下的相对路径，不含 `..`；第一段不能是保留名（总站的框架文件和用户文件、`hub.toml`、`apps.lock`、`memory`、`skills`、`cron`、`scripts`、`apps`、`secrets`，以及任何以 `.` 开头的名字）；不能与别的应用的数据目录相同或互相包含。`seed/` 下的每个文件都必须落在本应用声明的某个数据目录里。
 
@@ -606,8 +606,9 @@ cc-hub/
 │   ├── platform.py           平台判断、目录链接（symlink / junction）
 │   ├── encoding.py           UTF-8 读写、原子写、stdio
 │   ├── gitops.py             总站的 git：是否仓库、身份、按路径提交、重试
+│   ├── applock.py            读写 apps.lock
 │   ├── taps.py               克隆、拉取、解析 commit、列出应用、按 commit 取出应用目录
-│   ├── apps.py               app.toml 解析与校验、apps.lock、本机设置状态、安装升级卸载
+│   ├── apps.py               app.toml 解析与校验、本机设置状态、安装升级卸载、sync
 │   ├── commands/             init doctor update memory link tap app feedback
 │   └── templates/            AGENTS.md BOOTSTRAP.md SOUL.md IDENTITY.md USER.md MEMORY.md
 │                             AGENTS.local.md hub.toml _gitignore cron/
