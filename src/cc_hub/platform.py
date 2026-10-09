@@ -55,7 +55,7 @@ def link_dir(
     run=subprocess.run,
 ) -> str:
     """Make `dst` a directory link to `src`: symlink on POSIX, junction on Windows."""
-    src = Path(src).resolve()
+    src = Path(os.path.abspath(src))
     dst = Path(dst)
     if not src.is_dir():
         raise LinkError(f"{src} is not a directory")

@@ -16,7 +16,7 @@ from rich.table import Table
 
 from cc_hub import __version__, gitops, manifest
 from cc_hub.commands.init import enclosing_git_repo
-from cc_hub.commands.link import inspect_skill_links
+from cc_hub.commands.link import POINTERS, inspect_skill_links
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import load_config
 
@@ -33,11 +33,6 @@ class Check:
 
 DATE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 AGENT_MARKERS = {"claude": ("claude", ".claude"), "codex": ("codex", ".codex")}
-# agent -> (instruction file that must import AGENTS.md, or None; skills directory)
-POINTERS: dict[str, tuple[str | None, str]] = {
-    "claude": ("CLAUDE.md", ".claude/skills"),
-    "codex": (None, ".agents/skills"),
-}
 IMPORT_LINE = "@AGENTS.md"
 _READ_ERRORS = (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError)
 

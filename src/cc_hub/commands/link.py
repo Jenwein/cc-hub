@@ -10,19 +10,51 @@ from pathlib import Path
 
 import typer
 
+from cc_hub.applock import LockError, load_lock
 from cc_hub.platform import LinkError, is_link, link_dir, link_target, remove_link
+
+# agent -> (instruction file that must import AGENTS.md, or None; skills directory)
+POINTERS: dict[str, tuple[str | None, str]] = {
+    "claude": ("CLAUDE.md", ".claude/skills"),
+    "codex": (None, ".agents/skills"),
+}
 
 
 def hub_skills(hub: Path) -> dict[str, Path]:
-    """Skill name -> resolved directory, for every `skills/<name>/SKILL.md` in the hub."""
-    root = Path(hub) / "skills"
-    if not root.is_dir():
-        return {}
-    return {p.name: p.resolve() for p in sorted(root.iterdir()) if (p / "SKILL.md").is_file()}
+    """Skill name -> directory: `skills/<name>/` and the skills of every installed app."""
+    hub = Path(hub)
+    roots = [hub / "skills"]
+    try:
+        roots += [hub / "apps" / app / "skills" for app in sorted(load_lock(hub).apps)]
+    except LockError:
+        pass
+    found: dict[str, Path] = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for p in sorted(root.iterdir()):
+            if (p / "SKILL.md").is_file():
+                found.setdefault(p.name, p)
+    return found
 
 
 def _same(a: Path, b: Path) -> bool:
     return os.path.normcase(str(a)) == os.path.normcase(str(b))
+
+
+def _norm(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _points_into_hub(target: Path, hub: Path) -> bool:
+    """True for a link to `skills/<name>` or `apps/<app>/skills/<name>` of this hub."""
+    parent = Path(_norm(target.parent))
+    for root in {_norm(hub), _norm(Path(hub).resolve())}:
+        if str(parent) == os.path.join(root, "skills"):
+            return True
+        if parent.name == "skills" and str(parent.parent.parent) == os.path.join(root, "apps"):
+            return True
+    return False
 
 
 @dataclass
@@ -36,13 +68,12 @@ class SkillLinks:
 def inspect_skill_links(hub: Path, target: Path) -> SkillLinks:
     """Compare an agent's skills directory with the hub's skills, changing nothing."""
     skills = hub_skills(hub)
-    root = (Path(hub) / "skills").resolve()
     state = SkillLinks()
     for name, src in skills.items():
         entry = Path(target) / name
         if not os.path.lexists(entry):
             state.missing.append(name)
-        elif _same(entry.resolve(), src):
+        elif _same(entry.resolve(), src.resolve()):
             state.ok.append(name)
         else:
             state.blocked.append(name)
@@ -50,7 +81,7 @@ def inspect_skill_links(hub: Path, target: Path) -> SkillLinks:
         for entry in sorted(Path(target).iterdir()):
             if entry.name in skills or entry.exists() or not is_link(entry):
                 continue
-            if _same(link_target(entry).parent, root):
+            if _points_into_hub(link_target(entry), hub):
                 state.dangling.append(entry.name)
     return state
 
@@ -86,7 +117,7 @@ def register(app: typer.Typer) -> None:
             "(for example .claude/skills).",
         ),
     ) -> None:
-        """Link every skill in skills/ into TARGET, one directory link per skill."""
+        """Link every skill in skills/ and in installed apps into TARGET, one link per skill."""
         from cc_hub.console import fail, resolve_hub
 
         hub = resolve_hub(ctx)
