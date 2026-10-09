@@ -223,3 +223,16 @@ def test_remove_reads_a_remove_md_that_is_not_utf8(hub: Path, ledger_tap: Path) 
     assert "stop" in plan.remove_md and "service" in plan.remove_md
     apps.apply_remove(hub, "ledger")
     assert not (hub / "apps" / "ledger").exists()
+
+
+def test_sync_sets_a_local_identity_in_a_clone_on_a_machine_without_one(
+    git_hub: Path, git_env: Path, ledger_tap: Path, tmp_path: Path
+) -> None:
+    installed(git_hub, ledger_tap)
+    clone = tmp_path / "other machine" / "hub"
+    subprocess.run(["git", "clone", "-q", str(git_hub), str(clone)], check=True)
+    git_env.write_text("", encoding="utf-8")
+    report = apps.sync(clone)
+    assert report.restored == ["ledger"] and report.warnings == []
+    assert git(clone, "config", "--local", "user.email").strip() == "hub@cc-hub.invalid"
+    assert git(clone, "config", "--local", "user.name").strip() == "中文 hub (cc-hub)"

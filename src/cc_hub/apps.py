@@ -31,6 +31,7 @@ from cc_hub.applock import (
 )
 from cc_hub.commands.link import POINTERS, sync_skill_links
 from cc_hub.encoding import read_text, write_text
+from cc_hub.hub import hub_name
 from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link, rmtree
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -972,6 +973,11 @@ def sync(hub: Path) -> SyncReport:
     hub = Path(hub)
     report = SyncReport()
     with hub_lock(hub):
+        if gitops.is_repo(hub):
+            try:  # the identity lives in .git/config, which a clone does not carry over
+                gitops.ensure_identity(hub, hub_name(hub))
+            except gitops.GitError as exc:
+                report.warnings.append(f"could not set a git identity: {exc}")
         lock = load_lock(hub)
         apps_dir = hub / "apps"
         apps_dir.mkdir(exist_ok=True)
@@ -986,5 +992,5 @@ def sync(hub: Path) -> SyncReport:
             except HUB_ERRORS as exc:
                 report.failed.append((name, str(exc)))
         report.strays = sorted(p.name for p in apps_dir.iterdir() if p.name not in lock.apps)
-        report.warnings = relink(hub)
+        report.warnings += relink(hub)
     return report

@@ -57,8 +57,10 @@ def git_check(hub: Path) -> Check:
             f'install git, then run `cc-hub init "{hub}"`',
         )
     problems = []
+    fixes = []
     if not gitops.has_identity(hub):
         problems.append("no git identity (user.name, user.email)")
+        fixes.append("run `cc-hub doctor --fix` to set a repository-local identity")
     n = gitops.uncommitted(hub)
     if n:
         problems.append(f"{n} uncommitted change(s)")
@@ -66,12 +68,8 @@ def git_check(hub: Path) -> Check:
     if not names:
         problems.append("no remote: the hub is not backed up")
     if problems:
-        return Check(
-            "git",
-            "warn",
-            "; ".join(problems),
-            "the agent commits after each task; docs/backup.md sets up a private remote",
-        )
+        fixes.append("the agent commits after each task; docs/backup.md sets up a private remote")
+        return Check("git", "warn", "; ".join(problems), "; ".join(fixes))
     return _ok("git", "committed; remote: " + ", ".join(names))
 
 
@@ -149,8 +147,13 @@ def run_checks(
         )
     name = str(cfg.get("hub", {}).get("name", hub.name))
 
-    # required-files (fix: user files and .gitignore only)
+    # required-files (fix: user files and .gitignore only, plus a git identity)
     if fix:
+        if gitops.is_repo(hub):
+            try:
+                gitops.ensure_identity(hub, name)
+            except gitops.GitError:
+                pass  # the git check below reports what is wrong
         restored = [".gitignore"]
         write_text(
             hub / ".gitignore", manifest.render(".gitignore", name=name, version=package_version)

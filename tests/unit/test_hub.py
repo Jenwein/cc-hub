@@ -66,3 +66,14 @@ def test_fail_raises_exit_with_code_1(capsys) -> None:
     assert exc.value.exit_code == 1
     captured = capsys.readouterr()
     assert "boom" in captured.err
+
+
+def test_hub_name_comes_from_hub_toml_or_the_directory(tmp_path: Path) -> None:
+    h = make_hub(tmp_path / "dir-name")
+    assert hub.hub_name(h) == "x"
+    (h / "hub.toml").write_text("[hub\n", encoding="utf-8")
+    assert hub.hub_name(h) == "dir-name"
+    (h / "hub.toml").write_text('[hub]\ntemplate_version = "1"\n', encoding="utf-8")
+    assert hub.hub_name(h) == "dir-name"
+    (h / "hub.toml").unlink()
+    assert hub.hub_name(h) == "dir-name"

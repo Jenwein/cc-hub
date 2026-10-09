@@ -287,3 +287,40 @@ def test_an_unreadable_app_toml_says_so(
     assert "ledger: app.toml in apps/ledger is unreadable" in check.message
     assert "cc-hub app remove ledger --yes" in check.fix
     assert "app sync" not in check.fix
+
+
+def test_git_check_points_at_doctor_fix_when_the_identity_is_missing(
+    git_hub: Path, git_env: Path, tmp_path: Path
+) -> None:
+    assert "identity" not in _git_check(git_hub, tmp_path).message
+    git_env.write_text("", encoding="utf-8")
+    check = _git_check(git_hub, tmp_path)
+    assert check.status == "warn"
+    assert "no git identity" in check.message
+    assert "run `cc-hub doctor --fix` to set a repository-local identity" in check.fix
+
+
+def test_fix_sets_a_repository_local_identity_before_it_commits(
+    git_hub: Path, git_env: Path, tmp_path: Path
+) -> None:
+    from cc_hub.gitops import run_git
+
+    (git_hub / "USER.md").unlink()
+    run_git(git_hub, "commit", "-qam", "lose USER.md")
+    git_env.write_text("", encoding="utf-8")
+    checks = run_checks(git_hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    assert run_git(git_hub, "config", "--local", "user.email").stdout.strip() == (
+        "hub@cc-hub.invalid"
+    )
+    assert run_git(git_hub, "config", "--local", "user.name").stdout.strip() == (
+        "中文 hub (cc-hub)"
+    )
+    assert run_git(git_hub, "log", "-1", "--format=%s").stdout.strip() == "cc-hub: doctor --fix"
+    assert "identity" not in next(c for c in checks if c.id == "git").message
+
+
+def test_fix_leaves_the_identity_alone_in_a_hub_that_is_not_a_repository(
+    hub: Path, tmp_path: Path
+) -> None:
+    run_checks(hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    assert not (hub / ".git").exists()

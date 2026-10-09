@@ -34,6 +34,9 @@ The new machine needs its own access to the repository: add a new deploy key wit
     git clone git@github.com:you/my-hub.git ~/.cc-hub
     cc-hub app sync
 
+`cc-hub app sync` also sets a repository-local git identity when the machine
+has none, so the restored hub can commit.
+
 Point cc-connect at the hub and send a message: the agent re-creates its
 pointers, registers the scheduled tasks on this machine and sets the apps up
 again.
