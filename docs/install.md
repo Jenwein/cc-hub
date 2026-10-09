@@ -3,7 +3,7 @@
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/) (single binary; installs Python 3.11+ itself if needed)
-- git (optional; `cc-hub init` initializes a repository in the hub)
+- git (history of the hub and its backups; `cc-hub init` creates the repository and the first commit)
 
 ## Install
 
@@ -40,8 +40,9 @@ root of one either; `init` refuses both. If the hub is not `~/.cc-hub`, set
 `CC_HUB_DIR` to its absolute path in cc-connect's
 `[projects.agent.options.env]` so every `cc-hub` call finds it from any
 working directory.
-Treat the hub as private data: commit it to a private repository if you want
-backups. Credentials, generated files and agent pointers are gitignored.
+Treat the hub as private data. It is a git repository with its own history;
+to back it up to a private remote, see [backup.md](backup.md). Credentials,
+generated files and agent pointers are gitignored.
 
 ## Connect cc-connect
 

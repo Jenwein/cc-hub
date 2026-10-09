@@ -19,7 +19,7 @@ def test_readme_command_tables_match_the_cli() -> None:
         assert set(TABLE_ROW.findall(readme)) == _command_names(), name
 
 
-DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md")
+DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md", "backup.md")
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -67,3 +67,10 @@ def test_every_python_file_declares_utf8() -> None:
     for path in sorted(ROOT.glob("src/**/*.py")) + sorted(ROOT.glob("tests/**/*.py")):
         first = path.read_text(encoding="utf-8").splitlines()[:1]
         assert first == ["# -*- coding: utf-8 -*-"], path
+
+
+def test_backup_doc_covers_a_private_remote() -> None:
+    text = (ROOT / "docs" / "backup.md").read_text(encoding="utf-8")
+    for phrase in ("private", "deploy key", "git -C ~/.cc-hub remote add origin", "rejected"):
+        assert phrase in text, phrase
+    assert "backup.md" in (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
