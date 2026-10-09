@@ -88,3 +88,6 @@ While developing, link your working copy so edits apply at once:
    `cc-hub app install <repo>/<app>`.
 4. Release a new version by raising `version` in `app.toml`, committing and
    pushing; users update with `cc-hub app update <app>`.
+
+Problems with an app go to its tap's issue tracker: `cc-hub feedback --app
+<name>` prints where, and the agent drafts the issue for you to approve.

@@ -38,6 +38,7 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
 | `cc-hub link <skills-dir>` | Link every hub skill into an agent's skills directory. |
 | `cc-hub tap add\|list\|remove` | Register git repositories of apps (taps). |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | Install, update and remove apps from taps. |
+| `cc-hub feedback [--app NAME] [--json]` | Where to report a problem, with an environment block; sends nothing. |
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |
 

@@ -27,6 +27,7 @@
 | `cc-hub link <skills-dir>` | 把总站的每个 skill 链接进 agent 的 skills 目录 |
 | `cc-hub tap add\|list\|remove` | 登记放应用的 git 仓库（tap） |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | 从 tap 安装、升级、卸载应用 |
+| `cc-hub feedback [--app NAME] [--json]` | 反馈问题的去处和环境信息，不发送任何东西 |
 | `cc-hub where` | 打印总站目录和包的安装位置 |
 | `cc-hub version` | 打印版本号 |
 
