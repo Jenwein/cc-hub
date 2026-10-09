@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -74,3 +75,16 @@ def link_dir(
         return "junction"
     except (OSError, subprocess.CalledProcessError) as exc:
         raise LinkError(f"could not link {dst} to {src}: {exc}") from exc
+
+
+def rmtree(path: Path) -> None:
+    """shutil.rmtree that also removes read-only files, such as git objects on Windows."""
+
+    def _retry(func, failed, *_):
+        os.chmod(failed, stat.S_IWRITE)
+        func(failed)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_retry)
+    else:
+        shutil.rmtree(path, onerror=_retry)
