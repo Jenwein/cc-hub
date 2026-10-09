@@ -14,11 +14,11 @@ From PyPI:
 
 Or a released tag straight from GitHub:
 
-    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.3.0
+    uv tool install git+https://github.com/Jenwein/cc-hub.git@v0.4.0
 
 Or download the wheel attached to the GitHub release and install that file:
 
-    uv tool install ./cc_hub-0.3.0-py3-none-any.whl
+    uv tool install ./cc_hub-0.4.0-py3-none-any.whl
 
 `uv tool install` puts `cc-hub` in `~/.local/bin` (Windows: `%USERPROFILE%\.local\bin`).
 Make sure that directory is on your PATH; `uv tool update-shell` can add it.
