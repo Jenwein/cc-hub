@@ -247,3 +247,43 @@ def test_a_broken_apps_lock_fails_only_that_check(hub: Path, tmp_path: Path) -> 
     s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
     assert s["apps"] == "fail"
     assert s["nested-git"] == "ok"
+
+
+def test_a_wrongly_shaped_apps_lock_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
+    (hub / "apps.lock").write_text("taps = 1\n", encoding="utf-8")
+    s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
+    assert s["apps"] == "fail"
+    assert s["nested-git"] == "ok"
+
+
+def test_a_link_whose_source_is_gone_says_so(hub: Path, tmp_path: Path) -> None:
+    from cc_hub import apps
+    from cc_hub.platform import rmtree
+
+    dev = tmp_path / "dev" / "notes"
+    dev.mkdir(parents=True)
+    (dev / "app.toml").write_text(
+        '[app]\nname = "notes"\nversion = "0.1.0"\ndescription = "Notes"\n', encoding="utf-8"
+    )
+    apps.install(hub, apps.plan_install(hub, str(dev), link=True))
+    rmtree(dev)
+    check = _apps_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "notes: link source" in check.message and "does not exist" in check.message
+    assert "cc-hub app remove notes --yes" in check.fix
+    assert "app sync" not in check.fix
+
+
+def test_an_unreadable_app_toml_says_so(
+    hub: Path, tmp_path: Path, ledger_tap: Path, register_tap
+) -> None:
+    from cc_hub import apps
+
+    register_tap(hub, "my-apps", ledger_tap)
+    apps.install(hub, apps.plan_install(hub, "my-apps/ledger"))
+    (hub / "apps" / "ledger" / "app.toml").write_text("[app\n", encoding="utf-8")
+    check = _apps_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "ledger: app.toml in apps/ledger is unreadable" in check.message
+    assert "cc-hub app remove ledger --yes" in check.fix
+    assert "app sync" not in check.fix

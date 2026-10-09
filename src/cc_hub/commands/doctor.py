@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import tomllib
@@ -15,7 +16,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from cc_hub import __version__, gitops, manifest
-from cc_hub.applock import LockError
+from cc_hub.applock import LockError, from_tilde, load_lock
 from cc_hub.apps import app_statuses
 from cc_hub.commands.init import enclosing_git_repo
 from cc_hub.commands.link import POINTERS, inspect_skill_links
@@ -77,6 +78,7 @@ def git_check(hub: Path) -> Check:
 def apps_check(hub: Path, which: Which) -> Check:
     try:
         rows = app_statuses(hub, which=which)
+        entries = load_lock(hub).apps
     except LockError as exc:
         return Check("apps", "fail", str(exc), "fix apps.lock, or restore it with git")
     if not rows:
@@ -85,8 +87,16 @@ def apps_check(hub: Path, which: Which) -> Check:
     fixes: list[str] = []
     for row in rows:
         if not row.present:
-            problems.append(f"{row.name}: missing from apps/")
-            fixes.append("run `cc-hub app sync`")
+            entry = entries.get(row.name, {})
+            if "link" in entry and not from_tilde(entry["link"]).is_dir():
+                problems.append(f"{row.name}: link source {entry['link']} does not exist")
+                fixes.append(f"restore that directory, or run `cc-hub app remove {row.name} --yes`")
+            elif not os.path.lexists(hub / "apps" / row.name):
+                problems.append(f"{row.name}: missing from apps/")
+                fixes.append("run `cc-hub app sync`")
+            else:
+                problems.append(f"{row.name}: app.toml in apps/{row.name} is unreadable")
+                fixes.append(f"run `cc-hub app remove {row.name} --yes`, then install it again")
             continue
         if not row.min_hub_ok:
             problems.append(f"{row.name}: needs a newer cc-hub")

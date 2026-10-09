@@ -38,3 +38,23 @@ def test_paths_under_home_use_a_tilde(tmp_path: Path) -> None:
     assert from_tilde("~/dev/x", home=home) == home / "dev" / "x"
     outside = tmp_path / "elsewhere"
     assert from_tilde(to_tilde(outside, home=home), home=home) == outside.absolute()
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("taps = 1\n", "taps must be a table"),
+        ("apps = 1\n", "apps must be a table"),
+        ("[taps]\nx = 1\n", "taps.x must be a table"),
+        ("[apps]\nx = 1\n", "apps.x must be a table"),
+        ('[taps.t]\nname = "x"\n', "taps.t needs a url or a path"),
+        ("[taps.t]\nurl = 1\n", "taps.t has a non-string url"),
+        ('[apps.a]\ntap = "t"\n', "apps.a needs a link, or a tap and a commit"),
+        ('[apps.a]\nversion = "1"\n', "apps.a needs a link, or a tap and a commit"),
+        ("[apps.a]\nlink = 1\n", "apps.a has a non-string link"),
+    ],
+)
+def test_a_wrongly_shaped_lock_raises(tmp_path: Path, text: str, match: str) -> None:
+    (tmp_path / "apps.lock").write_text(text, encoding="utf-8")
+    with pytest.raises(LockError, match=match):
+        load_lock(tmp_path)
