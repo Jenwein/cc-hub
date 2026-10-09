@@ -36,6 +36,8 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
 | `cc-hub update [--dry-run]` | Refresh framework-owned files; user files untouched; backups kept. |
 | `cc-hub memory log\|search\|recent` | Daily logs and long-term memory. |
 | `cc-hub link <skills-dir>` | Link every hub skill into an agent's skills directory. |
+| `cc-hub tap add\|list\|remove` | Register git repositories of apps (taps). |
+| `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | Install, update and remove apps from taps. |
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |
 

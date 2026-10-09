@@ -25,6 +25,8 @@
 | `cc-hub update [--dry-run]` | 只更新框架拥有的文件，用户文件不动，旧版本有备份 |
 | `cc-hub memory log\|search\|recent` | 日志与长期记忆 |
 | `cc-hub link <skills-dir>` | 把总站的每个 skill 链接进 agent 的 skills 目录 |
+| `cc-hub tap add\|list\|remove` | 登记放应用的 git 仓库（tap） |
+| `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | 从 tap 安装、升级、卸载应用 |
 | `cc-hub where` | 打印总站目录和包的安装位置 |
 | `cc-hub version` | 打印版本号 |
 
