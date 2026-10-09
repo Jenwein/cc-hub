@@ -59,7 +59,7 @@ def test_user_md_has_a_placeholder_for_each_bootstrap_question() -> None:
 
 
 def test_skills_have_valid_frontmatter_and_budget() -> None:
-    assert _skill_names() == {"hub-adapt", "hub-apps", "hub-memory"}
+    assert _skill_names() == {"hub-adapt", "hub-apps", "hub-feedback", "hub-memory"}
     for rel in manifest.FRAMEWORK_OWNED:
         if not (rel.startswith("skills/") and rel.endswith("/SKILL.md")):
             continue
@@ -186,3 +186,12 @@ def test_hub_adapt_and_cron_readme_mention_app_tasks() -> None:
     adapt = manifest.render("skills/hub-adapt/SKILL.md")
     assert "installed apps" in adapt and "hub-apps" in adapt
     assert "hub:<app>/<task>" in manifest.render("cron/README.md")
+
+
+def test_hub_feedback_asks_before_filing() -> None:
+    skill = manifest.render("skills/hub-feedback/SKILL.md")
+    for phrase in ("cc-hub feedback", "gh issue list", "gh issue create", "--body-file",
+                   "USER.md", "MEMORY.md", "agrees", "group chat"):
+        assert phrase in skill, phrase
+    agents = manifest.render("AGENTS.md")
+    assert "`hub-feedback`" in agents and "publishes" in agents

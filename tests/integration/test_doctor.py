@@ -91,7 +91,7 @@ def test_skill_links_are_checked_per_skill(hub: Path, tmp_path: Path) -> None:
     target.mkdir(parents=True)
     check = _pointer(hub, home, "codex")
     assert check.status == "warn"
-    assert "not linked: hub-adapt, hub-apps, hub-memory" in check.message
+    assert "not linked: hub-adapt, hub-apps, hub-feedback, hub-memory" in check.message
     assert "hub-adapt" in check.fix
     sync_skill_links(hub, target)
     assert _pointer(hub, home, "codex").status == "ok"

@@ -11,7 +11,7 @@ from cc_hub.cli import app
 from cc_hub.commands.link import inspect_skill_links, sync_skill_links
 from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link
 
-BUILT_IN = ["hub-adapt", "hub-apps", "hub-memory"]
+BUILT_IN = ["hub-adapt", "hub-apps", "hub-feedback", "hub-memory"]
 
 
 def add_skill(hub: Path, name: str) -> Path:
@@ -62,7 +62,10 @@ def test_link_leaves_other_entries_alone(hub: Path) -> None:
     (target / "hub-memory" / "SKILL.md").write_text("an old copy", encoding="utf-8")
     (target / "claude-only").mkdir()
     results = dict(sync_skill_links(hub, target))
-    assert results == {"hub-adapt": "linked", "hub-apps": "linked", "hub-memory": "blocked"}
+    assert results == {
+        "hub-adapt": "linked", "hub-apps": "linked", "hub-feedback": "linked",
+        "hub-memory": "blocked",
+    }
     assert (target / "hub-memory" / "SKILL.md").read_text(encoding="utf-8") == "an old copy"
     assert (target / "claude-only").is_dir()
     state = inspect_skill_links(hub, target)

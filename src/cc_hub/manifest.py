@@ -21,6 +21,7 @@ FRAMEWORK_OWNED: tuple[str, ...] = (
     "skills/hub-adapt/SKILL.md",
     "skills/hub-apps/SKILL.md",
     "skills/hub-apps/authoring.md",
+    "skills/hub-feedback/SKILL.md",
     "skills/hub-memory/SKILL.md",
 )
 # Seeded once by `cc-hub init`, never touched afterwards.
