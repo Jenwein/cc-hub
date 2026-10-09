@@ -827,10 +827,14 @@ def apply_update(hub: Path, preview: UpdatePreview) -> InstallResult:
         app_dir = hub / "apps" / name
         backup = hub / ".cc-hub" / "backups" / "apps" / name / preview.old[:7]
         try:
-            if backup.exists():
-                rmtree(backup)
-            if app_dir.exists():
-                shutil.copytree(app_dir, backup)
+            # the first backup of this commit holds the pre-update state; never overwrite it
+            if app_dir.exists() and not backup.exists():
+                try:
+                    shutil.copytree(app_dir, backup)
+                except BaseException:
+                    if backup.exists():
+                        rmtree(backup)  # no half-copied backup that a retry would keep
+                    raise
         except OSError as exc:
             raise AppError(f"backup failed, nothing was changed: {exc}") from exc
         seed_dir = app_dir / "seed"
@@ -843,15 +847,20 @@ def apply_update(hub: Path, preview: UpdatePreview) -> InstallResult:
             os.rename(app_dir, retired)
         try:
             _materialize(hub, plan.source, app_dir)
+            seeded = _seed(hub, plan, only=set(plan.seed) - old_seed)
+            entry.update(commit=preview.new, version=plan.manifest.version)
+            save_lock(hub, lock)
         except BaseException:
+            # apps.lock still names the old commit: put the old tree back
+            _discard(app_dir)
             if retired.exists():
                 os.rename(retired, app_dir)
             raise
         if retired.exists():
-            rmtree(retired)
-        seeded = _seed(hub, plan, only=set(plan.seed) - old_seed)
-        entry.update(commit=preview.new, version=plan.manifest.version)
-        save_lock(hub, lock)
+            try:
+                rmtree(retired)
+            except OSError:
+                pass
         warnings = relink(hub)
         warning = gitops.commit_paths(
             hub, [LOCK_FILE, *seeded],
@@ -882,10 +891,13 @@ def plan_remove(hub: Path, name: str) -> RemovePlan:
     m = read_installed(hub, name)
     cron = app_dir / "cron"
     tasks = sorted(p.stem for p in cron.glob("*.md")) if cron.is_dir() else []
-    remove_md = app_dir / "REMOVE.md"
+    try:
+        remove_md = (app_dir / "REMOVE.md").read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        remove_md = ""
     return RemovePlan(
         name, "link" in entry, m.data_dirs if m else [], [f"hub:{name}/{t}" for t in tasks],
-        m.requires if m else [], read_text(remove_md) if remove_md.is_file() else "",
+        m.requires if m else [], remove_md,
     )
 
 

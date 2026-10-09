@@ -171,3 +171,55 @@ def test_tap_and_app_commands_commit_apps_lock(git_hub: Path, ledger_tap: Path) 
         "cc-hub: tap add my-apps",
     ]
     assert log[2].startswith("cc-hub: app install ledger (my-apps@")
+
+
+def test_a_failed_update_rolls_back_and_keeps_the_first_backup(
+    hub: Path, ledger_tap: Path, tap_commit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installed(hub, ledger_tap)
+    old = load_lock(hub).apps["ledger"]["commit"]
+    new = tap_commit(ledger_tap, {
+        "ledger/SETUP.md": "# Setup v2\n",
+        "ledger/seed/ledger/budget.beancount": "; budget\n",
+    })
+    app_dir = hub / "apps" / "ledger"
+    skill = app_dir / "skills" / "ledger" / "SKILL.md"
+    skill.write_text("my local edit\n", encoding="utf-8")
+    preview = apps.preview_update(hub, "ledger")
+    backup = hub / ".cc-hub" / "backups" / "apps" / "ledger" / old[:7]
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(apps, "save_lock", boom)
+        with pytest.raises(OSError, match="disk full"):
+            apps.apply_update(hub, preview)
+
+    assert load_lock(hub).apps["ledger"]["commit"] == old
+    assert (app_dir / "SETUP.md").read_text(encoding="utf-8") == (
+        "# Setup\n\nAsk the user for the currency.\n"
+    )
+    assert skill.read_text(encoding="utf-8") == "my local edit\n"
+    assert (backup / "skills" / "ledger" / "SKILL.md").read_text(encoding="utf-8") == (
+        "my local edit\n"
+    )
+    assert not any((hub / ".cc-hub" / "tmp").iterdir())
+
+    again = apps.preview_update(hub, "ledger")
+    assert again.local_changes == ["skills/ledger/SKILL.md"]
+    apps.apply_update(hub, again)
+    assert load_lock(hub).apps["ledger"]["commit"] == new
+    assert (app_dir / "SETUP.md").read_text(encoding="utf-8") == "# Setup v2\n"
+    assert (backup / "skills" / "ledger" / "SKILL.md").read_text(encoding="utf-8") == (
+        "my local edit\n"
+    )
+
+
+def test_remove_reads_a_remove_md_that_is_not_utf8(hub: Path, ledger_tap: Path) -> None:
+    installed(hub, ledger_tap)
+    (hub / "apps" / "ledger" / "REMOVE.md").write_bytes(b"stop \xff service\n")
+    plan = apps.plan_remove(hub, "ledger")
+    assert "stop" in plan.remove_md and "service" in plan.remove_md
+    apps.apply_remove(hub, "ledger")
+    assert not (hub / "apps" / "ledger").exists()
