@@ -93,7 +93,12 @@ def sync_skill_links(
 
     Returns (name, status) pairs sorted by name; status is linked, existing,
     removed or blocked. Entries that are not links to hub skills are left alone.
+    A target that is itself a link to the hub's whole skills/ (an older setup) is
+    replaced by a real directory, so links to app skills do not land inside skills/.
     """
+    if is_link(target) and _same(Path(target).resolve(), (Path(hub) / "skills").resolve()):
+        remove_link(target)
+        Path(target).mkdir(parents=True)
     skills = hub_skills(hub)
     state = inspect_skill_links(hub, target)
     results = [(name, "existing") for name in state.ok]

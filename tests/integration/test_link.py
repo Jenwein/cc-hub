@@ -69,12 +69,12 @@ def test_link_leaves_other_entries_alone(hub: Path) -> None:
     assert state.blocked == ["hub-memory"] and state.missing == [] and state.dangling == []
 
 
-def test_link_accepts_a_target_that_already_reaches_the_whole_skills_directory(
-    hub: Path,
-) -> None:
+def test_link_replaces_a_target_that_links_the_whole_skills_directory(hub: Path) -> None:
     target = hub / ".claude" / "skills"
     link_dir(hub / "skills", target)
-    assert sync_skill_links(hub, target) == [(name, "existing") for name in BUILT_IN]
+    assert sync_skill_links(hub, target) == [(name, "linked") for name in BUILT_IN]
+    assert not is_link(target)
+    assert all(is_link(target / name) for name in BUILT_IN)
 
 
 @pytest.mark.skipif(is_windows(), reason="POSIX symlinks")
@@ -136,6 +136,15 @@ def test_link_includes_the_skills_of_installed_apps(hub: Path) -> None:
     install_fake_app(hub, "ledger", "ledger")
     target = hub / ".claude" / "skills"
     assert ("ledger", "linked") in sync_skill_links(hub, target)
+    assert (target / "ledger" / "SKILL.md").is_file()
+
+
+def test_link_does_not_write_app_links_through_a_whole_skills_directory_link(hub: Path) -> None:
+    install_fake_app(hub, "ledger", "ledger")
+    target = hub / ".claude" / "skills"
+    link_dir(hub / "skills", target)
+    sync_skill_links(hub, target)
+    assert not os.path.lexists(hub / "skills" / "ledger")
     assert (target / "ledger" / "SKILL.md").is_file()
 
 
