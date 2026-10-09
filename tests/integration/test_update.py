@@ -209,3 +209,41 @@ def test_update_removes_every_retired_file(hub: Path) -> None:
     for rel in manifest.RETIRED:
         assert not (hub / rel).exists(), rel
         assert read_text(backups / rel) == f"old {rel}"
+
+
+def _git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True,
+        encoding="utf-8", check=True,
+    ).stdout
+
+
+def test_update_commits_only_what_it_changed(git_hub: Path) -> None:
+    (git_hub / "AGENTS.md").write_text("custom agents", encoding="utf-8")
+    _git(git_hub, "commit", "-qam", "user edit")
+    (git_hub / "SOUL.md").write_text("draft soul", encoding="utf-8")
+    result = update_hub(git_hub, version="9.9.9")
+    assert result.git_warning is None
+    assert _git(git_hub, "log", "-1", "--format=%s").strip() == (
+        f"cc-hub: update {__version__} -> 9.9.9"
+    )
+    committed = set(_git(git_hub, "show", "--name-only", "--format=", "HEAD").split())
+    assert committed == {"AGENTS.md", "hub.toml"}
+    assert " M SOUL.md" in _git(git_hub, "status", "--porcelain")
+
+
+def test_update_makes_the_first_commit_of_a_hub_without_one(hub: Path, git_env: Path) -> None:
+    _git(hub, "init", "-q")
+    update_hub(hub, version="9.9.9")
+    assert _git(hub, "log", "--format=%s").split("\n")[:2] == [
+        "cc-hub: update " + __version__ + " -> 9.9.9",
+        "cc-hub: init",
+    ]
+
+
+def test_update_dry_run_does_not_commit(git_hub: Path) -> None:
+    before = _git(git_hub, "rev-parse", "HEAD")
+    update_hub(git_hub, version="9.9.9", dry_run=True)
+    assert _git(git_hub, "rev-parse", "HEAD") == before
