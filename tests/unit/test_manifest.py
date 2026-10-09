@@ -83,7 +83,7 @@ def test_hub_toml_renders_with_version_and_created() -> None:
 def test_gitignore_maps_to_underscore_source() -> None:
     assert manifest.template_source(".gitignore").name == "_gitignore"
     text = manifest.render(".gitignore")
-    for line in (".env", "secrets/", "apps/", ".cc-hub/", ".cc-connect/", "CLAUDE.md", ".claude/"):
+    for line in (".env", "secrets/", "/apps/", ".cc-hub/", ".cc-connect/", "CLAUDE.md", ".claude/"):
         assert line in text.splitlines(), line
 
 
@@ -205,3 +205,11 @@ def test_gitattributes_keeps_line_endings() -> None:
     text = manifest.render(".gitattributes")
     assert "* -text" in text.splitlines()
     assert "\r" not in text
+
+
+def test_agents_md_undo_recipe_restores_the_version_before_the_change() -> None:
+    text = " ".join(manifest.render("AGENTS.md").split())
+    assert "git restore --source <commit>~1 -- <path>" in text
+    assert "where `<commit>` is the change to undo" in text
+    assert "--source <commit> --" not in text
+

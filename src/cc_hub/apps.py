@@ -699,6 +699,10 @@ def add_tap(
     hub: Path, source: str, *, name: str | None = None, cwd: Path | None = None
 ) -> tuple[str, dict, int, str | None]:
     entry = taps.normalize_source(source, cwd=cwd)
+    if "url" in entry and taps.strip_credentials(entry["url"]) != entry["url"]:
+        raise AppError(
+            "the tap URL contains credentials; remove them and use a git credential helper"
+        )
     name = check_name(name or taps.default_name(entry), "tap name")
     hub = Path(hub)
     with hub_lock(hub):

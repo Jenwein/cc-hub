@@ -49,8 +49,9 @@ Do these in order before answering the first message:
   and today's log: `git add <paths>`, then
   `git commit -m "<one line: what changed>" -- <paths>`. Commit only the
   paths you changed; other sessions may have work in progress.
-- To undo a change, restore the earlier version from history
-  (`git log -- <path>`, then `git restore --source <commit> -- <path>`).
+- To undo a change, restore the version before it from history
+  (`git log -- <path>`, then `git restore --source <commit>~1 -- <path>`,
+  where `<commit>` is the change to undo).
 - Never rewrite history: no `reset --hard`, no `rebase`, no force push.
 - Do not push; the nightly consolidation task does (see `hub-memory`).
 

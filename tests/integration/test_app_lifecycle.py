@@ -236,3 +236,35 @@ def test_sync_sets_a_local_identity_in_a_clone_on_a_machine_without_one(
     assert report.restored == ["ledger"] and report.warnings == []
     assert git(clone, "config", "--local", "user.email").strip() == "hub@cc-hub.invalid"
     assert git(clone, "config", "--local", "user.name").strip() == "中文 hub (cc-hub)"
+
+
+def test_a_tap_url_with_credentials_is_refused_before_cloning(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cloned = []
+    monkeypatch.setattr(apps.taps, "clone", lambda url, dest: cloned.append(url))
+    for url in ("https://u:tok@github.com/a/b", "https://tok@github.com/a/b",
+                "ssh://git:pw@example.invalid/a/b.git"):
+        with pytest.raises(apps.AppError, match="contains credentials.*git credential helper"):
+            apps.add_tap(hub, url, name="secret")
+    assert cloned == []
+    assert load_lock(hub).taps == {}
+    assert not (hub / ".cc-hub" / "taps").exists()
+
+
+def test_an_ssh_tap_url_without_a_password_is_allowed(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cc_hub import taps
+
+    cloned = []
+
+    def stop(url, dest):
+        cloned.append(url)
+        raise taps.TapError("stop here")
+
+    monkeypatch.setattr(apps.taps, "clone", stop)
+    for url in ("git@github.com:a/b.git", "ssh://git@github.com/a/b.git"):
+        with pytest.raises(taps.TapError, match="stop here"):
+            apps.add_tap(hub, url, name="over-ssh")
+    assert cloned == ["git@github.com:a/b.git", "ssh://git@github.com/a/b.git"]
