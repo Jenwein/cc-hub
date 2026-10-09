@@ -130,3 +130,16 @@ def test_cron_registration_passes_session_mode_and_desc() -> None:
 
 def test_hub_adapt_leaves_permissions_to_the_runtime() -> None:
     assert "do not change them here" in manifest.render("skills/hub-adapt/SKILL.md")
+
+
+def test_hub_adapt_routes_through_one_line_imports_and_per_skill_links() -> None:
+    adapt = manifest.render("skills/hub-adapt/SKILL.md")
+    assert "`cc-hub link <your skills directory>`" in adapt
+    assert "`CLAUDE.md` containing only `@AGENTS.md`" in adapt
+    assert "`skills/<name>/`" in adapt
+    assert "`skills/<name>/`" in manifest.render("AGENTS.md")
+
+
+def test_bootstrap_names_the_hub_adapt_file() -> None:
+    """Skills are not routed yet during bootstrap, so the agent opens the file by path."""
+    assert "`skills/hub-adapt/SKILL.md`" in manifest.render("BOOTSTRAP.md")

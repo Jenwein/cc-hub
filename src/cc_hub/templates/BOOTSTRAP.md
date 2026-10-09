@@ -6,8 +6,8 @@ first and come back here. Work through the steps in order.
 1. **Check.** Run `cc-hub version`. If `cc-hub` cannot be found, stop and tell
    the user the installation is incomplete: cc-hub must be installed and on
    the PATH cc-connect gives you. Nothing below works without it.
-2. **Adapt.** Follow the `hub-adapt` skill so your own ecosystem finds this
-   hub's instructions and skills.
+2. **Adapt.** Read `skills/hub-adapt/SKILL.md` and follow it so your own
+   ecosystem finds this hub's instructions and skills.
 3. **Name.** Ask the user what they want to call you. Never pick a name
    yourself. Agree on a one-line vibe and an emoji. Write all three into
    `IDENTITY.md` and put the vibe line under "Core vibe" in `SOUL.md`.

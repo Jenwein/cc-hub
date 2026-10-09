@@ -15,10 +15,8 @@ cc-hub works natively, with these differences:
   folders its shells create under `%APPDATA%` land in its private storage,
   where cc-connect and the agents it starts cannot see them.
 - **Links.** Creating symlinks needs Developer Mode or administrator rights,
-  so `cc-hub link` creates a directory junction instead; if that fails it
-  copies and leaves a `.cc-hub-copied` marker. `cc-hub doctor` reports
-  `link-stale` when the copy is older than `skills/`; re-run the `hub-adapt`
-  skill to refresh it.
+  so `cc-hub link` gives each skill a directory junction instead, which needs
+  neither.
 - **Shell.** Claude Code uses Git Bash for its Bash tool when Git for Windows
   is installed and PowerShell otherwise; Codex uses PowerShell.
 - **Encoding.** All cc-hub output is UTF-8.
