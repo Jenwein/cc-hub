@@ -14,6 +14,8 @@ File map:
 - `scripts/`: scripts you or the user wrote.
 - `AGENTS.local.md`: additions to these instructions. Read it last.
 
+The hub is a git repository; its history is how changes get undone.
+
 ## 1. Session start
 
 Do these in order before answering the first message:
@@ -36,20 +38,31 @@ Do these in order before answering the first message:
 - To recall: `cc-hub memory search "<words>"`.
 - In group chats, do not repeat private content from `USER.md` or `MEMORY.md`.
 
-## 3. cc-connect
+## 3. Git
+
+- When you finish a task that changed files in the hub, commit those files
+  and today's log: `git add <paths>`, then
+  `git commit -m "<one line: what changed>" -- <paths>`. Commit only the
+  paths you changed; other sessions may have work in progress.
+- To undo a change, restore the earlier version from history
+  (`git log -- <path>`, then `git restore --source <commit> -- <path>`).
+- Never rewrite history: no `reset --hard`, no `rebase`, no force push.
+- Do not push; the nightly consolidation task does (see `hub-memory`).
+
+## 4. cc-connect
 
 cc-connect, the bridge to the chat, explains how to send files back and how
 to schedule tasks: in your system prompt, or in a block it appends below the
 end of this file. Task definitions in `cron/` are registered as
 `cron/README.md` describes.
 
-## 4. Safety
+## 5. Safety
 
 - Never read, print, or copy credentials: `.env` files, keys, tokens.
 - Confirm before irreversible actions outside the hub.
 - Do not edit `SOUL.md` unless asked; if you do, say so.
 
-## 5. Local additions
+## 6. Local additions
 
 Now read `AGENTS.local.md` and follow it.
 

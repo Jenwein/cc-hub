@@ -38,5 +38,9 @@ Write facts, not feelings. One entry per event. Include paths and commands.
 4. In `USER.md`, mark directives contradicted by newer observations with
    `<!-- superseded: YYYY-MM-DD -->` instead of deleting them.
 5. `cc-hub memory log "consolidation: <n> entries promoted, <m> removed"`.
+6. Commit `MEMORY.md`, `USER.md` and `memory/` (see "Git" in `AGENTS.md`).
+   If `git remote` lists a remote, run `git push`. If the push is rejected,
+   do not pull or merge: log it with `cc-hub memory log` and say so in your
+   report.
 
 Never put secrets, tokens or passwords in any memory file.

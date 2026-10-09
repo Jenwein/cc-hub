@@ -120,12 +120,32 @@ def test_cron_definitions_have_schedule_default_and_session() -> None:
 
 def test_cron_registration_passes_session_mode_and_desc() -> None:
     """A task's `session` only takes effect when the registration command passes it."""
-    for rel in ("BOOTSTRAP.md", "cron/README.md"):
+    for rel in ("skills/hub-adapt/SKILL.md", "cron/README.md"):
         text = manifest.render(rel)
         assert "--session-mode <session>" in text, rel
         assert '--desc "hub:<name>"' in text, rel
-    # Bootstrap skips tasks that are already registered instead of adding duplicates.
-    assert "cc-connect cron list" in manifest.render("BOOTSTRAP.md")
+    # hub-adapt skips tasks that are already registered instead of adding duplicates.
+    assert "cc-connect cron list" in manifest.render("skills/hub-adapt/SKILL.md")
+
+
+def test_bootstrap_leaves_scheduled_tasks_to_hub_adapt() -> None:
+    text = manifest.render("BOOTSTRAP.md")
+    assert "cc-connect cron add" not in text
+    assert "scheduled tasks" in text
+    assert "5. **Finish.**" in text and "6." not in text
+
+
+def test_agents_md_has_the_git_rules() -> None:
+    text = manifest.render("AGENTS.md")
+    assert "## 3. Git" in text
+    for phrase in ("git commit", "-- <paths>", "reset --hard", "force push", "hub-memory"):
+        assert phrase in text, phrase
+
+
+def test_consolidation_commits_and_pushes() -> None:
+    memory = manifest.render("skills/hub-memory/SKILL.md")
+    assert "git push" in memory and "do not pull or merge" in memory
+    assert "pushed" in manifest.render("cron/memory-consolidate.md")
 
 
 def test_hub_adapt_leaves_permissions_to_the_runtime() -> None:

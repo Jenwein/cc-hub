@@ -1,6 +1,6 @@
 ---
 name: hub-adapt
-description: Make your own agent ecosystem discover this hub's instructions and skills. Run on first use, after switching agents, after adding or removing a skill, or when `cc-hub doctor` reports missing pointers.
+description: Make your own agent ecosystem discover this hub's instructions and skills, and register the hub's default scheduled tasks. Run on first use, after switching agents, on a new machine, after adding or removing a skill, or when `cc-hub doctor` reports missing pointers.
 ---
 
 # hub-adapt
@@ -25,6 +25,14 @@ create here. Every step is idempotent: re-running must not duplicate anything.
 3. **Trust.** If your runtime needs a one-time interactive trust step before
    it reads this directory's instructions or skills, tell the user exactly
    what to run and why.
+4. **Scheduled tasks.** Only in a direct chat with the user: a task reports
+   back to the chat it was registered from. Run `cc-connect cron list`. For
+   every file in `cron/` with `default: true` whose `hub:<name>` (`<name>` is
+   the file name without `.md`) is not listed yet, run:
+
+       cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
+
+   If `cc-connect` is not available, log that this is still to do.
 
 Permissions and sandbox settings belong to the user and your runtime;
 do not change them here.
