@@ -213,7 +213,7 @@ cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <sessio
 - **保留尾部**：清单里标为保留尾部的文件（`AGENTS.md`）只替换分界标记及以上的部分，标记以下原样接回。文件里没有分界标记、但有 cc-connect 的 `<!-- cc-connect-instructions -->` 时，从该标记起保留到文件末尾；两者都没有则整份替换。替换后与原文件相同的算作未改动。
 - `hub.toml`：用模板默认值补齐缺失的表和键，已有的值不覆盖；`template_version` 改为包版本。原地编辑，保留用户的注释和排版；无法原地编辑时退回整份重写。
 - `apps.lock`、`apps/` 和数据目录不在清单里，update 不碰。
-- 提交：总站仓库还没有任何提交时，先提交所有不被忽略的文件（`cc-hub: init`）；再提交本次改动和删除的框架文件与 `hub.toml`（`cc-hub: update <旧版本> -> <新版本>`）。
+- 提交：本机没有任何 git 身份时，同 init 只在总站仓库里设置；总站仓库还没有任何提交时，先提交所有不被忽略的文件（`cc-hub: init`）；再提交本次改动和删除的框架文件与 `hub.toml`（`cc-hub: update <旧版本> -> <新版本>`）。
 - 打印每个文件的状态：updated、unchanged、not present (one-time)、removed (retired)。
 
 ### 5.5 memory

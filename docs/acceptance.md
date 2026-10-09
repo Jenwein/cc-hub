@@ -18,8 +18,8 @@ one chat platform (Feishu or any other).
 7. Bump the package version and run `cc-hub update`: `AGENTS.md` changes above
    its closing marker and keeps everything below it (the cc-connect block
    included); `SOUL.md`, `USER.md` and `memory/` do not change;
-   `.cc-hub/backups/` holds the previous version; there is a `cc-hub: update`
-   commit.
+   `.cc-hub/backups/` holds the previous version; there is a
+   `cc-hub: update <old> -> <new>` commit.
 8. Prepare a test tap whose app has `requires`, `cron/`, `seed/` and
    `SETUP.md`. Ask the agent in the chat to install it: it shows the overview
    first and installs after you agree, asks before installing the software,

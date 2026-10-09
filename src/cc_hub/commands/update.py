@@ -156,6 +156,8 @@ def update_hub(
     result.updated = [rel for rel, _, _ in plan]
     if dry_run:
         return result
+    if gitops.is_repo(hub):
+        gitops.ensure_identity(hub, name)
     if gitops.is_repo(hub) and not gitops.has_commits(hub):
         result.git_warning = gitops.commit_all(hub, "cc-hub: init")
 

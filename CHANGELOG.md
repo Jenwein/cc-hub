@@ -21,11 +21,12 @@
 
 ### Changed
 
-- The hub's git repository is used. `init` makes the first commit and sets a
-  repository-local identity when git has none; `update`, `tap`, `app` and
-  `doctor --fix` commit the paths they change. `AGENTS.md` has a Git section:
-  the agent commits after each task and never rewrites history. The nightly
-  memory-consolidate task pushes when the hub has a remote.
+- The hub's git repository is used. `init` makes the first commit, and `init`
+  and `update` set a repository-local identity when git has none; `update`,
+  `tap`, `app` and `doctor --fix` commit the paths they change. `AGENTS.md`
+  has a Git section: the agent commits after each task and never rewrites
+  history. The nightly memory-consolidate task pushes when the hub has a
+  remote.
 - `hub-adapt` registers the hub's default scheduled tasks, so they are
   registered on every machine; `BOOTSTRAP.md` has five steps.
 - `cc-hub link` and the `doctor` check `pointers` include the skills of

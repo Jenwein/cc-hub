@@ -243,6 +243,18 @@ def test_update_makes_the_first_commit_of_a_hub_without_one(hub: Path, git_env: 
     ]
 
 
+def test_update_sets_an_identity_when_git_has_none(hub: Path, git_env: Path) -> None:
+    git_env.write_text("", encoding="utf-8")
+    _git(hub, "init", "-q")
+    result = update_hub(hub, version="9.9.9")
+    assert result.git_warning is None
+    assert _git(hub, "log", "--format=%s").split("\n")[:2] == [
+        "cc-hub: update " + __version__ + " -> 9.9.9",
+        "cc-hub: init",
+    ]
+    assert _git(hub, "config", "--local", "user.email").strip() == "hub@cc-hub.invalid"
+
+
 def test_update_dry_run_does_not_commit(git_hub: Path) -> None:
     before = _git(git_hub, "rev-parse", "HEAD")
     update_hub(git_hub, version="9.9.9", dry_run=True)
