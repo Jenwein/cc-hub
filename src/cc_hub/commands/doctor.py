@@ -15,6 +15,8 @@ from rich.markup import escape
 from rich.table import Table
 
 from cc_hub import __version__, gitops, manifest
+from cc_hub.applock import LockError
+from cc_hub.apps import app_statuses
 from cc_hub.commands.init import enclosing_git_repo
 from cc_hub.commands.link import POINTERS, inspect_skill_links
 from cc_hub.encoding import read_text, write_text
@@ -70,6 +72,37 @@ def git_check(hub: Path) -> Check:
             "the agent commits after each task; docs/backup.md sets up a private remote",
         )
     return _ok("git", "committed; remote: " + ", ".join(names))
+
+
+def apps_check(hub: Path, which: Which) -> Check:
+    try:
+        rows = app_statuses(hub, which=which)
+    except LockError as exc:
+        return Check("apps", "fail", str(exc), "fix apps.lock, or restore it with git")
+    if not rows:
+        return _ok("apps", "no apps installed")
+    problems: list[str] = []
+    fixes: list[str] = []
+    for row in rows:
+        if not row.present:
+            problems.append(f"{row.name}: missing from apps/")
+            fixes.append("run `cc-hub app sync`")
+            continue
+        if not row.min_hub_ok:
+            problems.append(f"{row.name}: needs a newer cc-hub")
+            fixes.append("run `uv tool upgrade cc-hub`")
+        for m in row.missing:
+            install = m["install"] or "no install steps for this platform"
+            problems.append(f"{row.name}: needs {m['bin']} ({install})")
+        if row.setup == "pending":
+            problems.append(f"{row.name}: setup pending")
+        elif row.setup == "waiting":
+            problems.append(f"{row.name}: setup waiting ({row.note})")
+        if row.missing or row.setup != "done":
+            fixes.append("ask the agent to set the app up (hub-apps skill)")
+    if problems:
+        return Check("apps", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
+    return _ok("apps", f"{len(rows)} app(s) set up")
 
 
 def run_checks(
@@ -235,6 +268,9 @@ def run_checks(
             )
         else:
             checks.append(_ok(f"pointers:{agent}", "pointers present"))
+
+    # apps
+    checks.append(apps_check(hub, which))
 
     # git
     checks.append(git_check(hub))

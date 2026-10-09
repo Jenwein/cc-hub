@@ -22,6 +22,7 @@ CHECK_IDS = [
     "memory-budget:USER.md",
     "memory-files",
     "pointers",
+    "apps",
     "git",
     "nested-git",
 ]
@@ -206,3 +207,43 @@ def test_fix_commits_what_it_restored(git_hub: Path, tmp_path: Path) -> None:
     assert log == "cc-hub: doctor --fix"
     shown = run_git(git_hub, "show", "--name-only", "--format=", "HEAD").stdout.split()
     assert shown == ["USER.md"]
+
+
+def _apps_check(hub: Path, tmp_path: Path, which=lambda name: None):
+    checks = run_checks(hub, home=tmp_path / "home", which=which)
+    return next(c for c in checks if c.id == "apps")
+
+
+def test_apps_check_without_apps(hub: Path, tmp_path: Path) -> None:
+    check = _apps_check(hub, tmp_path)
+    assert (check.status, check.message) == ("ok", "no apps installed")
+
+
+def test_apps_check_reports_software_and_setup(
+    hub: Path, tmp_path: Path, ledger_tap: Path, register_tap
+) -> None:
+    from cc_hub import apps
+
+    register_tap(hub, "my-apps", ledger_tap)
+    apps.install(hub, apps.plan_install(hub, "my-apps/ledger"))
+    check = _apps_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "ledger: needs cc-hub-test-no-such-bin (uv tool install beancount)" in check.message
+    assert "ledger: setup pending" in check.message
+    assert "hub-apps" in check.fix
+    apps.set_setup_state(hub, "ledger", "done")
+    check = _apps_check(hub, tmp_path, which=lambda name: f"/usr/bin/{name}")
+    assert (check.status, check.message) == ("ok", "1 app(s) set up")
+    from cc_hub.platform import rmtree
+
+    rmtree(hub / "apps" / "ledger")
+    check = _apps_check(hub, tmp_path)
+    assert "ledger: missing from apps/" in check.message
+    assert "cc-hub app sync" in check.fix
+
+
+def test_a_broken_apps_lock_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
+    (hub / "apps.lock").write_text("[apps\n", encoding="utf-8")
+    s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
+    assert s["apps"] == "fail"
+    assert s["nested-git"] == "ok"
