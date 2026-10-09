@@ -190,8 +190,10 @@ def test_hub_adapt_and_cron_readme_mention_app_tasks() -> None:
 
 def test_hub_feedback_asks_before_filing() -> None:
     skill = manifest.render("skills/hub-feedback/SKILL.md")
-    for phrase in ("cc-hub feedback", "gh issue list", "gh issue create", "--body-file",
-                   "USER.md", "MEMORY.md", "agrees", "group chat"):
+    for phrase in ("cc-hub feedback", "gh issue list", "gh issue create", "gh issue comment",
+                   "--body-file", "USER.md", "MEMORY.md", "agrees", "group chat",
+                   "repository"):
         assert phrase in skill, phrase
     agents = manifest.render("AGENTS.md")
     assert "`hub-feedback`" in agents and "publishes" in agents
+    assert "commenting" in agents
