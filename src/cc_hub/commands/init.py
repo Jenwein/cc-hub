@@ -12,7 +12,7 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
-from cc_hub import manifest
+from cc_hub import gitops, manifest
 from cc_hub.encoding import write_text
 from cc_hub.hub import default_hub_dir
 
@@ -23,6 +23,8 @@ class InitResult:
     created: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     git_initialized: bool = False
+    committed: bool = False
+    git_warning: str | None = None
 
 
 class NestedGitError(Exception):
@@ -65,6 +67,14 @@ def init_hub(target: Path, *, name: str | None = None, git: bool = True) -> Init
     if git and shutil.which("git") and not (target / ".git").exists():
         subprocess.run(["git", "init", "-q", str(target)], check=False, capture_output=True)
         result.git_initialized = (target / ".git").exists()
+    if git and gitops.is_repo(target):
+        gitops.ensure_identity(target, name or target.name)
+        if not gitops.has_commits(target):
+            result.git_warning = gitops.commit_all(target, "cc-hub: init")
+            result.committed = result.git_warning is None and gitops.has_commits(target)
+        elif result.created:
+            result.git_warning = gitops.commit_paths(target, result.created, "cc-hub: init")
+            result.committed = result.git_warning is None
     return result
 
 
@@ -97,6 +107,10 @@ def register(app: typer.Typer) -> None:
         console.print(table)
         if result.git_initialized:
             console.print("Initialized a git repository in the hub.")
+        if result.committed:
+            console.print("Committed the hub's files (cc-hub: init).")
+        if result.git_warning:
+            console.print(escape(f"warning: {result.git_warning}"))
         console.print(
             "Next: set cc-connect's work_dir to this directory and send the first message; "
             "the agent will follow BOOTSTRAP.md."

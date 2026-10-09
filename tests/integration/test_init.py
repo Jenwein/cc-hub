@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import shutil
 from pathlib import Path
 
 import pytest
@@ -42,11 +41,47 @@ def test_init_refuses_target_inside_git_repo(tmp_path: Path) -> None:
     assert enclosing_git_repo(tmp_path / "deeper" / "still") == tmp_path.resolve()
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
-def test_init_runs_git_init(tmp_path: Path) -> None:
-    result = init_hub(tmp_path / "h", git=True)
-    assert result.git_initialized
-    assert (tmp_path / "h" / ".git").is_dir()
+def _git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True,
+        encoding="utf-8", check=True,
+    ).stdout
+
+
+def test_init_runs_git_init_and_commits(tmp_path: Path, git_env: Path) -> None:
+    target = tmp_path / "中文 hub"
+    result = init_hub(target, git=True)
+    assert result.git_initialized and result.committed
+    assert result.git_warning is None
+    assert _git(target, "log", "--format=%s").strip() == "cc-hub: init"
+    tracked = set(_git(target, "ls-files").split("\n"))
+    assert {"AGENTS.md", "hub.toml", ".gitignore", "skills/hub-adapt/SKILL.md"} <= tracked
+
+
+def test_init_sets_a_local_identity_only_when_git_has_none(
+    tmp_path: Path, git_env: Path
+) -> None:
+    init_hub(tmp_path / "with", git=True)
+    assert _git(tmp_path / "with", "config", "--local", "--list").count("user.") == 0
+    git_env.write_text("", encoding="utf-8")
+    init_hub(tmp_path / "without", git=True)
+    local = _git(tmp_path / "without", "config", "--local", "--list")
+    assert "user.name=without (cc-hub)" in local
+    assert "user.email=hub@cc-hub.invalid" in local
+
+
+def test_init_rerun_commits_only_the_files_it_created(tmp_path: Path, git_env: Path) -> None:
+    target = tmp_path / "h"
+    init_hub(target, git=True)
+    (target / "SOUL.md").unlink()
+    _git(target, "commit", "-qam", "drop SOUL.md")
+    (target / "MEMORY.md").write_text("mine, not committed", encoding="utf-8")
+    result = init_hub(target, git=True)
+    assert result.created == ["SOUL.md"]
+    assert _git(target, "show", "--name-only", "--format=", "HEAD").split() == ["SOUL.md"]
+    assert "MEMORY.md" in _git(target, "status", "--porcelain")
 
 
 def test_init_cli_prints_table_and_next_steps(tmp_path: Path) -> None:
