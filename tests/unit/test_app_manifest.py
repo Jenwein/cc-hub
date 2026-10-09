@@ -102,11 +102,20 @@ def test_versions() -> None:
     "raw",
     ["memory", "Skills/x", ".secret", "apps", "apps.lock", "USER.md", "/abs", "a/../b",
      "a\\b", "C:/x", "secrets/k", "", "memory.", "memory ", "ledger/con", "ledger/nul.txt",
-     "led\x01ger"],
+     "led\x01ger",
+     # 8.3 short names reach .git, .cc-hub and .claude on NTFS
+     "GIT~1", "ledger/GIT~1", "CC-HUB~1", "a~b",
+     # hidden parts at any depth, spaces and non-ASCII characters
+     "ledger/.hidden", "ledger/.git", "data dir", "ledger/my data", "账本", "ledger/账本"],
 )
 def test_data_dir_rejects(raw: str) -> None:
     with pytest.raises(AppError):
         normalize_data_dir(raw)
+
+
+@pytest.mark.parametrize("raw", ["ledger/2026", "reports/ledger", "a.b/c-d_e", "Ledger"])
+def test_data_dir_accepts(raw: str) -> None:
+    assert normalize_data_dir(raw) == raw
 
 
 def test_data_dir_relations() -> None:
@@ -117,10 +126,12 @@ def test_data_dir_relations() -> None:
 
 
 def test_entry_paths() -> None:
-    check_entry_path("skills/ledger/SKILL.md")
-    check_entry_path("seed/ledger/main.beancount")
+    for good in ("skills/ledger/SKILL.md", "seed/ledger/main.beancount", "ledger/2026",
+                 "reports/ledger", "a.b/c-d_e"):
+        check_entry_path(good)
     for bad in ("../x", "a/./b", ".git/config", "a\\b", "c:x",
-                ".GIT/config", ".git./x", "a/b ", "a/CON", "a/\x07b"):
+                ".GIT/config", ".git./x", "a/b ", "a/CON", "a/\x07b",
+                "skills/GIT~1/x", "a~b", "seed/CC-HUB~1/x"):
         with pytest.raises(AppError):
             check_entry_path(bad)
 

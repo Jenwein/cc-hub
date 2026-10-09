@@ -109,6 +109,10 @@ def _windows_unsafe(part: str) -> bool:
     )
 
 
+# "~" is left out on purpose: NTFS answers to 8.3 short names such as GIT~1 for .git.
+DATA_DIR_PART = re.compile(r"[A-Za-z0-9._-]+")
+
+
 def normalize_data_dir(raw: str) -> str:
     path = PurePosixPath(raw)
     parts = raw.split("/")
@@ -120,6 +124,11 @@ def normalize_data_dir(raw: str) -> str:
         or any(part in ("", ".", "..") for part in parts)
     ):
         raise AppError(f"data dir {raw!r}: use a relative path inside the hub, with / separators")
+    if not all(DATA_DIR_PART.fullmatch(part) for part in parts):
+        raise AppError(
+            f"data dir {raw!r}: every part may use only the ASCII letters, digits, "
+            "'.', '_' and '-'"
+        )
     if any(_windows_unsafe(part) for part in parts):
         raise AppError(
             f"data dir {raw!r}: no part may end with a dot or space, hold a control "
@@ -128,6 +137,8 @@ def normalize_data_dir(raw: str) -> str:
     first = path.parts[0]
     if first.startswith(".") or first.casefold() in reserved_names():
         raise AppError(f"data dir {raw!r}: {first!r} belongs to the hub itself")
+    if any(part.startswith(".") for part in parts):
+        raise AppError(f"data dir {raw!r}: no part may start with a dot")
     return path.as_posix()
 
 
@@ -151,6 +162,7 @@ def check_entry_path(rel: str) -> None:
     if (
         "\\" in rel
         or ":" in rel
+        or "~" in rel  # an 8.3 short name such as GIT~1 is another name for .git
         or any(p in ("", ".", "..") or p.casefold() == ".git" for p in parts)
         or any(_windows_unsafe(p) for p in parts)
     ):
@@ -499,6 +511,10 @@ def _seed(hub: Path, plan: AppPlan, only: set[str] | None = None) -> list[str]:
     hub = Path(hub)
     for d in plan.manifest.data_dirs:
         (hub / d).mkdir(parents=True, exist_ok=True)
+        first = d.split("/")[0]
+        real = Path(os.path.realpath(hub / first))  # expands 8.3 short names on Windows
+        if real.name.casefold() != first.casefold():
+            raise AppError(f"data dir {d!r} resolves to {real}; refusing to write there")
     seeded = []
     for rel in plan.seed:
         dst = hub / rel

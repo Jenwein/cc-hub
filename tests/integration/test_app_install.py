@@ -219,3 +219,37 @@ def test_setup_state_of_a_broken_app_toml_is_an_app_error(tapped: Path) -> None:
     assert apps.setup_status(tapped, "ledger") == ("pending", "")
     with pytest.raises(apps.AppError, match="cannot read the installed app"):
         apps.set_setup_state(tapped, "ledger", "done")
+
+
+def test_a_short_name_data_dir_is_refused_by_the_plan(
+    hub: Path, make_tap, register_tap, ledger_files: dict
+) -> None:
+    """On NTFS `GIT~1` is the hub's own .git (git itself refuses such a path in a tap)."""
+    files = {
+        **ledger_files,
+        "ledger/app.toml": ledger_files["ledger/app.toml"].replace(
+            'dirs = ["ledger"]', 'dirs = ["GIT~1"]'
+        ),
+    }
+    register_tap(hub, "bad", make_tap("bad", files))
+    with pytest.raises(apps.AppError, match="data dir 'GIT~1'"):
+        apps.plan_install(hub, "bad/ledger")
+
+
+def test_seeding_refuses_a_data_dir_that_resolves_elsewhere(
+    tapped: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = apps.plan_install(tapped, "my-apps/ledger")
+    real = os.path.realpath
+
+    def other_name(path, *args, **kwargs):
+        if Path(path) == tapped / "ledger":
+            return str(tapped / ".git")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(apps.os.path, "realpath", other_name)
+    with pytest.raises(apps.AppError, match="resolves to .*refusing to write there"):
+        apps.install(tapped, plan)
+    assert not os.path.lexists(tapped / "apps" / "ledger")
+    assert "ledger" not in load_lock(tapped).apps
+    assert not (tapped / "ledger" / "main.beancount").exists()
