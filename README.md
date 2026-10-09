@@ -48,18 +48,26 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
     ├── SOUL.md  IDENTITY.md  USER.md                 persona and user
     ├── MEMORY.md  memory/YYYY-MM-DD.md               memory
     ├── skills/  cron/  scripts/                      skills, scheduled prompts, your scripts
+    ├── apps/  apps.lock                              installed apps and their record
     └── hub.toml                                      configuration
 
 `cc-hub update` replaces only framework-owned files: `AGENTS.md` above its
 closing marker, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`,
-`cron/memory-consolidate.md` and `.gitignore`. Everything else is yours,
-including whatever you or cc-connect add below the closing marker of
-`AGENTS.md`.
+`cron/memory-consolidate.md` and `.gitignore`. `cc-hub app` manages `apps/`
+and `apps.lock`; an app's data, in the directories it declares, is yours.
+Everything else is yours too, including whatever you or cc-connect add below
+the closing marker of `AGENTS.md`.
+
+The hub is a git repository: cc-hub commits what its commands change and the
+agent commits after each task. See [docs/backup.md](docs/backup.md) for a
+private remote.
 
 ## Documentation
 
 - [Install and upgrade](docs/install.md)
 - [cc-connect configuration](docs/cc-connect.md)
+- [Apps and taps](docs/apps.md)
+- [Backing up the hub](docs/backup.md)
 - [Windows notes](docs/windows.md)
 - [Manual acceptance checklist](docs/acceptance.md)
 - [Design spec](docs/superpowers/specs/2026-09-22-cc-hub-design.md)

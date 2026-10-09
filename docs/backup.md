@@ -27,6 +27,15 @@ remote must be a **private** repository.
 
 `cc-hub doctor` stops reporting "no remote" once `origin` exists.
 
+## Restore on another machine
+
+    git clone git@github.com:you/my-hub.git ~/.cc-hub
+    cc-hub app sync
+
+Point cc-connect at the hub and send a message: the agent re-creates its
+pointers, registers the scheduled tasks on this machine and sets the apps up
+again.
+
 ## When a push is rejected
 
 A rejected push means the remote has commits this machine does not, usually

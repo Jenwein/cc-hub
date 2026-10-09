@@ -3,7 +3,7 @@
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/) (single binary; installs Python 3.11+ itself if needed)
-- git (history of the hub and its backups; `cc-hub init` creates the repository and the first commit)
+- git (history and backups of the hub, and taps for apps; `cc-hub init` creates the repository and the first commit)
 
 ## Install
 

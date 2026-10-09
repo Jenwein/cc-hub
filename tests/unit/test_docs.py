@@ -19,7 +19,7 @@ def test_readme_command_tables_match_the_cli() -> None:
         assert set(TABLE_ROW.findall(readme)) == _command_names(), name
 
 
-DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md", "backup.md")
+DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md", "backup.md", "apps.md")
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -74,3 +74,13 @@ def test_backup_doc_covers_a_private_remote() -> None:
     for phrase in ("private", "deploy key", "git -C ~/.cc-hub remote add origin", "rejected"):
         assert phrase in text, phrase
     assert "backup.md" in (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+
+
+def test_apps_doc_covers_writing_and_publishing() -> None:
+    text = (ROOT / "docs" / "apps.md").read_text(encoding="utf-8")
+    for phrase in ("app.toml", "SETUP.md", "--link", "cc-hub-tap", "cc-hub tap add",
+                   "cc-hub app install", "--yes"):
+        assert phrase in text, phrase
+    assert "cc-hub app sync" in (ROOT / "docs" / "backup.md").read_text(encoding="utf-8")
+    for readme in ("README.md", "README.zh-CN.md"):
+        assert "apps.lock" in (ROOT / readme).read_text(encoding="utf-8"), readme
