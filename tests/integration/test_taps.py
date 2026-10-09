@@ -33,6 +33,9 @@ def test_default_name_and_urls() -> None:
     assert taps.github_repo("ssh://git@github.com/a/b.git") == "a/b"
     assert taps.github_repo("https://gitlab.com/a/b") is None
     assert taps.describe({"url": "https://u:p@example.com/t.git"}) == "https://example.com/t.git"
+    assert taps.strip_credentials("ssh://user:pw@h/x.git") == "ssh://user@h/x.git"
+    assert taps.strip_credentials("git://u:p@h/x") == "git://u@h/x"
+    assert taps.strip_credentials("ssh://git@github.com/a/b.git") == "ssh://git@github.com/a/b.git"
 
 
 def test_clone_list_read_and_diff(
@@ -40,7 +43,7 @@ def test_clone_list_read_and_diff(
 ) -> None:
     dest = tmp_path / "clone"
     taps.clone(ledger_tap.as_uri(), dest)
-    head = taps.resolve(dest, "origin/HEAD")
+    head = taps.resolve(dest, "origin/HEAD", remote=True)
     assert taps.list_apps(dest, head) == ["ledger"]
     entries = {e.path: e for e in taps.ls_app(dest, head, "ledger")}
     assert set(entries) == {p.removeprefix("ledger/") for p in ledger_files}
@@ -52,16 +55,28 @@ def test_clone_list_read_and_diff(
 
     new = tap_commit(ledger_tap, {"ledger/SETUP.md": "# Setup v2\n"})
     taps.fetch(dest, ledger_tap.as_uri())
-    assert taps.resolve(dest, "origin/HEAD") == new
+    assert taps.resolve(dest, "origin/HEAD", remote=True) == new
     assert taps.has_commit(dest, head)
     assert taps.changed_files(dest, head, new, "ledger") == [("M", "SETUP.md")]
     assert "Setup v2" in taps.diff_text(dest, head, new, "ledger", ["SETUP.md"])
     assert taps.diff_text(dest, head, new, "ledger", []) == ""
-    assert taps.resolve(dest, head[:7]) == head
+    assert taps.resolve(dest, head[:7], remote=True) == head
     with pytest.raises(taps.TapError):
-        taps.resolve(dest, "no-such-ref")
+        taps.resolve(dest, "no-such-ref", remote=True)
     with pytest.raises(taps.TapError, match="no such app"):
         taps.ls_app(dest, new, "missing")
+
+
+def test_a_clone_resolves_a_fetched_branch(
+    tmp_path: Path, ledger_tap: Path, tap_commit
+) -> None:
+    dest = tmp_path / "clone"
+    taps.clone(ledger_tap.as_uri(), dest)
+    old = taps.resolve(dest, "main", remote=True)
+    new = tap_commit(ledger_tap, {"ledger/SETUP.md": "# Setup v3\n"})
+    taps.fetch(dest, ledger_tap.as_uri())
+    assert taps.resolve(dest, "main", remote=True) == new
+    assert taps.resolve(dest, "main") == old  # the clone's local main does not move
 
 
 def test_a_local_tap_resolves_head(ledger_tap: Path) -> None:
@@ -73,3 +88,9 @@ def test_a_failed_clone_hides_credentials(tmp_path: Path, git_env: Path) -> None
     with pytest.raises(taps.TapError) as info:
         taps.clone("https://user:secret@127.0.0.1:9/none.git", tmp_path / "c")
     assert "secret" not in str(info.value)
+
+
+def test_a_failed_ssh_clone_hides_the_password(tmp_path: Path, git_env: Path) -> None:
+    with pytest.raises(taps.TapError) as info:
+        taps.clone("ssh://user:pw0rd@127.0.0.1:9/x.git", tmp_path / "c")
+    assert "pw0rd" not in str(info.value)

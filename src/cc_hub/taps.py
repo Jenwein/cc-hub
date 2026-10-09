@@ -60,10 +60,15 @@ def default_name(entry: dict) -> str:
 
 
 def strip_credentials(url: str) -> str:
+    """The URL as it may be shown: no userinfo for http(s), otherwise no password."""
     parts = urlsplit(url)
-    if parts.scheme in ("http", "https") and "@" in parts.netloc:
-        return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
-    return url
+    if not parts.scheme or "@" not in parts.netloc:
+        return url
+    userinfo, _, host = parts.netloc.rpartition("@")
+    if parts.scheme in ("http", "https"):
+        return urlunsplit(parts._replace(netloc=host))
+    user = userinfo.partition(":")[0]
+    return urlunsplit(parts._replace(netloc=f"{user}@{host}" if user else host))
 
 
 def github_repo(url: str) -> str | None:
@@ -111,8 +116,11 @@ def fetch(repo: Path, url: str) -> None:
     run_git(repo, "remote", "set-head", "origin", "--auto", check=False)
 
 
-def resolve(repo: Path, ref: str) -> str:
-    for candidate in (ref, f"origin/{ref}"):
+def resolve(repo: Path, ref: str, *, remote: bool = False) -> str:
+    """Full sha of `ref`. A cloned tap (remote=True) prefers origin/<ref>, which fetch
+    advances; a local tap prefers the ref itself."""
+    candidates = (f"origin/{ref}", ref) if remote else (ref, f"origin/{ref}")
+    for candidate in candidates:
         proc = run_git(
             repo, "rev-parse", "--verify", "-q", f"{candidate}^{{commit}}", check=False
         )
