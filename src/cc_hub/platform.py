@@ -23,11 +23,14 @@ def is_link(path: Path) -> bool:
     """True for a symlink, and for a junction on Windows."""
     if Path(path).is_symlink():
         return True
+    junction = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", None)  # Windows only
+    if junction is None:
+        return False
     try:
         st = os.lstat(path)
     except OSError:
         return False
-    return getattr(st, "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+    return getattr(st, "st_reparse_tag", 0) == junction
 
 
 def link_target(path: Path) -> Path:
