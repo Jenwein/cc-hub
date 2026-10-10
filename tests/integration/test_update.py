@@ -306,3 +306,19 @@ def test_update_repairs_crlf_in_agents_md_and_keeps_its_tail(hub: Path) -> None:
     assert agents.read_bytes() == (
         manifest.render("AGENTS.md", name="hub") + CC_BLOCK + "\n- my note\n"
     ).encode("utf-8")
+
+
+def test_upgrading_a_hub_without_commits_keeps_crlf_user_files_clean(
+    hub: Path, git_env: Path
+) -> None:
+    """A 0.3.x hub on Windows: git init but no commit, autocrlf on, no .gitattributes yet."""
+    (hub / ".gitattributes").unlink()
+    _git(hub, "init", "-q")
+    _git(hub, "config", "core.autocrlf", "true")
+    user = hub / "USER.md"
+    user.write_bytes(user.read_bytes().replace(b"\n", b"\r\n"))
+    result = update_hub(hub, version="9.9.9")
+    assert result.git_warning is None
+    assert ".gitattributes" in _git(hub, "show", "--name-only", "--format=", "HEAD~1")
+    assert _git(hub, "status", "--porcelain") == ""
+    assert b"\r\n" in user.read_bytes()

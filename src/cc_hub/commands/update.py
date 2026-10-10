@@ -159,8 +159,14 @@ def update_hub(
         return result
     if gitops.is_repo(hub):
         gitops.ensure_identity(hub, name)
-    if gitops.is_repo(hub) and not gitops.has_commits(hub):
-        result.git_warning = gitops.commit_all(hub, "cc-hub: init")
+        if not gitops.has_commits(hub):
+            # The first commit must already see `* -text`, or git converts line endings
+            # on the way in and every CRLF file shows as modified afterwards.
+            attributes = hub / ".gitattributes"
+            if not attributes.exists():
+                text = manifest.render(".gitattributes", name=name, version=version)
+                write_text(attributes, text)
+            result.git_warning = gitops.commit_all(hub, "cc-hub: init")
 
     backup_dir = hub / ".cc-hub" / "backups" / old_version
     to_back_up = [rel for rel, _, exists in plan if exists] + result.retired
