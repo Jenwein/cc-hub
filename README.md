@@ -36,6 +36,9 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
 | `cc-hub update [--dry-run]` | Refresh framework-owned files; user files untouched; backups kept. |
 | `cc-hub memory log\|search\|recent` | Daily logs and long-term memory. |
 | `cc-hub link <skills-dir>` | Link every hub skill into an agent's skills directory. |
+| `cc-hub tap add\|list\|remove` | Register git repositories of apps (taps). |
+| `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | Install, update and remove apps from taps. |
+| `cc-hub feedback [--app NAME] [--json]` | Where to report a problem, with an environment block; sends nothing. |
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |
 
@@ -46,18 +49,27 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
     ├── SOUL.md  IDENTITY.md  USER.md                 persona and user
     ├── MEMORY.md  memory/YYYY-MM-DD.md               memory
     ├── skills/  cron/  scripts/                      skills, scheduled prompts, your scripts
+    ├── apps/  apps.lock                              installed apps and their record
     └── hub.toml                                      configuration
 
 `cc-hub update` replaces only framework-owned files: `AGENTS.md` above its
 closing marker, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`,
-`cron/memory-consolidate.md` and `.gitignore`. Everything else is yours,
-including whatever you or cc-connect add below the closing marker of
-`AGENTS.md`.
+`cron/memory-consolidate.md`, `.gitignore` and `.gitattributes`. `cc-hub app`
+manages `apps/` and `apps.lock`; an app's data, in the directories it
+declares, is yours.
+Everything else is yours too, including whatever you or cc-connect add below
+the closing marker of `AGENTS.md`.
+
+The hub is a git repository: cc-hub commits what its commands change and the
+agent commits after each task. See [docs/backup.md](docs/backup.md) for a
+private remote.
 
 ## Documentation
 
 - [Install and upgrade](docs/install.md)
 - [cc-connect configuration](docs/cc-connect.md)
+- [Apps and taps](docs/apps.md)
+- [Backing up the hub](docs/backup.md)
 - [Windows notes](docs/windows.md)
 - [Manual acceptance checklist](docs/acceptance.md)
 - [Design spec](docs/superpowers/specs/2026-09-22-cc-hub-design.md)

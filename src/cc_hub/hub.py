@@ -63,5 +63,15 @@ def load_config(hub: Path) -> dict:
     return tomllib.loads(read_text(Path(hub) / HUB_FILE))
 
 
+def hub_name(hub: Path) -> str:
+    """hub.toml's [hub] name; the directory name when hub.toml says nothing usable."""
+    hub = Path(hub)
+    try:
+        name = load_config(hub).get("hub", {}).get("name")
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        name = None
+    return str(name) if name else hub.name
+
+
 def save_config(hub: Path, data: Mapping) -> None:
     write_text(Path(hub) / HUB_FILE, tomli_w.dumps(dict(data)))

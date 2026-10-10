@@ -13,7 +13,7 @@ import tomli_w
 import typer
 from rich.table import Table
 
-from cc_hub import __version__, manifest
+from cc_hub import __version__, gitops, manifest
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import HUB_FILE, load_config
 
@@ -26,6 +26,7 @@ class UpdateResult:
     retired: list[str] = field(default_factory=list)
     backup_dir: Path | None = None
     config_changed: bool = False
+    git_warning: str | None = None
 
 
 class UpdateError(Exception):
@@ -137,9 +138,10 @@ def update_hub(
             result.absent.append(rel)
             continue
         new_text = manifest.render(rel, name=name, version=version)
-        current = read_text(dst) if dst.is_file() else None
+        # read_text would turn CRLF into LF, hiding the line endings a Windows clone gets
+        current = dst.read_bytes().decode("utf-8") if dst.is_file() else None
         if current is not None and rel in manifest.KEEPS_TAIL:
-            new_text = merge_tail(new_text, current)
+            new_text = merge_tail(new_text, current.replace("\r\n", "\n"))
         if current == new_text:
             result.skipped.append(rel)
             continue
@@ -155,6 +157,16 @@ def update_hub(
     result.updated = [rel for rel, _, _ in plan]
     if dry_run:
         return result
+    if gitops.is_repo(hub):
+        gitops.ensure_identity(hub, name)
+        if not gitops.has_commits(hub):
+            # The first commit must already see `* -text`, or git converts line endings
+            # on the way in and every CRLF file shows as modified afterwards.
+            attributes = hub / ".gitattributes"
+            if not attributes.exists():
+                text = manifest.render(".gitattributes", name=name, version=version)
+                write_text(attributes, text)
+            result.git_warning = gitops.commit_all(hub, "cc-hub: init")
 
     backup_dir = hub / ".cc-hub" / "backups" / old_version
     to_back_up = [rel for rel, _, exists in plan if exists] + result.retired
@@ -180,6 +192,9 @@ def update_hub(
         write_text(config_path, edit_config_text(read_text(config_path), cfg, merged))
     if to_back_up:
         result.backup_dir = backup_dir
+    changed = result.updated + result.retired + ([HUB_FILE] if result.config_changed else [])
+    warning = gitops.commit_paths(hub, changed, f"cc-hub: update {old_version} -> {version}")
+    result.git_warning = result.git_warning or warning
     return result
 
 
@@ -221,3 +236,5 @@ def register(app: typer.Typer) -> None:
             console.print(
                 "hub.toml: new keys merged, template_version updated"
             )
+        if result.git_warning:
+            console.print(f"warning: {result.git_warning}")

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -22,11 +23,14 @@ def is_link(path: Path) -> bool:
     """True for a symlink, and for a junction on Windows."""
     if Path(path).is_symlink():
         return True
+    junction = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", None)  # Windows only
+    if junction is None:
+        return False
     try:
         st = os.lstat(path)
     except OSError:
         return False
-    return getattr(st, "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+    return getattr(st, "st_reparse_tag", 0) == junction
 
 
 def link_target(path: Path) -> Path:
@@ -54,7 +58,7 @@ def link_dir(
     run=subprocess.run,
 ) -> str:
     """Make `dst` a directory link to `src`: symlink on POSIX, junction on Windows."""
-    src = Path(src).resolve()
+    src = Path(os.path.abspath(src))
     dst = Path(dst)
     if not src.is_dir():
         raise LinkError(f"{src} is not a directory")
@@ -74,3 +78,16 @@ def link_dir(
         return "junction"
     except (OSError, subprocess.CalledProcessError) as exc:
         raise LinkError(f"could not link {dst} to {src}: {exc}") from exc
+
+
+def rmtree(path: Path) -> None:
+    """shutil.rmtree that also removes read-only files, such as git objects on Windows."""
+
+    def _retry(func, failed, *_):
+        os.chmod(failed, stat.S_IWRITE)
+        func(failed)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_retry)
+    else:
+        shutil.rmtree(path, onerror=_retry)

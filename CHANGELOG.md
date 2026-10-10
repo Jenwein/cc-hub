@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.4.0 - 2026-10-10
+
+### Added
+
+- Apps. `cc-hub tap add|list|remove` registers git repositories of apps
+  (taps; `owner/repo` means a GitHub repository), and `cc-hub app
+  search|install|list|update|remove|sync|setup-state` manages apps in
+  `apps/<name>/`. Install, update and remove print what will happen and act
+  only with `--yes`. `apps.lock` records taps and installed apps and is
+  committed; `apps/` is gitignored and `cc-hub app sync` restores it.
+  `tap add` refuses a URL that contains credentials.
+- The `hub-apps` skill: setting apps up (software with the user's approval,
+  `SETUP.md`, scheduled tasks named `hub:<app>/<task>`), updating, removing,
+  and writing and publishing apps (`skills/hub-apps/authoring.md`).
+- `cc-hub feedback [--app NAME]` prints where to report a problem and an
+  environment block. The `hub-feedback` skill drafts the issue or comment and
+  posts it only after the user agrees.
+- `doctor` checks `apps` and `git`.
+- `docs/apps.md` and `docs/backup.md`.
+
+### Changed
+
+- The hub's git repository is used. `init` makes the first commit; `init`,
+  `update`, `app sync` and `doctor --fix` set a repository-local identity
+  when git has none; `update`, `tap`, `app` and `doctor --fix` commit the
+  paths they change. `AGENTS.md`
+  has a Git section: the agent commits after each task and never rewrites
+  history. The nightly memory-consolidate task pushes when the hub has a
+  remote.
+- `hub-adapt` registers the hub's default scheduled tasks, so they are
+  registered on every machine; `BOOTSTRAP.md` has five steps.
+- `cc-hub link` and the `doctor` check `pointers` include the skills of
+  installed apps.
+- `cc-hub link` replaces an agent skills directory that is itself a link to
+  the hub's `skills/` with a real directory of per-skill links.
+- `.gitignore` ignores `/apps/`.
+- The hub has a framework-owned `.gitattributes` (`* -text`), so a clone
+  keeps LF line endings; `update` rewrites framework files that have CRLF
+  line endings.
+
+### Migration notes
+
+- Run `cc-hub update`. In a hub without commits it first adds
+  `.gitattributes` and commits everything that is not ignored
+  (`cc-hub: init`), then the update.
+- `update` replaces `.gitattributes`; keep your own attribute rules in
+  `.git/info/attributes`.
+- Then have the agent run `hub-adapt` so the new `hub-apps` and
+  `hub-feedback` skills are linked; `cc-hub doctor` lists what is missing.
+- A hub that was bootstrapped keeps its registered `hub:memory-consolidate`
+  task. To back the hub up, add a private remote (`docs/backup.md`).
+
 ## 0.3.1 - 2026-10-09
 
 ### Changed

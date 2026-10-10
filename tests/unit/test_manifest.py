@@ -59,9 +59,9 @@ def test_user_md_has_a_placeholder_for_each_bootstrap_question() -> None:
 
 
 def test_skills_have_valid_frontmatter_and_budget() -> None:
-    assert _skill_names() == {"hub-adapt", "hub-memory"}
+    assert _skill_names() == {"hub-adapt", "hub-apps", "hub-feedback", "hub-memory"}
     for rel in manifest.FRAMEWORK_OWNED:
-        if not rel.startswith("skills/"):
+        if not (rel.startswith("skills/") and rel.endswith("/SKILL.md")):
             continue
         text = manifest.render(rel)
         m = FRONTMATTER.match(text)
@@ -83,7 +83,7 @@ def test_hub_toml_renders_with_version_and_created() -> None:
 def test_gitignore_maps_to_underscore_source() -> None:
     assert manifest.template_source(".gitignore").name == "_gitignore"
     text = manifest.render(".gitignore")
-    for line in (".env", "secrets/", ".cc-hub/", ".cc-connect/", "CLAUDE.md", ".claude/"):
+    for line in (".env", "secrets/", "/apps/", ".cc-hub/", ".cc-connect/", "CLAUDE.md", ".claude/"):
         assert line in text.splitlines(), line
 
 
@@ -120,12 +120,32 @@ def test_cron_definitions_have_schedule_default_and_session() -> None:
 
 def test_cron_registration_passes_session_mode_and_desc() -> None:
     """A task's `session` only takes effect when the registration command passes it."""
-    for rel in ("BOOTSTRAP.md", "cron/README.md"):
+    for rel in ("skills/hub-adapt/SKILL.md", "cron/README.md"):
         text = manifest.render(rel)
         assert "--session-mode <session>" in text, rel
         assert '--desc "hub:<name>"' in text, rel
-    # Bootstrap skips tasks that are already registered instead of adding duplicates.
-    assert "cc-connect cron list" in manifest.render("BOOTSTRAP.md")
+    # hub-adapt skips tasks that are already registered instead of adding duplicates.
+    assert "cc-connect cron list" in manifest.render("skills/hub-adapt/SKILL.md")
+
+
+def test_bootstrap_leaves_scheduled_tasks_to_hub_adapt() -> None:
+    text = manifest.render("BOOTSTRAP.md")
+    assert "cc-connect cron add" not in text
+    assert "scheduled tasks" in text
+    assert "5. **Finish.**" in text and "6." not in text
+
+
+def test_agents_md_has_the_git_rules() -> None:
+    text = manifest.render("AGENTS.md")
+    assert "## 3. Git" in text
+    for phrase in ("git commit", "-- <paths>", "reset --hard", "force push", "hub-memory"):
+        assert phrase in text, phrase
+
+
+def test_consolidation_commits_and_pushes() -> None:
+    memory = manifest.render("skills/hub-memory/SKILL.md")
+    assert "git push" in memory and "do not pull or merge" in memory
+    assert "pushed" in manifest.render("cron/memory-consolidate.md")
 
 
 def test_hub_adapt_leaves_permissions_to_the_runtime() -> None:
@@ -143,3 +163,62 @@ def test_hub_adapt_routes_through_one_line_imports_and_per_skill_links() -> None
 def test_bootstrap_names_the_hub_adapt_file() -> None:
     """Skills are not routed yet during bootstrap, so the agent opens the file by path."""
     assert "`skills/hub-adapt/SKILL.md`" in manifest.render("BOOTSTRAP.md")
+
+
+def test_agents_md_routes_to_apps() -> None:
+    text = manifest.render("AGENTS.md")
+    for phrase in ("`apps/<name>/`", "`apps.lock`", "cc-hub app list", "`hub-apps`",
+                   "never override"):
+        assert phrase in text, phrase
+
+
+def test_hub_apps_skill_covers_the_lifecycle() -> None:
+    skill = manifest.render("skills/hub-apps/SKILL.md")
+    for phrase in ("--yes", "setup-state", '--desc "hub:<name>/<task>"', "cc-connect cron del",
+                   "direct chat", "authoring.md", "cc-hub app sync"):
+        assert phrase in skill, phrase
+    authoring = manifest.render("skills/hub-apps/authoring.md")
+    for phrase in ("app.toml", "[[requires]]", "--link", "cc-hub-tap", "seed/"):
+        assert phrase in authoring, phrase
+
+
+def test_hub_adapt_and_cron_readme_mention_app_tasks() -> None:
+    adapt = manifest.render("skills/hub-adapt/SKILL.md")
+    assert "installed apps" in adapt and "hub-apps" in adapt
+    assert "hub:<app>/<task>" in manifest.render("cron/README.md")
+
+
+def test_hub_feedback_asks_before_filing() -> None:
+    skill = manifest.render("skills/hub-feedback/SKILL.md")
+    for phrase in ("cc-hub feedback", "gh issue list", "gh issue create", "gh issue comment",
+                   "--body-file", "USER.md", "MEMORY.md", "agrees", "group chat",
+                   "repository"):
+        assert phrase in skill, phrase
+    agents = manifest.render("AGENTS.md")
+    assert "`hub-feedback`" in agents and "publishes" in agents
+    assert "commenting" in agents
+
+
+def test_gitattributes_keeps_line_endings() -> None:
+    assert manifest.template_source(".gitattributes").name == "_gitattributes"
+    assert ".gitattributes" in manifest.FRAMEWORK_OWNED
+    text = manifest.render(".gitattributes")
+    assert "* -text" in text.splitlines()
+    assert "\r" not in text
+
+
+def test_agents_md_undo_recipe_restores_the_version_before_the_change() -> None:
+    text = " ".join(manifest.render("AGENTS.md").split())
+    assert "git restore --source <commit>~1 -- <path>" in text
+    assert "where `<commit>` is the change to undo" in text
+    assert "--source <commit> --" not in text
+
+
+
+def test_hub_apps_setup_replaces_stale_scheduled_tasks() -> None:
+    skill = manifest.render("skills/hub-apps/SKILL.md")
+    setup = " ".join(skill.split("## Set up", 1)[1].split("\n## ", 1)[0].split())
+    assert "whose schedule or prompt differs from `apps/<name>/cron/<task>.md`" in setup
+    assert "or whose file no longer exists" in setup
+    assert "is deleted with `cc-connect cron del <id>`" in setup
+    assert "added again when the file exists and has `default: true`" in setup

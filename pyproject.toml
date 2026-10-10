@@ -18,6 +18,7 @@ cc-hub = "cc_hub.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Jenwein/cc-hub"
+Issues = "https://github.com/Jenwein/cc-hub/issues"
 
 [build-system]
 requires = ["hatchling"]

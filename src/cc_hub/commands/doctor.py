@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import tomllib
@@ -14,9 +15,11 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
-from cc_hub import __version__, manifest
+from cc_hub import __version__, gitops, manifest
+from cc_hub.applock import LockError, from_tilde, load_lock
+from cc_hub.apps import app_statuses
 from cc_hub.commands.init import enclosing_git_repo
-from cc_hub.commands.link import inspect_skill_links
+from cc_hub.commands.link import POINTERS, inspect_skill_links
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import load_config
 
@@ -33,11 +36,6 @@ class Check:
 
 DATE_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 AGENT_MARKERS = {"claude": ("claude", ".claude"), "codex": ("codex", ".codex")}
-# agent -> (instruction file that must import AGENTS.md, or None; skills directory)
-POINTERS: dict[str, tuple[str | None, str]] = {
-    "claude": ("CLAUDE.md", ".claude/skills"),
-    "codex": (None, ".agents/skills"),
-}
 IMPORT_LINE = "@AGENTS.md"
 _READ_ERRORS = (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError)
 
@@ -48,6 +46,71 @@ def detect_agents(*, home: Path, which: Which) -> list[str]:
 
 def _ok(id_: str, message: str) -> Check:
     return Check(id_, "ok", message)
+
+
+def git_check(hub: Path) -> Check:
+    if not gitops.git_available() or not (hub / ".git").exists():
+        return Check(
+            "git",
+            "warn",
+            "the hub is not a git repository: no history and no backup",
+            f'install git, then run `cc-hub init "{hub}"`',
+        )
+    problems = []
+    fixes = []
+    if not gitops.has_identity(hub):
+        problems.append("no git identity (user.name, user.email)")
+        fixes.append("run `cc-hub doctor --fix` to set a repository-local identity")
+    n = gitops.uncommitted(hub)
+    if n:
+        problems.append(f"{n} uncommitted change(s)")
+    names = gitops.remotes(hub)
+    if not names:
+        problems.append("no remote: the hub is not backed up")
+    if problems:
+        fixes.append("the agent commits after each task; docs/backup.md sets up a private remote")
+        return Check("git", "warn", "; ".join(problems), "; ".join(fixes))
+    return _ok("git", "committed; remote: " + ", ".join(names))
+
+
+def apps_check(hub: Path, which: Which) -> Check:
+    try:
+        rows = app_statuses(hub, which=which)
+        entries = load_lock(hub).apps
+    except LockError as exc:
+        return Check("apps", "fail", str(exc), "fix apps.lock, or restore it with git")
+    if not rows:
+        return _ok("apps", "no apps installed")
+    problems: list[str] = []
+    fixes: list[str] = []
+    for row in rows:
+        if not row.present:
+            entry = entries.get(row.name, {})
+            if "link" in entry and not from_tilde(entry["link"]).is_dir():
+                problems.append(f"{row.name}: link source {entry['link']} does not exist")
+                fixes.append(f"restore that directory, or run `cc-hub app remove {row.name} --yes`")
+            elif not os.path.lexists(hub / "apps" / row.name):
+                problems.append(f"{row.name}: missing from apps/")
+                fixes.append("run `cc-hub app sync`")
+            else:
+                problems.append(f"{row.name}: app.toml in apps/{row.name} is unreadable")
+                fixes.append(f"run `cc-hub app remove {row.name} --yes`, then install it again")
+            continue
+        if not row.min_hub_ok:
+            problems.append(f"{row.name}: needs a newer cc-hub")
+            fixes.append("run `uv tool upgrade cc-hub`")
+        for m in row.missing:
+            install = m["install"] or "no install steps for this platform"
+            problems.append(f"{row.name}: needs {m['bin']} ({install})")
+        if row.setup == "pending":
+            problems.append(f"{row.name}: setup pending")
+        elif row.setup == "waiting":
+            problems.append(f"{row.name}: setup waiting ({row.note})")
+        if row.missing or row.setup != "done":
+            fixes.append("ask the agent to set the app up (hub-apps skill)")
+    if problems:
+        return Check("apps", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
+    return _ok("apps", f"{len(rows)} app(s) set up")
 
 
 def run_checks(
@@ -84,8 +147,14 @@ def run_checks(
         )
     name = str(cfg.get("hub", {}).get("name", hub.name))
 
-    # required-files (fix: user files and .gitignore only)
+    # required-files (fix: user files and .gitignore only, plus a git identity)
     if fix:
+        if gitops.is_repo(hub):
+            try:
+                gitops.ensure_identity(hub, name)
+            except gitops.GitError:
+                pass  # the git check below reports what is wrong
+        restored = [".gitignore"]
         write_text(
             hub / ".gitignore", manifest.render(".gitignore", name=name, version=package_version)
         )
@@ -94,6 +163,8 @@ def run_checks(
         for rel in manifest.USER_OWNED:
             if not (hub / rel).is_file():
                 write_text(hub / rel, manifest.render(rel, name=name, version=package_version))
+                restored.append(rel)
+        gitops.commit_paths(hub, restored, "cc-hub: doctor --fix")
     missing = [
         rel
         for rel in manifest.FRAMEWORK_OWNED + manifest.USER_OWNED
@@ -210,6 +281,12 @@ def run_checks(
             )
         else:
             checks.append(_ok(f"pointers:{agent}", "pointers present"))
+
+    # apps
+    checks.append(apps_check(hub, which))
+
+    # git
+    checks.append(git_check(hub))
 
     # nested-git
     repo = enclosing_git_repo(hub.parent)

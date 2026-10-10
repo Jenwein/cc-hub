@@ -22,6 +22,8 @@ CHECK_IDS = [
     "memory-budget:USER.md",
     "memory-files",
     "pointers",
+    "apps",
+    "git",
     "nested-git",
 ]
 
@@ -33,7 +35,7 @@ def statuses(checks) -> dict[str, str]:
 def test_fresh_hub_runs_the_hub_checks(hub: Path, tmp_path: Path) -> None:
     checks = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
     assert [c.id for c in checks] == CHECK_IDS
-    assert [c.id for c in checks if c.status != "ok"] == ["bootstrap-pending"]
+    assert [c.id for c in checks if c.status != "ok"] == ["bootstrap-pending", "git"]
 
 
 def test_memory_over_budget_fails(hub: Path, tmp_path: Path) -> None:
@@ -89,7 +91,7 @@ def test_skill_links_are_checked_per_skill(hub: Path, tmp_path: Path) -> None:
     target.mkdir(parents=True)
     check = _pointer(hub, home, "codex")
     assert check.status == "warn"
-    assert "not linked: hub-adapt, hub-memory" in check.message
+    assert "not linked: hub-adapt, hub-apps, hub-feedback, hub-memory" in check.message
     assert "hub-adapt" in check.fix
     sync_skill_links(hub, target)
     assert _pointer(hub, home, "codex").status == "ok"
@@ -163,3 +165,162 @@ def test_unreadable_pointer_file_warns(hub: Path, tmp_path: Path) -> None:
     finally:
         (hub / "CLAUDE.md").chmod(0o644)
     assert ids["pointers:claude"] == "warn"
+
+
+def _git_check(hub: Path, tmp_path: Path):
+    return next(c for c in run_checks(hub, home=tmp_path / "home", **NO_AGENTS) if c.id == "git")
+
+
+def test_git_check_without_a_repository(hub: Path, tmp_path: Path) -> None:
+    check = _git_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "not a git repository" in check.message
+    assert "cc-hub init" in check.fix
+
+
+def test_git_check_reports_uncommitted_changes_and_a_missing_remote(
+    git_hub: Path, tmp_path: Path
+) -> None:
+    check = _git_check(git_hub, tmp_path)
+    assert check.status == "warn"
+    assert check.message == "no remote: the hub is not backed up"
+    (git_hub / "SOUL.md").write_text("changed", encoding="utf-8")
+    assert "1 uncommitted change(s)" in _git_check(git_hub, tmp_path).message
+
+
+def test_git_check_ok_with_a_remote(git_hub: Path, tmp_path: Path) -> None:
+    from cc_hub.gitops import run_git
+
+    run_git(git_hub, "remote", "add", "origin", "https://example.invalid/hub.git")
+    check = _git_check(git_hub, tmp_path)
+    assert check.status == "ok"
+    assert "origin" in check.message
+
+
+def test_fix_commits_what_it_restored(git_hub: Path, tmp_path: Path) -> None:
+    from cc_hub.gitops import run_git
+
+    (git_hub / "USER.md").unlink()
+    run_git(git_hub, "commit", "-qam", "lose USER.md")
+    run_checks(git_hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    log = run_git(git_hub, "log", "-1", "--format=%s").stdout.strip()
+    assert log == "cc-hub: doctor --fix"
+    shown = run_git(git_hub, "show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert shown == ["USER.md"]
+
+
+def _apps_check(hub: Path, tmp_path: Path, which=lambda name: None):
+    checks = run_checks(hub, home=tmp_path / "home", which=which)
+    return next(c for c in checks if c.id == "apps")
+
+
+def test_apps_check_without_apps(hub: Path, tmp_path: Path) -> None:
+    check = _apps_check(hub, tmp_path)
+    assert (check.status, check.message) == ("ok", "no apps installed")
+
+
+def test_apps_check_reports_software_and_setup(
+    hub: Path, tmp_path: Path, ledger_tap: Path, register_tap
+) -> None:
+    from cc_hub import apps
+
+    register_tap(hub, "my-apps", ledger_tap)
+    apps.install(hub, apps.plan_install(hub, "my-apps/ledger"))
+    check = _apps_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "ledger: needs cc-hub-test-no-such-bin (uv tool install beancount)" in check.message
+    assert "ledger: setup pending" in check.message
+    assert "hub-apps" in check.fix
+    apps.set_setup_state(hub, "ledger", "done")
+    check = _apps_check(hub, tmp_path, which=lambda name: f"/usr/bin/{name}")
+    assert (check.status, check.message) == ("ok", "1 app(s) set up")
+    from cc_hub.platform import rmtree
+
+    rmtree(hub / "apps" / "ledger")
+    check = _apps_check(hub, tmp_path)
+    assert "ledger: missing from apps/" in check.message
+    assert "cc-hub app sync" in check.fix
+
+
+def test_a_broken_apps_lock_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
+    (hub / "apps.lock").write_text("[apps\n", encoding="utf-8")
+    s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
+    assert s["apps"] == "fail"
+    assert s["nested-git"] == "ok"
+
+
+def test_a_wrongly_shaped_apps_lock_fails_only_that_check(hub: Path, tmp_path: Path) -> None:
+    (hub / "apps.lock").write_text("taps = 1\n", encoding="utf-8")
+    s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
+    assert s["apps"] == "fail"
+    assert s["nested-git"] == "ok"
+
+
+def test_a_link_whose_source_is_gone_says_so(hub: Path, tmp_path: Path) -> None:
+    from cc_hub import apps
+    from cc_hub.platform import rmtree
+
+    dev = tmp_path / "dev" / "notes"
+    dev.mkdir(parents=True)
+    (dev / "app.toml").write_text(
+        '[app]\nname = "notes"\nversion = "0.1.0"\ndescription = "Notes"\n', encoding="utf-8"
+    )
+    apps.install(hub, apps.plan_install(hub, str(dev), link=True))
+    rmtree(dev)
+    check = _apps_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "notes: link source" in check.message and "does not exist" in check.message
+    assert "cc-hub app remove notes --yes" in check.fix
+    assert "app sync" not in check.fix
+
+
+def test_an_unreadable_app_toml_says_so(
+    hub: Path, tmp_path: Path, ledger_tap: Path, register_tap
+) -> None:
+    from cc_hub import apps
+
+    register_tap(hub, "my-apps", ledger_tap)
+    apps.install(hub, apps.plan_install(hub, "my-apps/ledger"))
+    (hub / "apps" / "ledger" / "app.toml").write_text("[app\n", encoding="utf-8")
+    check = _apps_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "ledger: app.toml in apps/ledger is unreadable" in check.message
+    assert "cc-hub app remove ledger --yes" in check.fix
+    assert "app sync" not in check.fix
+
+
+def test_git_check_points_at_doctor_fix_when_the_identity_is_missing(
+    git_hub: Path, git_env: Path, tmp_path: Path
+) -> None:
+    assert "identity" not in _git_check(git_hub, tmp_path).message
+    git_env.write_text("", encoding="utf-8")
+    check = _git_check(git_hub, tmp_path)
+    assert check.status == "warn"
+    assert "no git identity" in check.message
+    assert "run `cc-hub doctor --fix` to set a repository-local identity" in check.fix
+
+
+def test_fix_sets_a_repository_local_identity_before_it_commits(
+    git_hub: Path, git_env: Path, tmp_path: Path
+) -> None:
+    from cc_hub.gitops import run_git
+
+    (git_hub / "USER.md").unlink()
+    run_git(git_hub, "commit", "-qam", "lose USER.md")
+    git_env.write_text("", encoding="utf-8")
+    checks = run_checks(git_hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    assert run_git(git_hub, "config", "--local", "user.email").stdout.strip() == (
+        "hub@cc-hub.invalid"
+    )
+    assert run_git(git_hub, "config", "--local", "user.name").stdout.strip() == (
+        "中文 hub (cc-hub)"
+    )
+    assert run_git(git_hub, "log", "-1", "--format=%s").stdout.strip() == "cc-hub: doctor --fix"
+    assert "identity" not in next(c for c in checks if c.id == "git").message
+
+
+def test_fix_leaves_the_identity_alone_in_a_hub_that_is_not_a_repository(
+    hub: Path, tmp_path: Path
+) -> None:
+    run_checks(hub, fix=True, home=tmp_path / "home", **NO_AGENTS)
+    assert not (hub / ".git").exists()

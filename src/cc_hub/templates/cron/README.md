@@ -4,7 +4,7 @@ Each `*.md` file here is one task: YAML frontmatter plus the prompt body.
 
     ---
     schedule: "0 3 * * *"     # cron expression
-    default: true             # register during bootstrap
+    default: true             # registered on each machine by hub-adapt
     session: new_per_run      # reuse | new_per_run (cc-connect --session-mode)
     ---
     Prompt text the agent receives when the task fires.
@@ -14,6 +14,10 @@ should receive its results, and name it after its file (`<name>` is the file
 name without `.md`) so `cc-connect cron list` shows which ones are registered:
 
     cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
+
+Installed apps keep their task definitions in `apps/<app>/cron/<task>.md`, in
+the same format, and register them during setup with
+`--desc "hub:<app>/<task>"` (see the `hub-apps` skill).
 
 `cc-hub update` overwrites `README.md` and `memory-consolidate.md`; files you
 add here are yours.

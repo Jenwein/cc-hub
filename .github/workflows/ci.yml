@@ -28,3 +28,15 @@ jobs:
           uvx --from dist/*.whl cc-hub version
           uvx --from dist/*.whl cc-hub init "${RUNNER_TEMP}/hub" --no-git
           uvx --from dist/*.whl cc-hub --hub "${RUNNER_TEMP}/hub" doctor --json
+          git config --global user.name ci
+          git config --global user.email ci@example.invalid
+          TAP="${RUNNER_TEMP}/tap"
+          mkdir -p "$TAP/demo/skills/demo"
+          printf '[app]\nname = "demo"\nversion = "0.1.0"\ndescription = "Smoke test"\n' > "$TAP/demo/app.toml"
+          printf -- '---\nname: demo\ndescription: Smoke test skill.\n---\n' > "$TAP/demo/skills/demo/SKILL.md"
+          git -C "$TAP" init -q
+          git -C "$TAP" add -A
+          git -C "$TAP" commit -qm demo
+          uvx --from dist/*.whl cc-hub --hub "${RUNNER_TEMP}/hub" tap add "$TAP" --name demo
+          uvx --from dist/*.whl cc-hub --hub "${RUNNER_TEMP}/hub" app install demo/demo --yes
+          uvx --from dist/*.whl cc-hub --hub "${RUNNER_TEMP}/hub" app list

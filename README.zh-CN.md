@@ -25,6 +25,9 @@
 | `cc-hub update [--dry-run]` | 只更新框架拥有的文件，用户文件不动，旧版本有备份 |
 | `cc-hub memory log\|search\|recent` | 日志与长期记忆 |
 | `cc-hub link <skills-dir>` | 把总站的每个 skill 链接进 agent 的 skills 目录 |
+| `cc-hub tap add\|list\|remove` | 登记放应用的 git 仓库（tap） |
+| `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | 从 tap 安装、升级、卸载应用 |
+| `cc-hub feedback [--app NAME] [--json]` | 反馈问题的去处和环境信息，不发送任何东西 |
 | `cc-hub where` | 打印总站目录和包的安装位置 |
 | `cc-hub version` | 打印版本号 |
 
@@ -35,9 +38,12 @@
     ├── SOUL.md  IDENTITY.md  USER.md                 人格与用户
     ├── MEMORY.md  memory/YYYY-MM-DD.md               记忆
     ├── skills/  cron/  scripts/                      skills、定时任务、你的脚本
+    ├── apps/  apps.lock                              已安装的应用及其记录
     └── hub.toml                                      配置
 
-`cc-hub update` 只替换框架拥有的文件：`AGENTS.md` 结尾标记以上的部分、`BOOTSTRAP.md`、`skills/hub-*`、`cron/README.md`、`cron/memory-consolidate.md` 和 `.gitignore`。其余都归你，包括你或 cc-connect 写在 `AGENTS.md` 结尾标记以下的内容。
+`cc-hub update` 只替换框架拥有的文件：`AGENTS.md` 结尾标记以上的部分、`BOOTSTRAP.md`、`skills/hub-*`、`cron/README.md`、`cron/memory-consolidate.md`、`.gitignore` 和 `.gitattributes`。`apps/` 和 `apps.lock` 由 `cc-hub app` 管理；应用声明的数据目录归你。其余都归你，包括你或 cc-connect 写在 `AGENTS.md` 结尾标记以下的内容。
+
+总站是一个 git 仓库：cc-hub 提交它的命令改动的文件，agent 每做完一件事提交一次。备份到私有远程见 [docs/backup.md](docs/backup.md)。
 
 其余文档见英文 README 的链接。
 

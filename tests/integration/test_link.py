@@ -9,9 +9,9 @@ from typer.testing import CliRunner
 
 from cc_hub.cli import app
 from cc_hub.commands.link import inspect_skill_links, sync_skill_links
-from cc_hub.platform import LinkError, is_link, is_windows, link_dir
+from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link
 
-BUILT_IN = ["hub-adapt", "hub-memory"]
+BUILT_IN = ["hub-adapt", "hub-apps", "hub-feedback", "hub-memory"]
 
 
 def add_skill(hub: Path, name: str) -> Path:
@@ -62,19 +62,22 @@ def test_link_leaves_other_entries_alone(hub: Path) -> None:
     (target / "hub-memory" / "SKILL.md").write_text("an old copy", encoding="utf-8")
     (target / "claude-only").mkdir()
     results = dict(sync_skill_links(hub, target))
-    assert results == {"hub-adapt": "linked", "hub-memory": "blocked"}
+    assert results == {
+        "hub-adapt": "linked", "hub-apps": "linked", "hub-feedback": "linked",
+        "hub-memory": "blocked",
+    }
     assert (target / "hub-memory" / "SKILL.md").read_text(encoding="utf-8") == "an old copy"
     assert (target / "claude-only").is_dir()
     state = inspect_skill_links(hub, target)
     assert state.blocked == ["hub-memory"] and state.missing == [] and state.dangling == []
 
 
-def test_link_accepts_a_target_that_already_reaches_the_whole_skills_directory(
-    hub: Path,
-) -> None:
+def test_link_replaces_a_target_that_links_the_whole_skills_directory(hub: Path) -> None:
     target = hub / ".claude" / "skills"
     link_dir(hub / "skills", target)
-    assert sync_skill_links(hub, target) == [(name, "existing") for name in BUILT_IN]
+    assert sync_skill_links(hub, target) == [(name, "linked") for name in BUILT_IN]
+    assert not is_link(target)
+    assert all(is_link(target / name) for name in BUILT_IN)
 
 
 @pytest.mark.skipif(is_windows(), reason="POSIX symlinks")
@@ -117,3 +120,73 @@ def test_link_cli_fails_when_a_skill_is_blocked(hub: Path) -> None:
     result = CliRunner().invoke(app, ["--hub", str(hub), "link", ".claude/skills"])
     assert result.exit_code == 1
     assert "blocked\thub-memory" in result.output
+
+
+def install_fake_app(hub: Path, app: str, skill: str) -> Path:
+    """An app directory and its apps.lock entry, without going through `cc-hub app`."""
+    from cc_hub.applock import load_lock, save_lock
+
+    skill_dir = hub / "apps" / app / "skills" / skill
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(f"---\nname: {skill}\n---\n", encoding="utf-8")
+    lock = load_lock(hub)
+    lock.apps[app] = {"tap": "t", "commit": "0" * 40, "version": "0.1.0"}
+    save_lock(hub, lock)
+    return hub / "apps" / app
+
+
+def test_link_includes_the_skills_of_installed_apps(hub: Path) -> None:
+    install_fake_app(hub, "ledger", "ledger")
+    target = hub / ".claude" / "skills"
+    assert ("ledger", "linked") in sync_skill_links(hub, target)
+    assert (target / "ledger" / "SKILL.md").is_file()
+
+
+def test_link_does_not_write_app_links_through_a_whole_skills_directory_link(hub: Path) -> None:
+    install_fake_app(hub, "ledger", "ledger")
+    target = hub / ".claude" / "skills"
+    link_dir(hub / "skills", target)
+    sync_skill_links(hub, target)
+    assert not os.path.lexists(hub / "skills" / "ledger")
+    assert (target / "ledger" / "SKILL.md").is_file()
+
+
+def test_link_ignores_app_directories_missing_from_apps_lock(hub: Path) -> None:
+    stray = hub / "apps" / "stray" / "skills" / "stray"
+    stray.mkdir(parents=True)
+    (stray / "SKILL.md").write_text("---\nname: stray\n---\n", encoding="utf-8")
+    assert "stray" not in dict(sync_skill_links(hub, hub / ".claude" / "skills"))
+
+
+def test_link_removes_links_to_a_removed_app(hub: Path) -> None:
+    from cc_hub.applock import load_lock, save_lock
+    from cc_hub.platform import rmtree
+
+    app = install_fake_app(hub, "ledger", "ledger")
+    target = hub / ".claude" / "skills"
+    sync_skill_links(hub, target)
+    rmtree(app)
+    lock = load_lock(hub)
+    del lock.apps["ledger"]
+    save_lock(hub, lock)
+    assert ("ledger", "removed") in sync_skill_links(hub, target)
+    assert not os.path.lexists(target / "ledger")
+
+
+def test_link_follows_an_app_that_is_itself_a_link(hub: Path, tmp_path: Path) -> None:
+    from cc_hub.applock import load_lock, save_lock
+
+    dev = tmp_path / "dev" / "notes"
+    (dev / "skills" / "notes").mkdir(parents=True)
+    (dev / "skills" / "notes" / "SKILL.md").write_text("---\nname: notes\n---\n", encoding="utf-8")
+    link_dir(dev, hub / "apps" / "notes")
+    lock = load_lock(hub)
+    lock.apps["notes"] = {"link": str(dev), "version": "0.1.0"}
+    save_lock(hub, lock)
+    target = hub / ".claude" / "skills"
+    assert ("notes", "linked") in sync_skill_links(hub, target)
+    assert ("notes", "existing") in sync_skill_links(hub, target)
+    remove_link(hub / "apps" / "notes")
+    del lock.apps["notes"]
+    save_lock(hub, lock)
+    assert ("notes", "removed") in sync_skill_links(hub, target)

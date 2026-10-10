@@ -48,8 +48,9 @@ cc-connect explains its own commands to the agent: sending files back
 
 ## Scheduled tasks
 
-The hub keeps task definitions in `cron/*.md`. Bootstrap registers the
-default ones from the chat it runs in:
+The hub keeps task definitions in `cron/*.md`. The `hub-adapt` skill
+registers the default ones from the direct chat it runs in, during bootstrap
+and again on a new machine:
 
     cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <session> --desc "hub:<name>"
 

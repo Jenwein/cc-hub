@@ -32,3 +32,10 @@ def fail(exc: Exception | str) -> NoReturn:
     """Print an error to stderr and exit 1."""
     typer.echo(str(exc), err=True)
     raise typer.Exit(code=1)
+
+
+def warn(*messages: str | None) -> None:
+    """Print each non-empty message to stderr as a warning."""
+    for message in messages:
+        if message:
+            typer.echo(f"warning: {message}", err=True)

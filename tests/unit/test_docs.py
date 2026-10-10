@@ -19,7 +19,7 @@ def test_readme_command_tables_match_the_cli() -> None:
         assert set(TABLE_ROW.findall(readme)) == _command_names(), name
 
 
-DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md")
+DOCS = ("install.md", "cc-connect.md", "windows.md", "acceptance.md", "backup.md", "apps.md")
 LINK = re.compile(r"\]\(([^)#\s]+)(?:#[^)]*)?\)")
 
 
@@ -67,3 +67,27 @@ def test_every_python_file_declares_utf8() -> None:
     for path in sorted(ROOT.glob("src/**/*.py")) + sorted(ROOT.glob("tests/**/*.py")):
         first = path.read_text(encoding="utf-8").splitlines()[:1]
         assert first == ["# -*- coding: utf-8 -*-"], path
+
+
+def test_backup_doc_covers_a_private_remote() -> None:
+    text = (ROOT / "docs" / "backup.md").read_text(encoding="utf-8")
+    for phrase in ("private", "deploy key", "git -C ~/.cc-hub remote add origin", "rejected"):
+        assert phrase in text, phrase
+    assert "backup.md" in (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+
+
+def test_apps_doc_covers_writing_and_publishing() -> None:
+    text = (ROOT / "docs" / "apps.md").read_text(encoding="utf-8")
+    for phrase in ("app.toml", "SETUP.md", "--link", "cc-hub-tap", "cc-hub tap add",
+                   "cc-hub app install", "--yes"):
+        assert phrase in text, phrase
+    assert "cc-hub app update <app>" in text
+    backup = (ROOT / "docs" / "backup.md").read_text(encoding="utf-8")
+    assert "cc-hub app sync" in backup
+    restore = backup.split("## Restore on another machine", 1)[1].split("\n## ", 1)[0]
+    assert "core.sshCommand" in restore
+    # the clone itself needs the key, so the key goes into the clone command
+    assert 'git clone -c core.sshCommand="ssh -i ~/.ssh/cc-hub-backup' in restore
+    assert "repository-local git identity" in restore
+    for readme in ("README.md", "README.zh-CN.md"):
+        assert "apps.lock" in (ROOT / readme).read_text(encoding="utf-8"), readme
