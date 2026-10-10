@@ -55,12 +55,15 @@ cc-hub 的职责有三件：
 ├── <数据目录>/             用户              应用声明的数据目录，如 ledger/；安装时播种，之后归用户
 ├── hub.toml                框架管结构        值归用户；update 只合并新键和改版本号
 ├── .gitignore              框架
+├── .gitattributes          框架              `* -text`：git 不转换换行符
 ├── .cc-hub/                派生              backups/、taps/、apps-state.toml、临时目录、锁文件
 ├── .cc-connect/            派生              cc-connect 自己建的附件目录
 └── CLAUDE.md .claude/ .agents/ .codex/   派生   agent 按自身生态生成的指针
 ```
 
-`.gitignore` 忽略凭据（`.env`、`.env.*`，`.env.example` 除外；`secrets/`）、`apps/`、`.cc-hub/`、`.cc-connect/` 和 agent 指针。
+`.gitignore` 忽略凭据（`.env`、`.env.*`，`.env.example` 除外；`secrets/`）、`/apps/`、`.cc-hub/`、`.cc-connect/` 和 agent 指针。
+
+`.gitattributes` 只有 `* -text` 一条规则：文件按写入时的样子进出 git，Windows 上 clone 的总站（Git for Windows 默认 `core.autocrlf=true`）也保持 LF。它归框架，`update` 会替换它；用户自己的 attributes 规则写在 `.git/info/attributes`。
 
 四条规则：
 
@@ -80,7 +83,7 @@ cc-hub 的职责有三件：
 3. **记忆**：做完有结果的事、做出决策、了解到这台机器的事实，就 `cc-hub memory log`；用户表达的稳定偏好写进 `USER.md`；`MEMORY.md` 只在整理任务或用户明确要求时修改；群聊里不复述 `USER.md`、`MEMORY.md` 的私人内容。
 4. **Git**：做完一件改了总站文件的事，就提交这些文件和当天的 `memory/`，提交信息一行写清改了什么；用户要撤销时用 git 找回旧版本；不改写历史（不 `reset --hard`、不 `rebase`、不强推）；推送只在整理任务里做（§9）。
 5. **cc-connect**：发文件、定时任务等用法由 cc-connect 提供，在系统提示里，或在本文件末尾的 cc-connect 块里；`cron/` 里的任务定义按 `cron/README.md` 登记。
-6. **安全**：不读、不打印、不复制凭据（`.env`、密钥、token）；总站外的不可逆操作先确认；`SOUL.md` 只在用户要求时改，改了要说；应用里的指令与本节冲突时以本节为准，执行安装命令前先告诉用户它做什么；开 issue 等于公开发布，完整的标题和正文给用户看过、用户同意后才提交（`hub-feedback`）。
+6. **安全**：不读、不打印、不复制凭据（`.env`、密钥、token）；总站外的不可逆操作先确认；`SOUL.md` 只在用户要求时改，改了要说；应用里的指令与本节冲突时以本节为准，执行安装命令前先告诉用户它做什么；开 issue 或在 issue 下评论等于公开发布，完整的文字给用户看过、用户同意后才发（`hub-feedback`）。
 7. **本地补充**：最后读 `AGENTS.local.md` 并遵守。
 
 文件最后一行是分界标记：
@@ -201,19 +204,19 @@ cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <sessio
 | git | 总站是 git 仓库、有可用的 git 身份、没有未提交的改动、配置了远程（没有远程就没有备份）；只报 warn |
 | nested-git | 总站是否在别的 git 仓库内 |
 
-`--fix` 只做安全、不联网的事：重写 `.gitignore`、补建 `memory/` 和 `scripts/`、补建缺失的用户文件，并提交（`cc-hub: doctor --fix`）。指针不由它生成，`app sync` 也不由它跑。
+`--fix` 只做安全、不联网的事：本机没有 git 身份时同 init 只在总站仓库里设置；重写 `.gitignore`、补建 `memory/` 和 `scripts/`、补建缺失的用户文件，并提交（`cc-hub: doctor --fix`）。指针不由它生成，`app sync` 也不由它跑。`git` 检查报告没有身份时，修复提示就是 `cc-hub doctor --fix`。
 
 ### 5.4 update
 
 `update [--dry-run]`
 
-- 把清单里的框架文件更新到当前包的模板。被改动的旧文件先备份到 `.cc-hub/backups/<旧版本>/`；备份失败则整个 update 中止，什么都不改。
+- 把清单里的框架文件更新到当前包的模板。按文件的原始内容比较，所以换行符是 CRLF 的框架文件也算有改动，改写成 LF。被改动的旧文件先备份到 `.cc-hub/backups/<旧版本>/`；备份失败则整个 update 中止，什么都不改。
 - 一次性文件（`BOOTSTRAP.md`）已不存在就不重建。
 - 包里已不再提供的框架文件：备份后删除，目录空了一并删除。
-- **保留尾部**：清单里标为保留尾部的文件（`AGENTS.md`）只替换分界标记及以上的部分，标记以下原样接回。文件里没有分界标记、但有 cc-connect 的 `<!-- cc-connect-instructions -->` 时，从该标记起保留到文件末尾；两者都没有则整份替换。替换后与原文件相同的算作未改动。
+- **保留尾部**：清单里标为保留尾部的文件（`AGENTS.md`）只替换分界标记及以上的部分，标记以下原样接回（只把 CRLF 换成 LF）。文件里没有分界标记、但有 cc-connect 的 `<!-- cc-connect-instructions -->` 时，从该标记起保留到文件末尾；两者都没有则整份替换。替换后与原文件相同的算作未改动。
 - `hub.toml`：用模板默认值补齐缺失的表和键，已有的值不覆盖；`template_version` 改为包版本。原地编辑，保留用户的注释和排版；无法原地编辑时退回整份重写。
 - `apps.lock`、`apps/` 和数据目录不在清单里，update 不碰。
-- 提交：本机没有任何 git 身份时，同 init 只在总站仓库里设置；总站仓库还没有任何提交时，先提交所有不被忽略的文件（`cc-hub: init`）；再提交本次改动和删除的框架文件与 `hub.toml`（`cc-hub: update <旧版本> -> <新版本>`）。
+- 提交：本机没有任何 git 身份时，同 init 只在总站仓库里设置；总站仓库还没有任何提交时，先补上缺失的 `.gitattributes`，再提交所有不被忽略的文件（`cc-hub: init`），这样第一次提交就不转换换行符；然后提交本次改动和删除的框架文件与 `hub.toml`（`cc-hub: update <旧版本> -> <新版本>`）。
 - 打印每个文件的状态：updated、unchanged、not present (one-time)、removed (retired)。
 
 ### 5.5 memory
@@ -229,6 +232,7 @@ cc-connect cron add --cron "<schedule>" --prompt "<body>" --session-mode <sessio
 - 每个 skill 一个目录链接：`<skills-dir>/<name>` → 该 skill 的目录。Linux、macOS 用 symlink，Windows 用 junction。链接建不出来就报错退出。
 - 已经指向对应 skill 的项报 `existing`；新建的报 `linked`；指向 `skills/` 或 `apps/` 下已不存在的 skill 的链接删除并报 `removed`；同名但不是指向该 skill 的项不碰，报 `blocked`，命令退出 1。
 - 不是总站 skill 的其它项（agent 自己生态里的 skill 等）不碰。
+- `<skills-dir>` 本身是指向总站 `skills/` 的链接时（整个目录一个链接的旧做法），先把它换成真实目录，再逐个链接，这样应用的 skill 不会被链进总站的 `skills/`。
 - 每行输出状态和 skill 名，用制表符分隔。重复运行结果不变；新增或删除 skill 后再跑一次。`app` 命令结束时会自己对已存在的 skills 目录重跑。
 
 ### 5.7 tap
@@ -244,8 +248,10 @@ cc-hub tap remove my-apps
 `tap add <source> [--name NAME]`
 
 - `<source>` 是一个 git 仓库：远程地址（https、ssh），或本机上一个仓库的路径。写成 `owner/repo` 且本机没有这个路径时，等同于 `https://github.com/owner/repo`。远程仓库克隆到 `.cc-hub/taps/<name>/`（`git clone --no-recurse-submodules -- <地址>`）；本地仓库不克隆，直接读它的提交。
+- 地址里带凭据（https 的用户信息，或其它协议里的密码）时拒绝，提示改用 git 凭据助手；`git@host` 这样的 ssh 用户名不算凭据。地址要写进进 git 的 `apps.lock`。
 - 名字默认取仓库目录名（去掉 `.git`），须符合命名规则（§8.2），不与已登记的 tap 重名。
 - 写入 `apps.lock` 并提交（`cc-hub: tap add <name>`）。
+- 远程 tap 的本地克隆缺失或不完整（没有 `.git`）时，用到它的 `app` 命令会重新克隆。
 
 `tap list [--json]`：名字、地址或路径、其中的应用数。
 
@@ -279,14 +285,16 @@ cc-hub app setup-state ledger waiting --note "user installs beancount"
 
 - 不带 `--yes`：拉取 tap，列出从已安装 commit 到新 commit 之间应用目录里改动的文件；`app.toml`、`SETUP.md`、`REMOVE.md`、`skills/`、`scripts/`、`cron/` 下的改动给出完整 diff，新增的 `requires` 单独列出；同时列出 `apps/<name>/` 里与已安装 commit 不一致的文件（本地改动）。最后一行是确认用的完整命令。不改动总站。
 - 带 `--yes`：不再拉取，执行升级（§8.6）。
+- 应用目录在两个 commit 之间没有改动时（例如 tap 里只改了别的应用或 README），报告已是最新，什么都不做。
 - 链接安装的应用跳过并说明。
+- `--all` 时某个应用出错只报告它（`<name>: <错误>` 写 stderr），继续处理其它应用，最后以退出码 1 结束。
 
 `app remove <name> [--yes]`
 
 - 不带 `--yes`：打印将删除的目录、保留的数据目录、要注销的定时任务（`hub:<name>/*`）、`requires` 里的软件，以及 `REMOVE.md` 的全文（有的话）。
 - 带 `--yes`：执行卸载（§8.7）。
 
-`app sync`：让 `apps/` 与 `apps.lock` 一致。克隆缺少的 tap，按记录的 commit 安装缺少的应用，链接安装的重建链接（源目录不存在就报告），然后对已存在的 skills 目录重新链接。不升级，不播种（数据目录已在总站的 git 里），不需要确认，不提交（它不改动进 git 的文件）。`apps/` 下不在记录里的目录只报告不删除。单个应用失败不影响其它应用。
+`app sync`：让 `apps/` 与 `apps.lock` 一致。本机没有 git 身份时先同 init 只在总站仓库里设置（clone 不带 `.git/config` 里的身份）。克隆缺少的 tap，按记录的 commit 安装缺少的应用，链接安装的重建链接（源目录不存在就报告），然后对已存在的 skills 目录重新链接。不升级，不播种（数据目录已在总站的 git 里），不需要确认，不提交（它不改动进 git 的文件）。`apps/` 下不在记录里的目录只报告不删除。单个应用失败不影响其它应用。
 
 `app setup-state <name> done|waiting [--note TEXT]`：记录本机上该应用的设置状态（§8.5）。
 
@@ -309,7 +317,7 @@ cc-hub app setup-state ledger waiting --note "user installs beancount"
 | `hub-apps` | 找、装、设置、升级、卸载应用；编写应用 | 见 §8；编写指南放在同目录的 `authoring.md`，也归框架 |
 | `hub-feedback` | cc-hub 或某个应用出了问题，或用户有建议 | 见 §10 |
 
-`hub-memory` 的整理流程：读近 7 天日志；把仍然成立、跨天有用的条目并入 `MEMORY.md` 四节；超预算时合并同类、删去被后来条目推翻或已不成立的条目；`USER.md` 里被新观察取代的行标 `superseded`；写一条 memory log 记录本次整理；提交；总站配置了远程就 `git push`，推送失败时记一条 memory log 并在汇报里说明，不自动拉取或合并。任何记忆文件里都不写凭据。
+`hub-memory` 的整理流程：读近 7 天日志；把仍然成立、跨天有用的条目并入 `MEMORY.md` 四节；超预算时合并同类、删去被后来条目推翻或已不成立的条目；`USER.md` 里被新观察取代的行标 `superseded`；写一条 memory log 记录本次整理；提交；总站配置了远程就 `git push`，推送失败时不拉取也不合并，记一条 memory log、提交这条日志，并在汇报里说明。任何记忆文件里都不写凭据。
 
 ## 7. hub-adapt 与生态路由
 
@@ -389,7 +397,7 @@ windows = "winget install hledger"
 
 **命名规则**：应用名、skill 名、定时任务名、tap 名只用小写字母、数字和连字符，以字母或数字开头，最长 64 个字符；skill 名还不能以 `hub-` 开头（框架 skills 的命名空间）。
 
-**数据目录**：总站下的相对路径，不含 `..`；第一段不能是保留名（总站的框架文件和用户文件、`hub.toml`、`apps.lock`、`memory`、`skills`、`cron`、`scripts`、`apps`、`secrets`，以及任何以 `.` 开头的名字）；不能与别的应用的数据目录相同或互相包含。`seed/` 下的每个文件都必须落在本应用声明的某个数据目录里。
+**数据目录**：总站下的相对路径，用 `/` 分隔，不含 `..`；每一段只用 `[A-Za-z0-9._-]`，任何一段都不以 `.` 开头、不以点结尾、不是 Windows 设备名（`con`、`prn`、`aux`、`nul`、`com1`-`com9`、`lpt1`-`lpt9`，带不带扩展名都算）——这样 Windows 的 8.3 短名（如 `GIT~1` 就是 `.git`）也进不来；第一段不能是保留名（总站的框架文件和用户文件、`hub.toml`、`apps.lock`、`memory`、`skills`、`cron`、`scripts`、`apps`、`secrets`，以及任何以 `.` 开头的名字）；不能与别的应用的数据目录相同或互相包含。`seed/` 下的每个文件都必须落在本应用声明的某个数据目录里。
 
 **设置和凭据**：个人设置（账户、币种等）放在数据目录里，比如 `ledger/config.toml`，skills 从那里读。数据目录进 git，所以凭据不放在那里，放 `.env` 或 `secrets/`。
 
@@ -400,21 +408,22 @@ windows = "winget install hledger"
 - `app.toml` 能解析，必填字段齐全，`name` 等于目录名；
 - cc-hub 版本满足 `min_hub`；
 - 应用名未被占用（升级时除外）；每个 skill 名与 `skills/` 和其它应用的 skills 都不重名；数据目录符合 §8.2；
-- 应用目录在该 commit 下只含普通文件和目录，没有符号链接和子模块。
+- 应用目录在该 commit 下只含普通文件和目录，没有符号链接和子模块；
+- 应用里的每个路径都不含空段、`.`、`..`、`.git`（不分大小写）、`~`、`\`、`:`、控制字符和 Windows 设备名，没有以点或空格结尾的段，也没有只差大小写的两个路径。
 
 ### 8.4 安装
 
 `app install --yes`：
 
-1. 在 `.cc-hub/` 下的临时目录里取出该 commit 下的应用目录（`git archive`，逐条检查路径），按 §8.3 校验；
+1. 按 §8.3 校验后，在 `.cc-hub/` 下的临时目录里按 commit 的树逐个写出应用的文件（`git ls-tree` 列出，`git cat-file` 按 blob 读原始字节）；
 2. 整体移到 `apps/<name>/`；
-3. 把 `seed/` 里缺的文件复制进数据目录，已存在的不碰；
+3. 建好数据目录，确认它的第一段在磁盘上的真实路径（`realpath`）仍是声明的名字，再把 `seed/` 里缺的文件复制进去，已存在的不碰；
 4. 写 `apps.lock`；
 5. 对总站里已存在的 agent skills 目录（§7 参考表）重新链接；
 6. 提交 `apps.lock` 和新播种的文件（`cc-hub: app install <name> (<tap>@<commit 前 7 位>)`）；
 7. 打印缺少的依赖，以及"设置待执行"。
 
-第 2 步之前失败，`apps/` 不变；之后的步骤失败就报告问题，`apps.lock` 与 `apps/` 保持一致，由 `doctor` 继续提示。
+第 2 步之前失败，`apps/` 不变；第 3、4 步失败时删掉 `apps/<name>/`（链接安装只删链接）再报错，已播种的数据文件保留；之后的重新链接和提交只报告警告，`apps.lock` 与 `apps/` 保持一致，由 `doctor` 继续提示。
 
 `apps.lock`：
 
@@ -446,12 +455,12 @@ link = "~/dev/hub-apps/machines"   # 链接安装
 
 设置指纹是 `SETUP.md`、`app.toml` 的 `requires` 和 `cron/` 下全部任务定义合起来的哈希，其中任何一项变了，应用就回到 `pending`。
 
-`hub-apps` 规定的设置流程由 agent 执行，只在和用户本人的私聊里做（要问问题、要批准、会写入私人信息）；每一步先检查再做，可以重复执行：
+`hub-apps` 规定的设置流程由 agent 执行，只在和用户本人的私聊里做（要问问题、要批准、会写入私人信息）；`app list` 说某个应用不在 `apps/` 下（例如刚 clone 的总站）时先跑 `cc-hub app sync`。每一步先检查再做，可以重复执行：
 
 1. **依赖**：`cc-hub app list --json` 给出缺少的依赖和本平台的安装命令。告诉用户每条命令做什么，请求批准；批准就执行并再查一遍；不批准或做不到（例如需要 sudo）就把步骤列给用户，执行 `cc-hub app setup-state <name> waiting --note "<还差什么>"` 并停下。
 2. **应用自己的步骤**：照 `SETUP.md` 做，例如问用户的账户和币种并写进数据目录，按用户的意愿配置服务。
-3. **定时任务**：`cc-connect cron list` 里还没有的 `hub:<name>/<task>`，对 `default: true` 的任务按 §4.5 的命令登记，描述为 `hub:<name>/<task>`。
-4. **收尾**：`cc-hub app setup-state <name> done`，提交数据目录的改动，写一条 memory log。
+3. **定时任务**：`cc-connect cron list` 里还没有的 `hub:<name>/<task>`，对 `default: true` 的任务按 §4.5 的命令登记，描述为 `hub:<name>/<task>`。已登记的 `hub:<name>/<task>` 若时间或提示词与 `apps/<name>/cron/<task>.md` 不同，或对应文件已不存在，用 `cc-connect cron del <id>` 删掉；文件还在且 `default: true` 的再登记一次。
+4. **收尾**：`cc-hub app setup-state <name> done`，写一条 memory log，再提交数据目录的改动和当天的日志。
 
 `waiting` 的应用不在会话开始时自动重跑；用户说已经做好，或 `app list` 显示缺的依赖已经出现，agent 再跑一遍。
 
@@ -459,11 +468,13 @@ link = "~/dev/hub-apps/machines"   # 链接安装
 
 `app update --yes`：
 
-1. 把 `apps/<name>/` 备份到 `.cc-hub/backups/apps/<name>/<旧 commit 前 7 位>/`；备份失败则中止；
-2. 在临时目录取出新 commit 下的应用目录并校验（§8.3）；
-3. 用改名把新目录换进 `apps/<name>/`；
-4. 补播种新增的 seed 文件，更新 `apps.lock`，重新链接；
+1. 把 `apps/<name>/` 备份到 `.cc-hub/backups/apps/<name>/<旧 commit 前 7 位>/`；这个备份目录已存在时保留它、不再覆盖；备份失败则中止，什么都不改；
+2. 用改名把旧目录移到 `.cc-hub/` 下的临时位置，在临时目录取出新 commit 下的应用目录并校验（§8.3），整体换进 `apps/<name>/`；
+3. 补播种新增的 seed 文件，更新 `apps.lock`；这一步之前任何一步失败，就删掉新目录、把旧目录改名换回来再报错；`apps.lock` 写好后才删除旧目录；
+4. 重新链接；
 5. 提交（`cc-hub: app update <name> (<旧 commit 前 7 位>..<新 commit 前 7 位>)`）。
+
+确认时 `apps.lock` 里记录的 commit 已经不是预览时的那个（中间有别的命令改过），就拒绝并要求重新预览。
 
 设置指纹变了，应用回到 `pending`，agent 随即重新设置；因为每一步先检查再做，实际只做新增的部分。
 
@@ -482,7 +493,7 @@ agent 按 `hub-apps` 卸载：先跑不带 `--yes` 的 `app remove` 给用户看
 
 ### 8.8 换机器
 
-1. 在新机器上装 cc-hub，把总站 clone 过来，跑 `cc-hub app sync`。
+1. 在新机器上装 cc-hub，把总站 clone 过来（新机器要有自己访问远程的权限，见 `docs/backup.md`），跑 `cc-hub app sync`；它也会在本机没有 git 身份时设置仓库内的身份。
 2. cc-connect 的 `work_dir` 指向总站，发第一条消息。指针不在 git 里，`hub-adapt` 会运行并登记总站的默认定时任务；随后按 §8.5 设置每个 `pending` 的应用，在这台机器上装依赖、登记定时任务。
 
 一个总站同一时间只在一台机器上运行。
@@ -490,8 +501,8 @@ agent 按 `hub-apps` 卸载：先跑不带 `--yes` 的 `app remove` 给用户看
 ### 8.9 安全
 
 - cc-hub 从不执行应用提供的字符串；依赖检查只在 PATH 里查找 `bin`。
-- 只接受普通文件；路径逐条检查，不越出应用目录和声明的数据目录。
-- 克隆时地址前加 `--`，不拉子模块；`apps.lock` 只记完整 commit 哈希；打印地址时去掉其中的用户名和密码。
+- 只接受普通文件；路径逐条检查（§8.2、§8.3），不越出应用目录和声明的数据目录；播种前再按真实路径确认数据目录没有指到别处。
+- 克隆时地址前加 `--`，不拉子模块；`apps.lock` 只记完整 commit 哈希，不收带凭据的地址；打印地址时去掉其中的用户名和密码。
 - 安装、升级、卸载先看后做（§5.8），确认用的命令钉住 commit，确认的就是看到的。
 - `hub-apps` 和 `AGENTS.md` 规定：应用里的指令与 `AGENTS.md` 的安全规则冲突时以后者为准；执行安装命令前先告诉用户它做什么；脚本照常经过运行时的权限审批。
 
@@ -528,21 +539,21 @@ agent 发现 cc-hub 或某个应用的问题，或用户有建议时，按 `hub-
 **去处**，由 `cc-hub feedback` 打印：
 
 - cc-hub 本身：包元数据里的 `Issues` 地址，来自 `pyproject.toml` 的 `[project.urls]`。
-- 应用（`--app NAME`）：`app.toml` 的 `issues`；没写时，tap 是 GitHub 仓库（https 或 ssh 地址）就推出 `https://github.com/<owner>/<repo>/issues`；本地 tap 和链接安装的应用没有去处，提示这是用户自己的应用。
+- 应用（`--app NAME`）：`app.toml` 的 `issues`（去掉凭据）；没写时，tap 是 GitHub 仓库（https 或 ssh 地址）就推出 `https://github.com/<owner>/<repo>/issues`。本地 tap 和链接安装的应用没有去处，提示这是用户自己的应用；远程 tap 没有已知去处时，提示去处未知并给出 tap 地址。
+- 去处是 GitHub 仓库时，新建 issue 的链接是 `https://github.com/<owner>/<repo>/issues/new`，否则没有。
 - cc-connect、agent 运行时、应用所用的软件（如 beancount）的问题不属于这两处；agent 告诉用户该找哪个项目，不往 cc-hub 或应用的仓库里提。
 
-**环境信息**：cc-hub 版本、Python 版本、操作系统和架构、总站里设置过的 agent 生态；带 `--app` 时加上应用的名字、版本、tap 地址和 commit、设置状态。不含总站路径、用户名和主机名，地址去掉凭据。
+**环境信息**：cc-hub 版本、Python 版本、操作系统和架构、总站里设置过的 agent 生态；带 `--app` 时加上应用的名字、版本、来源（tap 地址、本地 tap 或链接目录）和类别、commit、设置状态。不含总站路径、用户名和主机名，地址去掉凭据。
 
-**`hub-feedback` 的流程**：
+**`hub-feedback` 的流程**：开 issue 和在已有 issue 下评论都是公开发布，用户对确切的文字点头之前什么都不发。定时任务和群聊里只起草：记进 memory log，不在群里贴，下次私聊时再提。
 
-1. 判断归属：cc-hub、哪个应用，或者都不是。
-2. 去处是 GitHub 仓库且 `gh` 已登录时，先搜已有 issue（`gh issue list -R <owner/repo> --search "<关键词>" --state all`）；有相同的就给用户看，建议补充评论而不是新开。
-3. 起草：标题一行；问题写现象、复现步骤、期望和实际结果，附 `cc-hub feedback` 的环境信息；建议写想要什么、为什么。
-4. 去掉隐私：不放 `USER.md`、`MEMORY.md`、日志和数据目录的内容，不放凭据、主机名、IP、带用户名的路径；报错输出只摘必要的几行。
-5. 把完整的标题和正文给用户看，用户同意后才提交：`gh` 可用就 `gh issue create -R <owner/repo> --title <标题> --body-file <文件>`；否则把新建 issue 的链接和正文交给用户自己提交。
-6. 提交后写一条 memory log，带上 issue 地址。
-
-定时任务和群聊里只起草并记进 memory log，不提交。
+1. 判断归属：cc-hub、哪个应用，或者都不是（都不是就告诉用户该找哪个项目，停下）。
+2. 跑 `cc-hub feedback` 或 `cc-hub feedback --app <name>` 拿到去处和环境信息；没有去处就照它打印的说给用户，停下。
+3. 去处是 GitHub 仓库且 `gh` 已登录时，先搜已有 issue（`gh issue list -R <owner/repo> --search "<关键词>" --state all`）；有相同的就给用户看，建议在那里评论。评论同样走第 4 到第 6 步，用 `gh issue comment <编号> -R <owner/repo> --body-file <文件>` 发出。
+4. 起草：标题一行；问题写现象、复现步骤、期望和实际结果，附环境信息；建议写想要什么、为什么。
+5. 去掉隐私：不放 `USER.md`、`MEMORY.md`、日志和数据目录的内容，不放凭据、主机名、IP、带用户名的路径；报错输出只摘必要的几行。
+6. 把目标仓库和完整的标题、正文（评论则是 issue 和正文）给用户看，用户同意后才发：`gh` 可用就 `gh issue create -R <owner/repo> --title <标题> --body-file <文件>`；否则把新建 issue 的链接和正文交给用户自己提交。
+7. 发出后写一条 memory log，带上地址。
 
 ## 11. 与 cc-connect 的配合
 
@@ -583,6 +594,7 @@ Python 代码：
 平台：
 
 - 仓库 `.gitattributes` 设 `* text=auto eol=lf`；模板全部 LF、无 BOM（有些 skill 加载器遇到 CRLF 会静默丢掉 frontmatter）。
+- 总站自己的 `.gitattributes` 是 `* -text`（§3），所以在 Git for Windows（默认 `core.autocrlf=true`）上 clone 或 `git restore` 都不会把框架文件变成 CRLF；`update` 也会把已经是 CRLF 的框架文件改回 LF。
 - Windows 上建 symlink 需要开发者模式或管理员权限，所以 skill 链接和应用的链接安装都用 junction（目录连接点），不需要特殊权限。
 - 给人看的表格由 rich 渲染；在旧版 Windows 控制台下 rich 自动换用能显示的边框，agent 读的是纯文本或 `--json`。
 - WSL 下总站放 Linux 文件系统，不放 `/mnt/c`。
@@ -611,7 +623,7 @@ cc-hub/
 │   ├── apps.py               app.toml 解析与校验、本机设置状态、安装升级卸载、sync
 │   ├── commands/             init doctor update memory link tap app feedback
 │   └── templates/            AGENTS.md BOOTSTRAP.md SOUL.md IDENTITY.md USER.md MEMORY.md
-│                             AGENTS.local.md hub.toml _gitignore cron/
+│                             AGENTS.local.md hub.toml _gitignore _gitattributes cron/
 │                             skills/hub-adapt/ hub-memory/ hub-apps/ hub-feedback/
 ├── tests/unit/  tests/integration/
 ├── docs/                     install.md cc-connect.md windows.md apps.md backup.md

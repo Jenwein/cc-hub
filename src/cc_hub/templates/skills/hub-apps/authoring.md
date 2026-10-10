@@ -34,7 +34,10 @@ name is the app name: lowercase letters, digits and hyphens.
 
 - Skill names are unique in the hub and must not start with `hub-`.
 - A data directory is a relative path; it must not be a hub file or folder
-  (`memory`, `skills`, `cron`, `scripts`, `apps`, ...) or start with `.`.
+  (`memory`, `skills`, `cron`, `scripts`, `apps`, ...). Each part uses only
+  letters, digits, `.`, `_` and `-`, and does not start with `.`.
+- File names inside the app do not contain `~`, and no two of them differ
+  only in letter case.
 - Personal settings live in a file in the data directory, such as
   `ledger/config.toml`. Credentials go in `.env` or `secrets/`, never in the
   data directory, which is committed.

@@ -16,6 +16,9 @@ Apps live in **taps**: git repositories with one top-level directory per app.
     cc-hub app install my-apps/ledger       # prints an overview, changes nothing
     cc-hub app install my-apps/ledger --ref <commit> --yes
 
+A private tap needs your own git access (a credential helper or an ssh
+key); a tap URL with a password or token in it is refused.
+
 Usually you ask the agent instead; it runs the same commands, shows you the
 overview, and after you agree installs the app and sets it up: installs the
 software it needs (asking first), asks for your settings, and registers the
@@ -67,9 +70,12 @@ Rules:
   and hyphens; skill names must not start with `hub-` and must be unique in the
   hub.
 - Data directories are relative paths outside the hub's own files and
-  folders. Files under `seed/` are copied into them once and never
-  overwritten. Personal settings belong there too; credentials belong in
-  `.env` or `secrets/`.
+  folders. Each part uses only letters, digits, `.`, `_` and `-`, and does
+  not start with `.`. Files under `seed/<data dir>/` are copied into them
+  once and never overwritten. Personal settings belong there too;
+  credentials belong in `.env` or `secrets/`.
+- File names inside the app do not contain `~`, and no two of them differ
+  only in letter case.
 - `SETUP.md` steps check before they act, so setup can run again after an
   update. Prefer installs without root.
 - Only regular files: no symlinks or submodules.
