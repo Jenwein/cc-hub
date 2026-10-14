@@ -4,11 +4,12 @@
 A restricted scheduled task declares an ``allow`` list of command prefixes; its unattended
 agent run may only execute those commands and may only read inside the hub. Because the hub's
 sessions run in ``bypassPermissions`` mode, enforcement is a PreToolUse hook that runs before
-every tool call of every session. The hook recognises a restricted task's run by the pointer
-prompt in the first user message of the transcript; every other session gets no opinion.
+every tool call of every session. The hook recognises a scheduled run by the pointer prompt
+in the first user message of the transcript; a session without one gets no opinion.
 
-Nothing here may raise or print a traceback: outside a recognised restricted session any
-failure means "no opinion" (``run_hook`` returns ``""``). Inside one, the decision is final.
+Nothing here may raise or print a traceback. Without a pointer prompt any failure means
+"no opinion" (``run_hook`` returns ``""``). With one, a task that cannot be evaluated denies
+every tool, and a valid task without ``allow`` gets no opinion.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ POINTER = re.compile(r"Scheduled task hub:(?P<name>[a-z0-9][a-z0-9-]*(?:/[a-z0-9
 # bare ``$`` (not only ``$(``) is rejected because several parameter expansions can reach a
 # command substitution without ``$(``, and ``\r`` because it is not caught by ``\n``
 UNSAFE_BASH = re.compile(r"[;&|`$<>\n\r]")
+DRIVE = re.compile(r"[A-Za-z]:")
 _TRANSCRIPT_LINES = 200
 _SKIP = object()  # an entry that is not the deciding user message (e.g. only tool_result blocks)
 
@@ -98,9 +100,21 @@ def _out(decision: str, reason: str) -> dict:
 
 
 def _norm_part(part: str) -> str:
-    """A path component normalised for comparison: Windows case folding, and the trailing
-    dots/spaces and the ``name::stream`` suffix that Windows collapses onto the real entry."""
-    return os.path.normcase(part.rstrip(" .").split(":", 1)[0])
+    """A path component normalised for comparison on every platform: case-folded (Windows and
+    macOS file systems are case-insensitive, and `realpath` on POSIX does not correct case),
+    without the trailing dots/spaces and ``name::stream`` suffix that Windows collapses onto
+    the real entry."""
+    return part.rstrip(" .").split(":", 1)[0].casefold()
+
+
+def _rooted(value: str) -> bool:
+    """Whether a glob names its own starting point (absolute, root, home or a drive letter),
+    so the search no longer starts at the checked path."""
+    return (
+        value.startswith(("/", "\\", "~"))
+        or DRIVE.match(value) is not None
+        or os.path.isabs(value)
+    )
 
 
 def _bash(name: str, allow: list[str], tool_input) -> dict:
@@ -121,12 +135,19 @@ def _read(name: str, tool: str, tool_input, hub: Path, cwd) -> dict:
     base = Path(cwd) if isinstance(cwd, str) and cwd else Path(hub)
 
     if search:
-        # a .. in the regex/glob or the file filter could climb out; a non-string one is junk
+        # a .. in the pattern or the file filter could climb out; a non-string one is junk; a
+        # path glob (Glob's pattern, Grep's glob) that is rooted escapes the checked path.
+        # Grep's pattern is a regex, not a path, so only the .. rule applies to it.
+        path_glob = "pattern" if tool == "Glob" else "glob"
         for key in ("pattern", "glob"):
             value = inp.get(key)
             if value is None:
                 continue
-            if not isinstance(value, str) or ".." in value:
+            if (
+                not isinstance(value, str)
+                or ".." in value
+                or (key == path_glob and _rooted(value))
+            ):
                 return _out("deny", f"hub:{name} may not read {value}")
         raw = inp.get("path")
         if raw is None:
@@ -148,9 +169,9 @@ def _read(name: str, tool: str, tool_input, hub: Path, cwd) -> dict:
         return denied  # outside the hub
     rel = os.path.relpath(resolved, hub_real)
     parts = [] if rel in (".", "") else rel.replace("\\", "/").split("/")
-    if parts and _norm_part(parts[0]) == os.path.normcase("secrets"):
+    if parts and _norm_part(parts[0]) == "secrets":
         return denied
-    if _norm_part(os.path.basename(resolved)).startswith(os.path.normcase(".env")):
+    if _norm_part(os.path.basename(resolved)).startswith(".env"):
         return denied
     # a recursive tool rooted at the hub itself would reach secrets/; make it name a subtree
     if search and nc_resolved == nc_hub:
@@ -158,8 +179,21 @@ def _read(name: str, tool: str, tool_input, hub: Path, cwd) -> dict:
     return _out("allow", f"allowed for hub:{name}")
 
 
-def decide(event: dict, hub: Path) -> dict | None:
-    """The hook's decision for one tool call, or None for no opinion (normal permission flow)."""
+def _no_tools(name: str, problem: str) -> dict:
+    problem = " ".join(str(problem).split()) or "unknown"
+    return _out(
+        "deny", f"hub:{name} has no valid definition: {problem}; this run may not use tools"
+    )
+
+
+def decide(event: dict, hub: Path | None) -> dict | None:
+    """The hook's decision for one tool call, or None for no opinion (normal permission flow).
+
+    ``hub`` is None when no hub could be found. A session without a pointer prompt always gets
+    no opinion. A pointer prompt only comes from a scheduled run, so when its task cannot be
+    evaluated (no hub, unreadable tasks, no such task, a broken definition) every tool is
+    denied; a valid task without ``allow`` gets no opinion.
+    """
     if not isinstance(event, dict) or event.get("hook_event_name") != "PreToolUse":
         return None
     transcript = event.get("transcript_path")
@@ -168,16 +202,26 @@ def decide(event: dict, hub: Path) -> dict | None:
     name = task_from_transcript(Path(transcript))
     if name is None:
         return None
-    task = next(
-        (
-            t
-            for t in discover(hub)
-            if t.name == name and t.definition is not None and t.definition.allow
-        ),
-        None,
-    )
+    try:
+        return _decide_for(name, event, hub)
+    except Exception as exc:  # inside a recognised scheduled run: fail closed
+        return _no_tools(name, f"the guard could not check it ({exc})")
+
+
+def _decide_for(name: str, event: dict, hub: Path | None) -> dict | None:
+    if hub is None:
+        return _no_tools(name, "no hub found")
+    try:
+        tasks = discover(hub)
+    except Exception as exc:
+        return _no_tools(name, f"cannot read the hub's tasks: {exc}")
+    task = next((t for t in tasks if t.name == name), None)
     if task is None:
-        return None  # not a restricted task (or a task that no longer exists) → no opinion
+        return _no_tools(name, f"no task named {name}")
+    if task.definition is None:
+        return _no_tools(name, task.error or "the definition cannot be read")
+    if not task.definition.allow:
+        return None  # a valid task that is not restricted
     allow = [prefix.strip() for prefix in task.definition.allow if prefix.strip()]
 
     tool = event.get("tool_name")
@@ -197,7 +241,10 @@ def run_hook(stdin_text: str, cwd: Path) -> str:
             return ""
         event_cwd = event.get("cwd")
         base = Path(event_cwd) if isinstance(event_cwd, str) and event_cwd else Path(cwd)
-        hub = find_hub(cwd=base, env={})
+        try:
+            hub: Path | None = find_hub(cwd=base, env={})
+        except Exception:
+            hub = None  # decide still fails closed for a scheduled run, and ignores a chat
         decision = decide(event, hub)
         return "" if decision is None else json.dumps(decision)
     except Exception:

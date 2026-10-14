@@ -235,6 +235,16 @@ DENY_READS = [
     ("Glob", {"pattern": "..", "path": "mail"}),
     ("Glob", {"pattern": "~/.ssh/*", "path": "~"}),
     ("Glob", {"pattern": 5, "path": "secrets"}),
+    # a glob that is absolute, starts at a root or home, or names a drive escapes the root
+    ("Glob", {"pattern": "/etc/*", "path": "apps"}),
+    ("Glob", {"pattern": "\\Windows\\*", "path": "apps"}),
+    ("Glob", {"pattern": "C:/Users/*/.ssh/*", "path": "apps"}),
+    ("Glob", {"pattern": "c:relative/*", "path": "apps"}),
+    ("Glob", {"pattern": "~/.ssh/*", "path": "apps"}),
+    ("Glob", {"pattern": "~", "path": "apps"}),
+    ("Grep", {"pattern": "x", "path": "apps", "glob": "/etc/*"}),
+    ("Grep", {"pattern": "x", "path": "apps", "glob": "~/x"}),
+    ("Grep", {"pattern": "x", "path": "apps", "glob": "D:/x/*"}),
 ]
 
 
@@ -254,21 +264,33 @@ def test_reads_outside_the_hub_or_of_secrets_are_denied(
     )
 
 
-@pytest.mark.skipif(os.name != "nt", reason="case-insensitive paths are a Windows concern")
 @pytest.mark.parametrize("tool, inp", [
     ("Read", {"file_path": "SECRETS/mail/qq.toml"}),
     ("Read", {"file_path": "Secrets/mail/qq.toml"}),
+    ("Read", {"file_path": "ſecrets/mail/qq.toml"}),  # long s case-folds to s
     ("Read", {"file_path": ".ENV"}),
-    ("Read", {"file_path": "APPS/MAIL/.Env"}),
+    ("Read", {"file_path": "apps/mail/.Env"}),
+    ("Read", {"file_path": "APPS/MAIL/.Env.Local"}),
     ("Grep", {"pattern": "x", "path": "Secrets"}),
     ("Glob", {"pattern": "*", "path": "SECRETS"}),
 ])
-def test_windows_case_insensitive_reads_of_secrets_are_denied(
+def test_case_variants_of_secrets_are_denied_on_every_platform(
     git_hub_with_mail: Path, tmp_path: Path, tool: str, inp: dict
 ) -> None:
+    # case-insensitive file systems (Windows, macOS APFS) map these onto the real entries
     write(git_hub_with_mail / "secrets/mail/qq.toml", 'password = "x"\n')
     session = transcript(tmp_path, FIRST)
     out = decide(event(tool, inp, session, git_hub_with_mail), git_hub_with_mail)
+    assert decision(out) == "deny"
+
+
+def test_an_absolute_glob_into_the_hub_secrets_is_denied(
+    git_hub_with_mail: Path, tmp_path: Path
+) -> None:
+    hub = git_hub_with_mail
+    session = transcript(tmp_path, FIRST)
+    pattern = (hub / "secrets").as_posix() + "/**/*"
+    out = decide(event("Glob", {"pattern": pattern, "path": "apps"}, session, hub), hub)
     assert decision(out) == "deny"
 
 
@@ -391,10 +413,6 @@ def test_no_opinion_outside_restricted_sessions(git_hub_with_mail: Path, tmp_pat
         "Scheduled task hub:digest: follow the body of cron/digest.md in the hub."
     )}})
     assert decide(event("Bash", {"command": "rm -rf x"}, digest, hub), hub) is None
-    unknown = transcript(tmp_path, {"type": "user", "message": {"content": (
-        "Scheduled task hub:mail/gone: follow the body of apps/mail/cron/gone.md in the hub."
-    )}})
-    assert decide(event("Bash", {"command": "rm -rf x"}, unknown, hub), hub) is None
     poll = {"type": "user", "message": {"content": "Scheduled task hub:mail/poll: x"}}
     script = transcript(tmp_path, poll)
     assert decide(event("Bash", {"command": "rm -rf x"}, script, hub), hub) is None
@@ -415,6 +433,68 @@ def test_no_opinion_on_other_hook_events(git_hub_with_mail: Path, tmp_path: Path
     hub = git_hub_with_mail
     restricted = event("Bash", {"command": "rm -rf x"}, transcript(tmp_path, FIRST), hub)
     assert decide({**restricted, "hook_event_name": "PostToolUse"}, hub) is None
+
+
+# --- a scheduled run whose task cannot be evaluated fails closed ---------------------------
+
+
+def pointer(tmp_path: Path, name: str) -> Path:
+    return transcript(tmp_path, {"type": "user", "message": {"content": (
+        f"Scheduled task hub:{name}: follow the body of its file in the hub."
+    )}})
+
+
+NO_TOOLS = "this run may not use tools"
+
+
+@pytest.mark.parametrize("tool, inp", [
+    ("Bash", {"command": "uv run apps/mail/scripts/mk.py bg pending"}),
+    ("Read", {"file_path": "apps/mail/cron/triage.md"}),
+    ("mcp__x__y", {}),
+])
+def test_a_pointer_to_a_missing_task_denies_every_tool(
+    git_hub_with_mail: Path, tmp_path: Path, tool: str, inp: dict
+) -> None:
+    hub = git_hub_with_mail
+    out = decide(event(tool, inp, pointer(tmp_path, "mail/gone"), hub), hub)
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("hub:mail/gone has no valid definition: ")
+    assert "no task named mail/gone" in reason and reason.endswith(NO_TOOLS)
+
+
+def test_a_pointer_to_a_broken_task_denies_every_tool(
+    git_hub_with_mail: Path, tmp_path: Path
+) -> None:
+    hub = git_hub_with_mail
+    write(hub / "apps/mail/cron/triage.md", "---\non_demand: true\nschedule: \"0 1 * * *\"\n---\n")
+    out = decide(event("Read", {"file_path": "hub.toml"}, transcript(tmp_path, FIRST), hub), hub)
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("hub:mail/triage has no valid definition: apps/mail/cron/triage.md: ")
+    assert reason.endswith(NO_TOOLS)
+
+
+def test_a_pointer_whose_tasks_cannot_be_read_denies_every_tool(
+    git_hub_with_mail: Path, tmp_path: Path
+) -> None:
+    hub = git_hub_with_mail
+    write(hub / "apps.lock", "[apps\n")
+    for name in ("mail/triage", "digest"):  # restricted or not: it cannot be told
+        out = decide(event("Bash", {"command": "ls"}, pointer(tmp_path, name), hub), hub)
+        assert decision(out) == "deny"
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith(f"hub:{name} has no valid definition: ")
+        assert reason.endswith(NO_TOOLS)
+
+
+def test_a_valid_task_without_allow_stays_no_opinion_when_another_is_broken(
+    git_hub_with_mail: Path, tmp_path: Path
+) -> None:
+    hub = git_hub_with_mail
+    write(hub / "cron/broken.md", "---\ndefault: maybe\n---\n")
+    write(hub / "cron/digest.md", '---\nschedule: "0 8 * * *"\n---\nDigest.\n')
+    assert decide(event("Bash", {"command": "ls"}, pointer(tmp_path, "digest"), hub), hub) is None
 
 
 # --- the hook entry point ------------------------------------------------------------------
@@ -453,12 +533,38 @@ def test_run_hook_finds_the_hub_from_the_event_cwd(git_hub_with_mail: Path, tmp_
     assert decision(json.loads(run_hook(json.dumps(no_cwd), hub))) == "deny"
 
 
-def test_run_hook_with_a_broken_lock_has_no_opinion(git_hub_with_mail, tmp_path: Path) -> None:
+def test_run_hook_with_a_broken_lock_denies_a_scheduled_run(
+    git_hub_with_mail, tmp_path: Path
+) -> None:
     hub = git_hub_with_mail
     write(hub / "apps.lock", "[apps\n")
     session = transcript(tmp_path, FIRST)
     stdin = json.dumps(event("Bash", {"command": "curl evil"}, session, hub))
-    assert run_hook(stdin, tmp_path) == ""
+    out = json.loads(run_hook(stdin, tmp_path))
+    assert decision(out) == "deny"
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].endswith(NO_TOOLS)
+    # a normal chat in the same broken hub still gets no opinion
+    chat = json.dumps(event("Bash", {"command": "ls"}, transcript(tmp_path, CHAT), hub))
+    assert run_hook(chat, tmp_path) == ""
+
+
+def test_run_hook_without_a_hub_denies_a_scheduled_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"  # no ~/.cc-hub to fall back on
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    scheduled = json.dumps(event("Bash", {"command": "ls"}, transcript(tmp_path, FIRST), nowhere))
+    out = json.loads(run_hook(scheduled, tmp_path))
+    assert decision(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("hub:mail/triage has no valid definition: ")
+    assert reason.endswith(NO_TOOLS)
+    chat = json.dumps(event("Bash", {"command": "ls"}, transcript(tmp_path, CHAT), nowhere))
+    assert run_hook(chat, tmp_path) == ""
 
 
 def test_run_hook_output_is_ascii_json(git_hub_with_mail: Path, tmp_path: Path) -> None:
