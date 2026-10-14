@@ -119,3 +119,27 @@ def test_update_all_continues_past_a_failing_app(
     r = run(hub, "app", "update", "agenda")
     assert r.exit_code == 1
     assert "tap agenda-apps:" in r.output
+
+
+def test_app_remove_lists_and_drops_the_overrides(git_hub_with_mail: Path) -> None:
+    from cc_hub.cronoverrides import save
+    from cc_hub.gitops import commit_paths
+
+    hub = git_hub_with_mail
+    save(hub, "mail/poll", {"schedule": "0 8 * * *"})
+    save(hub, "ledger/prices", {"enabled": False})
+    assert commit_paths(hub, ["hub.toml", "apps.lock"], "cc-hub: set up") is None
+    r = run(hub, "app", "remove", "mail")
+    assert r.exit_code == 0, r.output
+    assert "overrides: mail/poll" in r.output and "ledger/prices" not in r.output
+    assert (hub / "apps" / "mail").exists()
+    r = run(hub, "app", "remove", "mail", "--yes")
+    assert r.exit_code == 0, r.output
+    toml = (hub / "hub.toml").read_text(encoding="utf-8")
+    assert "mail/poll" not in toml and "ledger/prices" in toml
+
+
+def test_app_remove_without_overrides_says_none(hub_with_mail: Path) -> None:
+    r = run(hub_with_mail, "app", "remove", "mail")
+    assert r.exit_code == 0, r.output
+    assert "overrides: none" in r.output

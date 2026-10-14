@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
 import shutil
 import tomllib
 from collections.abc import Callable
@@ -15,11 +17,12 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
-from cc_hub import __version__, gitops, manifest
+from cc_hub import __version__, cronguard, cronoverrides, crontasks, gitops, manifest
 from cc_hub.applock import LockError, from_tilde, load_lock
 from cc_hub.apps import app_statuses
 from cc_hub.commands.init import enclosing_git_repo
 from cc_hub.commands.link import POINTERS, inspect_skill_links
+from cc_hub.crontasks import CronError
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import load_config
 
@@ -111,6 +114,80 @@ def apps_check(hub: Path, which: Which) -> Check:
     if problems:
         return Check("apps", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
     return _ok("apps", f"{len(rows)} app(s) set up")
+
+
+def _guard_installed(hub: Path) -> bool:
+    """Whether .claude/settings.json has a PreToolUse hook that runs the restricted-task guard."""
+    try:
+        data = json.loads(read_text(hub / cronguard.SETTINGS_REL).lstrip("﻿"))
+    except (OSError, ValueError):
+        return False
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    if not isinstance(entries, list):
+        return False
+    return any(
+        isinstance(entry, dict)
+        and isinstance(entry.get("hooks"), list)
+        and any(
+            isinstance(h, dict) and h.get("command") == cronguard.HOOK_COMMAND
+            for h in entry["hooks"]
+        )
+        for entry in entries
+    )
+
+
+def cron_check(hub: Path) -> Check:
+    """Scheduled tasks: definition files, overrides in hub.toml, the restricted-task guard.
+
+    A hub.toml or apps.lock that cannot be read is the business of the hub-toml and apps checks,
+    so this one says so and stops.
+    """
+    try:
+        overrides = cronoverrides.load(hub)
+    except _READ_ERRORS:
+        return _ok("cron", "hub.toml unreadable; see hub-toml")
+    except CronError as exc:  # [cron] is not one table per task
+        return Check("cron", "warn", str(exc), 'make every [cron."<task>"] a table of its own')
+    try:
+        task_rows = crontasks.rows(hub)
+        installed = set(load_lock(hub).apps)
+    except (LockError, OSError, UnicodeDecodeError):
+        return _ok("cron", "apps.lock unreadable; see apps")
+    except CronError as exc:
+        return Check("cron", "warn", str(exc), "fix hub.toml")
+
+    problems: list[str] = []
+    fixes: list[str] = []
+    for row in task_rows:
+        if not row["error"]:
+            continue
+        problems.append(row["error"])
+        if row["kind"] is not None:  # the definition is fine; the override of it is not
+            fixes.append(f"run `cc-hub cron reset {shlex.quote(row['name'])}`")
+        elif row["source"] == "hub":
+            fixes.append(f"fix {row['file']}")
+        else:
+            fixes.append(f"fix {row['file']}, or run `cc-hub app update {row['source']}`")
+    names = {row["name"] for row in task_rows}
+    for key in overrides:
+        app, slash, _ = key.partition("/")
+        if key in names or (slash and app in installed and not (hub / "apps" / app).is_dir()):
+            continue  # a task of an app that is not on disk yet: the apps check says what to do
+        problems.append(f'hub.toml: [cron."{key}"] has no task')
+        fixes.append(f"run `cc-hub cron reset {shlex.quote(key)}`")
+
+    restricted = [row["name"] for row in task_rows if row["allow"]]
+    claude_set_up = any((hub / rel).exists() for rel in POINTERS["claude"] if rel)
+    if restricted and claude_set_up and not _guard_installed(hub):
+        problems.append(
+            f"restricted task(s) {', '.join(restricted)}: the guard hook is not in "
+            f"{cronguard.SETTINGS_REL}, so nothing enforces their allow list"
+        )
+        fixes.append("run the hub-adapt skill from the agent")
+    if problems:
+        return Check("cron", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
+    return _ok("cron", f"{len(task_rows)} task(s) checked")
 
 
 def run_checks(
@@ -284,6 +361,9 @@ def run_checks(
 
     # apps
     checks.append(apps_check(hub, which))
+
+    # cron
+    checks.append(cron_check(hub))
 
     # git
     checks.append(git_check(hub))

@@ -225,6 +225,8 @@ def remove_cmd(
             typer.echo(f"remove apps/{name}{linked}")
             typer.echo("data kept: " + (", ".join(plan.data_dirs) or "none"))
             typer.echo("scheduled tasks to unregister: " + (", ".join(plan.cron_tasks) or "none"))
+            overrides = ", ".join(plan.overrides) + " (removed from hub.toml)"
+            typer.echo("overrides: " + (overrides if plan.overrides else "none"))
             typer.echo("software it used: " + (", ".join(r.name for r in plan.software) or "none"))
             if plan.remove_md:
                 typer.echo("REMOVE.md:")
