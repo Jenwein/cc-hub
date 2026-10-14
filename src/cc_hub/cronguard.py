@@ -1,0 +1,239 @@
+# -*- coding: utf-8 -*-
+"""The restricted-task guard: a Claude Code PreToolUse hook (`cc-hub cron guard`).
+
+A restricted scheduled task declares an ``allow`` list of command prefixes; its unattended
+agent run may only execute those commands and may only read inside the hub. Because the hub's
+sessions run in ``bypassPermissions`` mode, enforcement is a PreToolUse hook that runs before
+every tool call of every session. The hook recognises a restricted task's run by the pointer
+prompt in the first user message of the transcript; every other session gets no opinion.
+
+Nothing here may raise or print a traceback: outside a recognised restricted session any
+failure means "no opinion" (``run_hook`` returns ``""``). Inside one, the decision is final.
+"""
+
+from __future__ import annotations
+
+import itertools
+import json
+import os
+import re
+from pathlib import Path
+
+from cc_hub.crontasks import CronError, discover
+from cc_hub.encoding import read_text, write_text
+from cc_hub.hub import find_hub
+
+HOOK_COMMAND = "cc-hub cron guard"
+SETTINGS_REL = ".claude/settings.json"
+
+# the pointer prompt a restricted task's session opens with (crontasks.pointer_prompt)
+POINTER = re.compile(r"Scheduled task hub:(?P<name>[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?):")
+# a shell would act on any of these inside a command, chaining or expanding past the prefix;
+# bare ``$`` (not only ``$(``) is rejected because several parameter expansions can reach a
+# command substitution without ``$(``, and ``\r`` because it is not caught by ``\n``
+UNSAFE_BASH = re.compile(r"[;&|`$<>\n\r]")
+_TRANSCRIPT_LINES = 200
+_SKIP = object()  # an entry that is not the deciding user message (e.g. only tool_result blocks)
+
+
+def _entry_text(entry: dict):
+    """The deciding text of a user entry, or ``_SKIP`` if it is not the deciding message."""
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = [
+            block["text"]
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ]
+        if texts:
+            return "\n".join(texts)
+        # content that is only tool_result (foreign data) is skipped, never the decider
+        if any(isinstance(block, dict) and block.get("type") == "tool_result" for block in content):
+            return _SKIP
+    return ""
+
+
+def task_from_transcript(path: Path) -> str | None:
+    """The restricted-task name from the first real user message of the transcript, or None.
+
+    Only the first user message (not meta, not a tool-result-only entry) counts, so foreign
+    content arriving later in tool results cannot impersonate a task's pointer prompt.
+    """
+    try:
+        with Path(path).open(encoding="utf-8") as handle:
+            lines = list(itertools.islice(handle, _TRANSCRIPT_LINES))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isMeta"):
+            continue
+        text = _entry_text(entry)
+        if text is _SKIP:
+            continue
+        match = POINTER.search(text)
+        return match.group("name") if match else None
+    return None
+
+
+def _out(decision: str, reason: str) -> dict:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
+def _norm_part(part: str) -> str:
+    """A path component normalised for comparison: Windows case folding, and the trailing
+    dots/spaces and the ``name::stream`` suffix that Windows collapses onto the real entry."""
+    return os.path.normcase(part.rstrip(" .").split(":", 1)[0])
+
+
+def _bash(name: str, allow: list[str], tool_input) -> dict:
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    only = f"hub:{name} may only run: {', '.join(allow)}"
+    if not isinstance(command, str):
+        return _out("deny", only)
+    if UNSAFE_BASH.search(command):
+        return _out("deny", only)
+    if any(command == prefix or command.startswith(prefix + " ") for prefix in allow):
+        return _out("allow", f"allowed for hub:{name}")
+    return _out("deny", only)
+
+
+def _read(name: str, tool: str, tool_input, hub: Path, cwd) -> dict:
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    search = tool in ("Grep", "Glob")
+    base = Path(cwd) if isinstance(cwd, str) and cwd else Path(hub)
+
+    if search:
+        # a .. in the regex/glob or the file filter could climb out; a non-string one is junk
+        for key in ("pattern", "glob"):
+            value = inp.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str) or ".." in value:
+                return _out("deny", f"hub:{name} may not read {value}")
+        raw = inp.get("path")
+        if raw is None:
+            raw = str(base)
+    else:
+        raw = inp.get("file_path")
+    if not isinstance(raw, str) or not raw:
+        return _out("deny", f"hub:{name} may not read {raw}")
+
+    denied = _out("deny", f"hub:{name} may not read {raw}")
+    try:
+        resolved = os.path.realpath(os.path.join(str(base), os.path.expanduser(raw)))
+        hub_real = os.path.realpath(str(hub))
+    except (OSError, ValueError):
+        return denied
+    nc_resolved = os.path.normcase(resolved)
+    nc_hub = os.path.normcase(hub_real)
+    if nc_resolved != nc_hub and not nc_resolved.startswith(nc_hub + os.sep):
+        return denied  # outside the hub
+    rel = os.path.relpath(resolved, hub_real)
+    parts = [] if rel in (".", "") else rel.replace("\\", "/").split("/")
+    if parts and _norm_part(parts[0]) == os.path.normcase("secrets"):
+        return denied
+    if _norm_part(os.path.basename(resolved)).startswith(os.path.normcase(".env")):
+        return denied
+    # a recursive tool rooted at the hub itself would reach secrets/; make it name a subtree
+    if search and nc_resolved == nc_hub:
+        return denied
+    return _out("allow", f"allowed for hub:{name}")
+
+
+def decide(event: dict, hub: Path) -> dict | None:
+    """The hook's decision for one tool call, or None for no opinion (normal permission flow)."""
+    if not isinstance(event, dict) or event.get("hook_event_name") != "PreToolUse":
+        return None
+    transcript = event.get("transcript_path")
+    if not isinstance(transcript, str) or not transcript:
+        return None
+    name = task_from_transcript(Path(transcript))
+    if name is None:
+        return None
+    task = next(
+        (
+            t
+            for t in discover(hub)
+            if t.name == name and t.definition is not None and t.definition.allow
+        ),
+        None,
+    )
+    if task is None:
+        return None  # not a restricted task (or a task that no longer exists) → no opinion
+    allow = [prefix.strip() for prefix in task.definition.allow if prefix.strip()]
+
+    tool = event.get("tool_name")
+    tool_input = event.get("tool_input")
+    if tool == "Bash":
+        return _bash(name, allow, tool_input)
+    if tool in ("Read", "Grep", "Glob"):
+        return _read(name, tool, tool_input, hub, event.get("cwd"))
+    return _out("deny", f"hub:{name} may not use {tool}")
+
+
+def run_hook(stdin_text: str, cwd: Path) -> str:
+    """The hook entry point: JSON to print on stdout, or ``""`` for no opinion. Never raises."""
+    try:
+        event = json.loads(stdin_text)
+        if not isinstance(event, dict):
+            return ""
+        event_cwd = event.get("cwd")
+        base = Path(event_cwd) if isinstance(event_cwd, str) and event_cwd else Path(cwd)
+        hub = find_hub(cwd=base, env={})
+        decision = decide(event, hub)
+        return "" if decision is None else json.dumps(decision)
+    except Exception:
+        return ""
+
+
+def _invalid(detail: str) -> CronError:
+    return CronError(f"{SETTINGS_REL} {detail}; fix it, then run cc-hub cron guard-setup again")
+
+
+def setup(hub: Path) -> bool:
+    """Add the guard hook to ``.claude/settings.json`` (merging, idempotent). True if changed."""
+    settings = Path(hub) / ".claude" / "settings.json"
+    data: dict = {}
+    if settings.exists():
+        raw = read_text(settings).lstrip("﻿")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            raise _invalid("is not valid JSON") from None
+        if not isinstance(data, dict):
+            raise _invalid("must be a JSON object")
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise _invalid('has a "hooks" that is not a JSON object')
+    pretool = hooks.setdefault("PreToolUse", [])
+    if not isinstance(pretool, list):
+        raise _invalid('has a "hooks.PreToolUse" that is not a list')
+    for entry in pretool:
+        if not isinstance(entry, dict):
+            continue
+        inner = entry.get("hooks")
+        if isinstance(inner, list) and any(
+            isinstance(h, dict) and h.get("command") == HOOK_COMMAND for h in inner
+        ):
+            return False
+    pretool.append({"matcher": "*", "hooks": [{"type": "command", "command": HOOK_COMMAND}]})
+    write_text(settings, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    return True
