@@ -80,7 +80,7 @@ def test_set_writes_commits_and_prints_steps(git_hub: Path) -> None:
     assert r.exit_code == 0, r.output
     assert load(git_hub)["memory-consolidate"] == {"schedule": "30 2 * * *"}
     assert git_log_subject(git_hub) == "cc-hub: cron set memory-consolidate"
-    assert "cc-connect cron del" in r.stdout and '--cron "30 2 * * *"' in r.stdout
+    assert "cc-connect cron del <old id>" in r.stdout and '--cron "30 2 * * *"' in r.stdout
     assert r.stdout.splitlines()[0] == "next, in a direct chat with the user:"
 
 
@@ -238,7 +238,9 @@ def test_reregister_steps_for_a_row_that_is_off_or_gone() -> None:
     steps = reregister_steps(None, "gone/task")
     assert steps[0] == "next, in a direct chat with the user:"
     assert steps[1].strip().startswith("cc-connect cron list")
-    assert "hub:gone/task" in steps[1] and steps[2].strip() == "cc-connect cron del <id>"
+    # the job to delete is <old id>, so <id> in the commands after it is the new job's
+    assert "<old id>" in steps[1] and "hub:gone/task" in steps[1]
+    assert steps[2].strip() == "cc-connect cron del <old id>"
     assert len(steps) == 3
     off = {"enabled": False, "commands": ["cc-connect cron add ..."]}
     assert reregister_steps(off, "x") == reregister_steps(None, "x")

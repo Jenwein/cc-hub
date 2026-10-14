@@ -79,9 +79,9 @@ to do. You are sent here for some rows: those whose `source` is `hub`
 Before you register a row, ask first where needed:
 
 - **Script task** (`kind: exec`): tell the user the command (`exec`) and
-  what the file's body says it does; register it only if they agree, unless
-  they already agreed to this same command (for example, they asked to
-  change its time). If they decline, do not register it, log that
+  what the file's body says it does; register it only if they agree. Skip
+  this only when the task is already registered with this same command and
+  only its time changes. If they decline, do not register it, log that
   (`cc-hub memory log`) and tell them what will not work without it.
 - **Restricted task** (non-empty `allow`): on Claude Code, run
   `cc-hub cron guard-setup` first (it changes nothing when the guard is in
@@ -90,8 +90,8 @@ Before you register a row, ask first where needed:
   only if they agree.
 
 To register a row, run its `commands` in order. A later command contains
-`<id>`: use the id that `cc-connect cron add` printed. If a later command
-fails, delete the job you just added and tell the user. To delete:
+`<id>`: use the id that this `cc-connect cron add` printed, the new job's.
+If a later command fails, delete the job you just added and tell the user. To delete:
 `cc-connect cron del <id>`, with the id from `cc-connect cron list`.
 
 1. Run `cc-hub cron list --json` and `cc-connect cron list`. A row is
@@ -122,9 +122,19 @@ When the user wants a task to run at another time, or turned off or on:
     cc-hub cron reset <name>            # back to the time in the file
 
 The override is kept in `hub.toml` and committed; `cc-hub update`, app
-updates and the steps above keep it. Then run the steps it prints, in a
-direct chat. An on-demand task has no time: only `--off` and `--on`. Do not
-change a time in cc-connect alone; the next registration puts it back.
+updates and the steps above keep it. An on-demand task has no time: only
+`--off` and `--on`. Do not change a time in cc-connect alone; the next
+registration puts it back.
+
+Then run the steps the command prints, in a direct chat: find the task's
+`<old id>` with `cc-connect cron list` and delete it, then, if the task is
+on, run its registration commands. That is a registration like any other.
+Before you run any of it, apply "Before you register" above: the user's
+consent for a script task's command (unless only the time of a registered
+task changes), and the guard or the no-safety-belt warning for a restricted
+task. For `<id>` in the commands after `cron add`, use the id that this
+`cc-connect cron add` printed; if one of them fails, delete the new job and
+tell the user.
 
 ## Wake
 

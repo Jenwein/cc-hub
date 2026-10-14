@@ -52,12 +52,14 @@ def reregister_steps(row: dict | None, name: str) -> list[str]:
     """What the agent does next, in a direct chat, to register `name` as the hub now has it.
 
     `row` is the task's row after the change, or None when the task no longer exists. A task
-    that is off, or gone, is only deleted from cc-connect; an enabled one is added again.
+    that is off, or gone, is only deleted from cc-connect; an enabled one is added again. The
+    job to delete is `<old id>`, so `<id>` in the registration commands after it can only mean
+    the id the new `cron add` prints.
     """
     steps = [
         "next, in a direct chat with the user:",
-        f"  cc-connect cron list            # find the id of hub:{name}, if registered",
-        "  cc-connect cron del <id>",
+        f"  cc-connect cron list            # find <old id>, the id of hub:{name}, if registered",
+        "  cc-connect cron del <old id>",
     ]
     if row is not None and row["enabled"]:
         steps += [f"  {command}" for command in row["commands"]]

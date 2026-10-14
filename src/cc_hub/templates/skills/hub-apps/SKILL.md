@@ -55,8 +55,10 @@ lists missing software.
 When the user wants an app's task at another time, or turned off or on, run
 `cc-hub cron set <app>/<task> "<expr>"` (quote the expression), `--off` or
 `--on`; `cc-hub cron reset <app>/<task>` goes back to the app's own time. The
-choice is kept in `hub.toml`, so updates and setup keep it. Then run the
-steps it prints, in a direct chat.
+choice is kept in `hub.toml`, so updates and setup keep it. The steps it
+prints delete the old job and register the task again: follow "Change a
+time" in `cron/README.md` to run them, in a direct chat. It asks the user
+before a script task's command and checks the guard for a restricted task.
 
 ## Update
 

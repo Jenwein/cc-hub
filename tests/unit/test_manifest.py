@@ -154,6 +154,25 @@ def test_cron_readme_asks_before_script_and_unguarded_restricted_tasks() -> None
     assert "do not guess" in text
 
 
+def _section(text: str, heading: str) -> str:
+    return " ".join(text.split(heading, 1)[1].split("\n## ", 1)[0].split())
+
+
+def test_time_changes_register_with_the_same_safeguards() -> None:
+    """`cron set`/`reset` print a registration; it must not bypass consent, guard or <id> rules."""
+    readme = manifest.render("cron/README.md")
+    change = _section(readme, "## Change a time")
+    for phrase in ("`<old id>`", "a registration like any other", "Before you register",
+                   "the id that this `cc-connect cron add` printed", "delete the new job"):
+        assert phrase in change, phrase
+    # consent is skipped only when the same command is already registered
+    register = " ".join(readme.split())
+    assert "already registered with this same command and only its time changes" in register
+    assert "they asked to change its time" not in register
+    apps = _section(manifest.render("skills/hub-apps/SKILL.md"), "## Change a task's time")
+    assert "follow \"Change a time\" in `cron/README.md`" in apps
+
+
 def test_agents_md_handles_a_task_without_a_definition() -> None:
     """In such a run the guard denies every tool, so the rule must be in AGENTS.md itself."""
     text = " ".join(manifest.render("AGENTS.md").split())
