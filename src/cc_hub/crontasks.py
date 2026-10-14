@@ -22,6 +22,8 @@ ITEM = re.compile(r"\s*-(?:\s+(?P<value>.*))?")
 _CRON_ITEM = r"(?:\*|[0-9A-Za-z]+(?:-[0-9A-Za-z]+)?)(?:/[0-9]+)?"
 CRON_FIELD = re.compile(rf"{_CRON_ITEM}(?:,{_CRON_ITEM})*")
 POSITIVE_INT = re.compile(r"[0-9]+")
+# what a shell reads inside double quotes: `exec` goes into one, so none of these may occur
+UNSAFE_EXEC_CHARS = ('"', "$", "`", "\\")
 # the rule for app names (apps.NAME): a task name ends up inside quoted command arguments
 TASK_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 NAME_RULE = (
@@ -137,8 +139,12 @@ def parse_task(text: str, *, where: str) -> TaskDef:
         command = fields["exec"]
         if not command.strip():
             raise CronError(f"{where}: exec must not be empty")
-        if '"' in command:
-            raise CronError(f"{where}: exec must not contain a double quote; use single quotes")
+        if any(char in command for char in UNSAFE_EXEC_CHARS):
+            raise CronError(
+                f"{where}: exec must not contain a double quote, $, a backtick or a backslash "
+                "(a shell would expand them); write a plain program and arguments, "
+                "with single quotes for spaces and / in paths"
+            )
         if "session" in fields:
             raise CronError(f"{where}: a script task has no session; remove session")
         if allow is not None:
@@ -225,8 +231,10 @@ def pointer_prompt(name: str, file: str) -> str:
 def registration_commands(task: Task, schedule: str | None) -> list[str]:
     """The cc-connect commands that register `task` to run at `schedule`.
 
-    Values never hold a double quote (names are checked, so are schedules and exec), so double
-    quotes are safe delimiters on every shell. `<id>` is the id that `cron add` prints.
+    Every value goes into a double-quoted argument. That is safe because none can hold what a
+    shell acts on inside double quotes: names and schedules are checked against a narrow
+    pattern, and `parse_task` rejects a double quote, `$`, a backtick and a backslash in exec.
+    `<id>` is the id that `cron add` prints.
     """
     d = task.definition
     if d is None:

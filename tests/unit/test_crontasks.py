@@ -79,6 +79,14 @@ def test_quoted_value_keeps_hash():
     assert d.exec == "echo a#b"
 
 
+def test_exec_with_single_quotes_and_slashes_is_accepted():
+    d = parse_task(
+        '---\nschedule: "0 3 * * *"\nexec: "uv run \'apps/my app/x.py\' --flag"\n---\n',
+        where="x",
+    )
+    assert d.exec == "uv run 'apps/my app/x.py' --flag"
+
+
 def test_comment_after_a_quoted_value_may_hold_quotes():
     d = parse_task('---\nschedule: "0 3 * * *"\nexec: "echo a"  # say "hi"\n---\n', where="x")
     assert d.exec == "echo a"
@@ -105,6 +113,12 @@ def test_no_frontmatter():
     ('default: true', "schedule is required"),
     ('schedule: "* * * * *"\nexec: ""', "exec"),
     ('schedule: "* * * * *"\nexec: "say "hi""', "single quotes"),
+    ('schedule: "* * * * *"\nexec: "echo $HOME"', "plain program"),
+    ('schedule: "* * * * *"\nexec: "echo $(whoami)"', "plain program"),
+    ('schedule: "* * * * *"\nexec: "echo `whoami`"', "plain program"),
+    ('schedule: "* * * * *"\nexec: "dir C:\\tools"', "plain program"),
+    ('schedule: "* * * * *"\nexec: "echo hi\\"', "plain program"),
+    ('schedule: "* * * * *"\nexec: echo $HOME', "plain program"),
     ('schedule: "* * * * *"\nexec: "x"\nsession: reuse', "session"),
     ('schedule: "* * * * *"\nexec: "x"\ntimeout_mins: 0', "timeout_mins"),
     ('schedule: "* * * * *"\nexec: "x"\ntimeout_mins: soon', "timeout_mins"),

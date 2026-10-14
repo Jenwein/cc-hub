@@ -154,6 +154,12 @@ def test_parse_cron() -> None:
         parse_cron("---\ndefault: true\n---\nbody\n", where="apps/a/cron/t.md")
 
 
+def test_parse_cron_rejects_an_exec_a_shell_would_expand() -> None:
+    text = '---\nschedule: "0 9 * * *"\nexec: "echo $(whoami)"\n---\nbody\n'
+    with pytest.raises(AppError, match="^apps/a/cron/t.md: exec must not contain"):
+        parse_cron(text, where="apps/a/cron/t.md")
+
+
 class _Source:
     def describe(self) -> str:
         return "my-apps@abc1234"
