@@ -30,13 +30,13 @@ from cc_hub.applock import (
     to_tilde,
 )
 from cc_hub.commands.link import POINTERS, sync_skill_links
+from cc_hub.crontasks import CronError, TaskDef, parse_task
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import hub_name
 from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link, rmtree
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 VERSION = re.compile(r"^\d+(?:\.\d+){0,2}$")
-CRON = re.compile(r"^---\n(?P<head>.*?)\n---\n(?P<body>.*)$", re.S)
 NAME_RULE = (
     "lowercase letters, digits and hyphens, starting with a letter or digit, "
     "at most 64 characters"
@@ -256,22 +256,11 @@ def parse_manifest(text: str, *, dirname: str) -> AppManifest:
     )
 
 
-def parse_cron(text: str, *, where: str) -> dict:
-    m = CRON.match(text.replace("\r\n", "\n"))
-    if not m:
-        raise AppError(f"{where}: needs a frontmatter block between --- lines")
-    fields: dict[str, str] = {}
-    for line in m.group("head").splitlines():
-        key, sep, value = line.partition(":")
-        if sep:
-            fields[key.strip()] = value.split("#", 1)[0].strip().strip('"')
-    if not fields.get("schedule"):
-        raise AppError(f"{where}: schedule is required")
-    return {
-        "schedule": fields["schedule"],
-        "default": fields.get("default", "false") == "true",
-        "session": fields.get("session", "reuse"),
-    }
+def parse_cron(text: str, *, where: str) -> TaskDef:
+    try:
+        return parse_task(text, where=where)
+    except CronError as exc:
+        raise AppError(str(exc)) from exc
 
 
 HUB_ERRORS: tuple[type[Exception], ...] = (
@@ -354,7 +343,7 @@ class AppPlan:
     manifest: AppManifest
     source: GitSource | DirSource
     skills: list[str]
-    crons: dict[str, dict]
+    crons: dict[str, TaskDef]
     scripts: list[str]
     seed: list[str]  # hub-relative paths
     has_setup: bool

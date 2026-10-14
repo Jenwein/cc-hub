@@ -3,6 +3,8 @@ import pytest
 
 from cc_hub.apps import (
     AppError,
+    AppManifest,
+    AppPlan,
     Requirement,
     check_entry_path,
     check_name,
@@ -13,6 +15,8 @@ from cc_hub.apps import (
     parse_manifest,
     version_tuple,
 )
+from cc_hub.commands.app import overview
+from cc_hub.crontasks import TaskDef
 
 GOOD = """
 [app]
@@ -141,8 +145,36 @@ def test_parse_cron() -> None:
         '---\nschedule: "0 9 1 * *"  # monthly\ndefault: true\nsession: new_per_run\n---\n'
         "Summarise.\n"
     )
-    assert parse_cron(text, where="x") == {
-        "schedule": "0 9 1 * *", "default": True, "session": "new_per_run",
-    }
+    assert parse_cron(text, where="x") == TaskDef(
+        "prompt", "0 9 1 * *", True, "new_per_run", False, None, None, ()
+    )
     with pytest.raises(AppError):
         parse_cron("no frontmatter", where="x")
+    with pytest.raises(AppError, match="^apps/a/cron/t.md: .*schedule is required"):
+        parse_cron("---\ndefault: true\n---\nbody\n", where="apps/a/cron/t.md")
+
+
+class _Source:
+    def describe(self) -> str:
+        return "my-apps@abc1234"
+
+
+def test_overview_lists_each_kind_of_task() -> None:
+    crons = {
+        "nightly": TaskDef("prompt", "0 3 * * *", True, "reuse", False, None, None, ()),
+        "quiet": TaskDef("prompt", "0 4 * * *", False, "new_per_run", True, None, None, ()),
+        "poll": TaskDef("exec", "*/5 * * * *", True, None, False, "uv run x poll", 10, ()),
+        "triage": TaskDef(
+            "on_demand", None, True, "new_per_run", True, None, None, ("uv run x bg", "cc-hub log"),
+        ),
+    }
+    plan = AppPlan(
+        AppManifest("mail", "0.1.0", "Mail"), _Source(), [], crons, [], [], False, False
+    )
+    lines = overview(plan)
+    assert lines[lines.index("scheduled tasks:") + 1 :][:4] == [
+        "  hub:mail/nightly: 0 3 * * * (default, reuse)",
+        "  hub:mail/poll: */5 * * * * runs `uv run x poll` (default, script, silent)",
+        "  hub:mail/quiet: 0 4 * * * (optional, new_per_run, silent)",
+        "  hub:mail/triage: on demand (default, new_per_run) allow: uv run x bg, cc-hub log",
+    ]

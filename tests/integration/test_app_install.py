@@ -8,6 +8,7 @@ import pytest
 
 from cc_hub import apps
 from cc_hub.applock import load_lock
+from cc_hub.crontasks import TaskDef
 from cc_hub.platform import is_link
 
 
@@ -21,8 +22,9 @@ def test_the_plan_describes_the_app_and_changes_nothing(tapped: Path) -> None:
     plan = apps.plan_install(tapped, "my-apps/ledger")
     assert plan.manifest.name == "ledger"
     assert plan.skills == ["ledger"]
-    assert plan.crons == {"monthly": {"schedule": "0 9 1 * *", "default": True,
-                                      "session": "new_per_run"}}
+    assert plan.crons == {
+        "monthly": TaskDef("prompt", "0 9 1 * *", True, "new_per_run", False, None, None, ())
+    }
     assert plan.scripts == ["scripts/check.sh"]
     assert plan.seed == ["ledger/main.beancount"]
     assert plan.has_setup and not plan.has_remove
