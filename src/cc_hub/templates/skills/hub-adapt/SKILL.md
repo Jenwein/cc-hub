@@ -34,11 +34,12 @@ create here. Every step is idempotent: re-running must not duplicate anything.
    available, log that this is still to do. Installed apps register their
    own tasks during setup (`hub-apps`).
 5. **Guard.** On Claude Code, run `cc-hub cron guard-setup`. It adds the
-   restricted-task guard, a PreToolUse hook running `cc-hub cron guard`, to
-   `.claude/settings.json` and keeps everything else in that file; running it
-   again changes nothing. It applies to sessions started afterwards. Other
-   runtimes have no guard; `cron/README.md` says what that means for
-   restricted tasks.
+   restricted-task guard, a PreToolUse hook that runs `cc-hub cron guard` by
+   cc-hub's absolute path, to `.claude/settings.json` and keeps everything
+   else in that file; running it again changes nothing, unless cc-hub has
+   moved, when it rewrites the path. It applies to sessions started
+   afterwards. Other runtimes have no guard; `cron/README.md` says what that
+   means for restricted tasks.
 
 Permissions and sandbox settings belong to the user and your runtime;
 do not change them here, except the guard hook that

@@ -78,6 +78,16 @@ def test_cc_connect_doc_covers_script_tasks_and_the_guard() -> None:
     assert '--prompt "<body>"' not in text
 
 
+def test_apps_doc_gives_restricted_tasks_a_command_group_that_changes_nothing_outside() -> None:
+    text = " ".join((ROOT / "docs" / "apps.md").read_text(encoding="utf-8").split())
+    assert "read-only command group" not in text
+    assert (
+        "a separate command group that only reads, or records the app's own local state "
+        "(so a restricted run can acknowledge its work), and never sends, deletes or changes "
+        "anything outside the app"
+    ) in text
+
+
 def test_changelog_has_0_5_0() -> None:
     text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## 0.5.0" in text

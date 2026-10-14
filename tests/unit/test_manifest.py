@@ -173,11 +173,51 @@ def test_time_changes_register_with_the_same_safeguards() -> None:
     assert "follow \"Change a time\" in `cron/README.md`" in apps
 
 
+BROKEN_TASK = (
+    "If the file is broken (the guard says why the task has no valid definition), reply with "
+    "the reason, and that the user can fix it (`cc-hub doctor` says how) or remove the job "
+    "the same way."
+)
+
+
 def test_agents_md_handles_a_task_without_a_definition() -> None:
     """In such a run the guard denies every tool, so the rule must be in AGENTS.md itself."""
     text = " ".join(manifest.render("AGENTS.md").split())
     assert "do not guess" in text
     assert "cc-connect cron del <id>" in text
+    # only a missing definition is gone for good; a broken one is reported so it can be fixed
+    assert "If the file is missing (or the guard says there is no task named" in text
+    assert BROKEN_TASK in text
+
+
+def test_cron_readme_tells_a_missing_from_a_broken_definition() -> None:
+    fires = _section(manifest.render("cron/README.md"), "## When a task fires")
+    assert "do not guess" in fires and "cc-connect cron del <id>" in fires
+    assert BROKEN_TASK in fires
+
+
+def test_cron_readme_keeps_the_registered_job_of_a_row_with_an_error() -> None:
+    """A row with an `error` is `enabled: false` only because it cannot be registered now;
+    deleting its job would stop a working task over, say, a typo in an override."""
+    register = _section(manifest.render("cron/README.md"), "## Register")
+    assert (
+        "With an `error`: leave its registered job, if any, as it is, and tell the user what "
+        "is wrong; `cc-hub doctor` says how to fix it."
+    ) in register
+    assert "treated as below" not in register
+    assert "Without an `error`, `enabled: false`: if `hub:<name>` is registered, delete it." in (
+        register
+    )
+
+
+def test_restricted_tasks_get_a_command_group_that_changes_nothing_outside_the_app() -> None:
+    text = " ".join(manifest.render("skills/hub-apps/authoring.md").split())
+    assert "read-only command group" not in text
+    assert (
+        "a separate command group that only reads, or records the app's own local state "
+        "(so a restricted run can acknowledge its work), and never sends, deletes or changes "
+        "anything outside the app"
+    ) in text
 
 
 def test_hub_adapt_installs_the_guard_on_claude_code() -> None:

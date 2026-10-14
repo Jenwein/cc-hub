@@ -18,15 +18,17 @@
 - Script tasks (`exec`, optional `timeout_mins`): run one command on a
   schedule without the agent; registered muted. On-demand tasks
   (`on_demand: true`): no schedule; registered silent and disabled, run by
-  `cc-hub cron wake <task>`. Prompt tasks may set `silent: true`.
+  `cc-hub cron wake <task>`, which waits at most 60 seconds for each
+  cc-connect call. Prompt tasks may set `silent: true`.
 - Restricted tasks (`allow`, with `session: new_per_run`): their runs may run
-  only the listed command prefixes and read only inside the hub, outside
-  `secrets/` and `.env*`. On Claude Code a PreToolUse hook enforces this,
+  only the listed command prefixes and read only inside the hub and the
+  directories of apps installed with `--link`, outside `secrets/` and
+  `.env*`. On Claude Code a PreToolUse hook enforces this,
   `cc-hub cron guard`; `cc-hub cron guard-setup` adds it to
-  `.claude/settings.json`.
+  `.claude/settings.json`, naming cc-hub by its absolute path.
 - `doctor` check `cron`: task definitions with errors, overrides of tasks
   that do not exist or with invalid expressions, restricted tasks without the
-  guard.
+  guard or with a guard whose cc-hub path no longer exists.
 - App install and update reject task definitions with errors; the install
   overview shows each task's kind, its command and its `allow` list;
   `app remove` lists the app's overrides and `--yes` drops them from
@@ -42,7 +44,7 @@
   `cc-hub cron guard-setup` on Claude Code.
 - `AGENTS.md` Safety: a credential the user gives in chat for an app may be
   passed to that app's own tool, which stores it under `secrets/`. `AGENTS.md`
-  says what to do when a task's definition file is missing.
+  says what to do when a task's definition file is missing or broken.
 
 ### Migration notes
 

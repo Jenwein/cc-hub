@@ -82,7 +82,7 @@ cc-hub 的职责有三件：
 2. **会话开始**：`BOOTSTRAP.md` 存在就先执行它；读 `IDENTITY.md`、`SOUL.md`、`USER.md`、`MEMORY.md`；跑 `cc-hub memory recent`；自己生态的指针缺失就跑 `hub-adapt`；存在 `apps.lock` 时跑 `cc-hub app list`，若是和用户本人的私聊，按 `hub-apps` 设置每个 `pending` 的应用；读 `AGENTS.local.md`。
 3. **记忆**：做完有结果的事、做出决策、了解到这台机器的事实，就 `cc-hub memory log`；用户表达的稳定偏好写进 `USER.md`；`MEMORY.md` 只在整理任务或用户明确要求时修改；群聊里不复述 `USER.md`、`MEMORY.md` 的私人内容。
 4. **Git**：做完一件改了总站文件的事，就提交这些文件和当天的 `memory/`，提交信息一行写清改了什么；用户要撤销时用 git 找回旧版本；不改写历史（不 `reset --hard`、不 `rebase`、不强推）；推送只在整理任务里做（§9）。
-5. **cc-connect**：发文件、定时任务等用法由 cc-connect 提供，在系统提示里，或在本文件末尾的 cc-connect 块里；`cron/` 和 `apps/<app>/cron/` 里的任务按 `cron/README.md` 登记、改时间和唤醒。定时任务触发时，提示词指向它的定义文件：读文件，跳过 frontmatter，按正文做。文件不存在，或安全带说这个任务没有有效定义时，不猜：回复 `hub:<名>` 已经没有定义，并给出注销它的 `cc-connect cron list`（找 id）和 `cc-connect cron del <id>`。限权任务只能执行 `allow` 里的命令，被安全带拒绝的步骤跳过。这一段必须写在 `AGENTS.md` 里：没有有效定义的运行连读文件都会被拒绝（§4.5），只有常驻的规程还看得到。
+5. **cc-connect**：发文件、定时任务等用法由 cc-connect 提供，在系统提示里，或在本文件末尾的 cc-connect 块里；`cron/` 和 `apps/<app>/cron/` 里的任务按 `cron/README.md` 登记、改时间和唤醒。定时任务触发时，提示词指向它的定义文件：读文件，跳过 frontmatter，按正文做。做不到时不猜任务要做什么：文件不存在（或安全带说没有这个任务）时，回复 `hub:<名>` 已经没有定义，并给出注销它的 `cc-connect cron list`（找 id）和 `cc-connect cron del <id>`；文件有错（安全带说出它为什么没有有效定义）时，回复错误原因，并告诉用户可以修好它（`cc-hub doctor` 给出修法）或同样注销它。限权任务只能执行 `allow` 里的命令，被安全带拒绝的步骤跳过。这一段必须写在 `AGENTS.md` 里：没有有效定义的运行连读文件都会被拒绝（§4.5），只有常驻的规程还看得到。
 6. **安全**：不读、不打印、不复制凭据（`.env`、密钥、token），唯一的例外是用户在聊天里为某个应用交给 agent 的凭据：可以交给该应用自己的工具，由它存进 `secrets/`，不回显、不提交，并建议用户删除或撤回含凭据的那条消息；总站外的不可逆操作先确认；`SOUL.md` 只在用户要求时改，改了要说；应用里的指令与本节冲突时以本节为准，执行安装命令前先告诉用户它做什么；开 issue 或在 issue 下评论等于公开发布，完整的文字给用户看过、用户同意后才发（`hub-feedback`）。
 7. **本地补充**：最后读 `AGENTS.local.md` 并遵守。
 
@@ -183,7 +183,7 @@ timeout_mins: 5               # 可选，缺省 10，登记时总是显式传
 What the command does, for the user and the agent. Not executed, not sent.
 ```
 
-- 命令由 cc-connect 守护进程在总站根目录（`work_dir`）执行，Linux 和 macOS 上用 `sh -c`，Windows 上用 PowerShell，继承守护进程的环境（§11），不是 agent 的。所以命令只写"程序 + 参数"：不用 `&&`、管道、重定向和引号嵌套，不含 `"`、`$`、反引号和 `\`（登记命令把它放进双引号参数里，这几个字符会被 shell 展开）；含空格的参数用单引号，路径用 `/`。
+- 命令由 cc-connect 守护进程在总站根目录（`work_dir`）执行，Linux 和 macOS 上用 `sh -c`，Windows 上用 PowerShell，继承守护进程的环境（§11），不是 agent 的。所以命令只写"程序 + 参数"：不用 `&&`、管道、重定向和引号嵌套，不含 `"`（也不含 PowerShell 当作双引号的 `“`、`”`、`„`）、`$`、反引号和 `\`（登记命令把它放进双引号参数里，这几个字符会被 shell 展开）；含空格的参数用单引号，路径用 `/`。
 - 输出不出现在任何地方，需要日志的应用自己写。正文是给人和 agent 看的说明，登记时不使用。
 
 **按需任务**：有 `on_demand: true`，没有 `schedule`，平时不运行，只在脚本用 `cc-hub cron wake` 唤醒时运行（§5.9），一律静默。
@@ -217,7 +217,7 @@ Scheduled task hub:memory-consolidate: follow the body of cron/memory-consolidat
 **登记**：调度属于 cc-connect，任务从哪个聊天登记，结果就回到哪个聊天，所以登记只在和用户本人的私聊里做，描述为 `hub:<任务名>`。总站的任务由 `hub-adapt` 登记（§7），应用的由 `hub-apps` 在设置时登记（§8.5），两者都按 `cron/README.md` 做：
 
 1. 跑 `cc-hub cron list --json` 和 `cc-connect cron list`。`cron list --json` 每个任务一行，字段 `name`、`source`（`hub` 或应用名）、`file`、`kind`（`prompt`、`exec`、`on_demand`）、`default`、`file_schedule`、`schedule`（实际生效的时间，按需任务为 null）、`overridden`、`enabled`（是否该登记）、`session`、`silent`（是否带 `--silent` 登记：按需任务总是，脚本任务否，提示词任务看 frontmatter）、`exec`、`timeout_mins`、`allow`、`desc`、`prompt`、`commands`、`error`。有 `error` 的行 `enabled` 为 false、`commands` 为空。
-2. `enabled: false` 的，已登记就删掉；该登记而没登记的，登记；已登记的用 `cc-connect cron info <id>` 和该行 `commands` 要设的值比对（时间、提示词、命令、超时、`session`、是否 `--silent`、静音、停用），任何一项不同就删掉重登。属于本次范围（总站：`hub:` 后不含 `/`；应用：`hub:<应用>/…`）却没有对应行的已登记任务（定义文件已删）删掉；同一个描述登记了不止一次的删掉重登一次。
+2. 有 `error` 的行，已登记的任务不动，把问题告诉用户（`cc-hub doctor` 给出修法）：它的 `enabled: false` 只表示现在登记不了，删掉会让一个正常运行的任务因为（比如）覆盖里的笔误停掉。没有 `error`、`enabled: false` 的，已登记就删掉；该登记而没登记的，登记；已登记的用 `cc-connect cron info <id>` 和该行 `commands` 要设的值比对（时间、提示词、命令、超时、`session`、是否 `--silent`、静音、停用），任何一项不同就删掉重登。属于本次范围（总站：`hub:` 后不含 `/`；应用：`hub:<应用>/…`）却没有对应行的已登记任务（定义文件已删）删掉；同一个描述登记了不止一次、行没有 `error` 的，删掉重登一次。
 3. 登记就是按顺序执行该行的 `commands`，后面命令里的 `<id>` 换成 `cc-connect cron add` 打印的 id；后面的命令失败时删掉刚登记的任务并告诉用户，不留下一个会往聊天里发输出的任务。三种任务的命令：
 
 ```
@@ -233,15 +233,15 @@ cc-connect cron edit <id> enabled false
 4. **批准**：脚本任务登记后会在没有 agent 参与的情况下反复执行，所以登记前 agent 把命令和定义正文告诉用户，用户同意才登记；只有这个任务已经用同一条命令登记着、变的只是时间时不必再问。不同意就不登记，记一条 memory log，并告诉用户哪些功能因此不可用。应用升级改了命令时设置指纹变化，重新设置时再问一次。
 5. **限权任务**：在 Claude Code 上先确保安全带已装（`cc-hub cron guard-setup`，没变化时什么都不改）；在没有安全带的 agent 上，登记前告诉用户这个任务在这里没有安全带、可能执行任何命令，用户同意才登记。
 
-定义文件不存在时（例如任务已删而登记还在），任务触发后 agent 不猜要做什么，只回报这个任务已经没有定义，并给出注销它的步骤（§4.1）。
+定义文件不存在时（例如任务已删而登记还在），任务触发后 agent 不猜要做什么，只回报这个任务已经没有定义，并给出注销它的步骤；定义文件有错时回报错误原因，告诉用户可以修好它或注销它（§4.1）。
 
 **安全带**（Claude Code）：后台的提示词任务和按需任务在没人看着时运行；用户让 agent 在不需要批准的模式下运行（`bypassPermissions`，俗称 YOLO）时，读外来内容（如陌生人写的邮件）的任务可能被内容里冲着 agent 的指令骗去执行任何命令。安全带是 Claude Code 的 PreToolUse 钩子 `cc-hub cron guard`，在任何权限模式下都在工具执行前运行：
 
-- `hub-adapt` 用 `cc-hub cron guard-setup` 把它写进总站的 `.claude/settings.json`：合并写入，不动用户的其他设置，重复运行不重复添加；`.claude/` 是派生目录，不进 git，每台机器各自写入。它对之后新开的会话生效。
+- `hub-adapt` 用 `cc-hub cron guard-setup` 把它写进总站的 `.claude/settings.json`：合并写入，不动用户的其他设置，重复运行不重复添加。钩子命令是 cc-hub 的绝对路径（斜杠写成 `/`，加双引号）后跟 ` cron guard`，不依赖 Claude Code 运行钩子时的 PATH；已有安全带条目（裸的 `cc-hub` 或旧路径）时改写那一条的命令，不另加；`.claude/` 是派生目录，不进 git，每台机器各自写入。它对之后新开的会话生效。
 - 每次工具调用前，钩子读 Claude Code 交给它的会话记录，找第一条真正的用户消息（跳过 meta 和只有工具结果的条目）。它是 `Scheduled task hub:<名>:` 开头的指针时，这个会话就是那个任务的一次运行；外来内容只出现在工具结果里，冒充不了。不是指针时什么都不输出，交回正常的权限流程，用户平时聊天的会话不受影响；读不到会话记录时同样不干预。
-- 限权任务的运行里：Bash 命令必须以清单里的某一项开头（等于它或后跟空格），并且不含 `;`、`&`、`|`、反引号、`$`、`<`、`>`、换行和回车；Read、Glob、Grep 只限总站内，`secrets/` 和 `.env*` 不分大小写一律拒绝；Glob 和 Grep 的 `pattern`、`glob` 不能含 `..`，Glob 的模式和 Grep 的 `glob` 不能以 `/`、`\`、`~` 或盘符开头（Grep 的 `pattern` 是正则，不是路径）；在总站根目录上递归搜索也拒绝；其他工具一律拒绝。允许的明确放行，所以用默认模式的用户也不会在聊天里看到后台任务的批准请求；拒绝时告诉 agent 原因。
+- 限权任务的运行里：Bash 命令必须以清单里的某一项开头（等于它或后跟空格），并且不含 `;`、`&`、`|`、反引号、`$`、`<`、`>`、换行和回车；Read、Glob、Grep 只限总站内，以及 `apps.lock` 里记为链接安装的应用的 `apps/<应用>` 链接解析后的目录（包含总站本身的不算）；`secrets/` 和 `.env*` 不分大小写一律拒绝，写出的路径和解析后的路径都查；Glob 和 Grep 的 `pattern`、`glob` 不能含 `..`，Glob 的模式和 Grep 的 `glob` 不能以 `/`、`\`、`~` 或盘符开头（Grep 的 `pattern` 是正则，不是路径）；在总站根目录上递归搜索也拒绝，理由告诉 agent 把一个子目录作为 `path` 传入；其他工具一律拒绝。允许的明确放行，所以用默认模式的用户也不会在聊天里看到后台任务的批准请求；拒绝时告诉 agent 原因。
 - 指针指向的任务定义有错、不存在，或者读不了总站的任务时，这次运行的每个工具都被拒绝（指针只来自定时运行，这样的运行只需要用文字回报问题）。因此一个普通聊天的第一条消息若本身含有不存在任务的 `Scheduled task hub:<名>:` 字样，这个会话的工具也全部被拒绝，开新会话即可。没有 `allow` 的有效任务不受限。
-- 钩子要求 Claude Code 进程的 PATH（cc-connect 的 `[projects.agent.options.env]`）里有 `cc-hub`；找不到时钩子跑不起来，Claude Code 照常执行，安全带不起作用（§11）。
+- 钩子记录的 cc-hub 路径不存在时（例如 cc-hub 装到了别处），钩子跑不起来，Claude Code 照常执行，安全带不起作用；`doctor` 报警告，重跑 `hub-adapt` 或 `cc-hub cron guard-setup` 即可。钩子在每次工具调用前都运行，所以不带其他参数的 `cc-hub cron guard` 不加载命令行框架，会话记录读到第一条决定性的用户消息就停。
 - 其他 agent（如 Codex）没有安全带，按上面第 5 步先问用户。
 
 内置 `cron/memory-consolidate.md`，每天 03:00，`new_per_run`，执行 `hub-memory` 的整理流程并汇报是否已推送。`cron/README.md` 说明三种任务、限权、触发时怎么做、登记和比对、改时间、唤醒。
@@ -282,7 +282,7 @@ cc-connect cron edit <id> enabled false
 | memory-files | `memory/` 下文件名符合 `YYYY-MM-DD.md` |
 | pointers | 对本机装了的、且已在总站里设置过的 agent，检查指令文件和每个 skill 的链接，包括已安装应用的 skills（见 §7） |
 | apps | `apps.lock` 可解析（否则 fail）；记录里的应用都在 `apps/` 下（缺了提示 `cc-hub app sync`）；链接安装的源目录存在；cc-hub 版本满足各应用的 `min_hub`；`requires` 里的可执行文件在 PATH 上（缺了给出本平台的安装命令）；有 `pending` 或 `waiting` 的应用 |
-| cron | 任务定义有错（总站的提示修文件，应用的提示修文件或 `cc-hub app update`）；`hub.toml` 里的覆盖指向不存在的任务（应用卸载后残留）或表达式不合法（提示 `cc-hub cron reset <任务>`）；有限权任务、总站里设置过 Claude Code，`.claude/settings.json` 里却没有安全带钩子（提示重跑 `hub-adapt`）；只报 warn |
+| cron | 任务定义有错（总站的提示修文件，应用的提示修文件或 `cc-hub app update`）；`hub.toml` 里的覆盖指向不存在的任务（应用卸载后残留）或表达式不合法（提示 `cc-hub cron reset <任务>`）；有限权任务、总站里设置过 Claude Code，`.claude/settings.json` 里却没有安全带钩子（提示重跑 `hub-adapt`），或钩子记录的 cc-hub 路径已不存在（提示重跑 `hub-adapt` 或 `cc-hub cron guard-setup`）；只报 warn |
 | git | 总站是 git 仓库、有可用的 git 身份、没有未提交的改动、配置了远程（没有远程就没有备份）；只报 warn |
 | nested-git | 总站是否在别的 git 仓库内 |
 
@@ -399,11 +399,11 @@ cc-hub cron guard-setup
 
 `cron reset <任务>`：去掉覆盖，回到定义文件；同样提交（`cc-hub: cron reset <任务>`）并打印重新登记步骤。没有覆盖时只说明并退出 0。
 
-`cron wake <任务>`：只接受按需任务。在 `cc-connect cron list` 的输出里找描述为 `hub:<任务>` 的任务，执行 `cc-connect cron exec <id>`。退出码 0 表示 cc-connect 已收到，不表示 agent 已处理完；1 表示没唤醒，原因写 stderr：不是按需任务、任务不存在或定义有错、被关掉、没登记或登记了不止一次、找不到 `cc-connect`、`cc-connect cron list` 失败（多半是 cc-connect 没在运行）、`cron exec` 失败。应用要靠自己的状态确认处理结果，没确认的过一段时间再唤醒；同一批数据不被两次运行同时处理，也由应用自己保证。
+`cron wake <任务>`：只接受按需任务。在 `cc-connect cron list` 的输出里找描述为 `hub:<任务>` 的任务，执行 `cc-connect cron exec <id>`。退出码 0 表示 cc-connect 已收到，不表示 agent 已处理完；1 表示没唤醒，原因写 stderr：不是按需任务、任务不存在或定义有错、被关掉、没登记或登记了不止一次、找不到 `cc-connect`、`cc-connect cron list` 失败（多半是 cc-connect 没在运行）、`cron exec` 失败、cc-connect 60 秒内没有应答（每次调用都最多等 60 秒）。应用要靠自己的状态确认处理结果，没确认的过一段时间再唤醒；同一批数据不被两次运行同时处理，也由应用自己保证。
 
-`cron guard`：安全带钩子的入口（§4.5），从 stdin 读 Claude Code 的 PreToolUse 事件，只在限权任务的运行里输出允许或拒绝的决定，其他情况什么都不输出；不按常规方式定位总站（钩子对所有会话运行，不能在总站外报错），从不失败，总是退出 0。
+`cron guard`：安全带钩子的入口（§4.5），从 stdin 读 Claude Code 的 PreToolUse 事件，只在限权任务的运行里输出允许或拒绝的决定，其他情况什么都不输出；不按常规方式定位总站（钩子对所有会话运行，不能在总站外报错），从不失败，总是退出 0。不带其他参数时由入口直接交给钩子，不加载 typer 和各个命令，因为它在每次工具调用前都运行。
 
-`cron guard-setup`：把钩子合并写进总站的 `.claude/settings.json`，已有时说明并什么都不改；文件不是合法的 JSON 对象时报错，不改写它。
+`cron guard-setup`：把钩子合并写进总站的 `.claude/settings.json`，命令是 cc-hub 的绝对路径（`cc-hub` 在 PATH 上就用找到的那个，否则用正在运行的程序），斜杠写成 `/`，加双引号，后跟 ` cron guard`，例如 `"C:/Users/x/.local/bin/cc-hub.exe" cron guard`。已有安全带条目（命令以 ` cron guard` 结尾、程序是 `cc-hub` 或指向它的路径）时改写那一条的命令，命令相同时说明并什么都不改；`doctor` 用同一个函数认这个条目。文件不是合法的 JSON 对象，或找不到 cc-hub 程序时报错，什么都不写。
 
 ### 5.10 feedback
 
@@ -511,7 +511,7 @@ windows = "winget install hledger"
 
 **设置和凭据**：个人设置（账户、币种等）放在数据目录里，比如 `ledger/config.toml`，skills 从那里读。数据目录进 git，所以凭据不放在那里，放 `.env` 或 `secrets/`。需要用户在聊天里交出凭据的应用，提供一个把凭据存进 `secrets/` 的命令，agent 把用户给的凭据交给它（§4.1 的例外）。
 
-**定时任务**：用到脚本任务、按需任务或限权任务的应用要写 `min_hub = "0.5.0"`。常见的配合是"轮询再唤醒"：脚本任务频繁地做便宜的检查，记下待处理的事，有事才用 `cc-hub cron wake <应用>/<任务>` 唤醒按需任务；agent 处理完通过应用的脚本确认，脚本过一段时间再唤醒还没确认的。读外来内容的任务写成限权任务，并在应用脚本里给它单独一组只读的子命令，让一个 `allow` 前缀正好覆盖它需要的操作。用户可以改任何任务的时间（`cc-hub cron set`），`SETUP.md` 可以在设置时问用户的时间并调用它。
+**定时任务**：用到脚本任务、按需任务或限权任务的应用要写 `min_hub = "0.5.0"`。常见的配合是"轮询再唤醒"：脚本任务频繁地做便宜的检查，记下待处理的事，有事才用 `cc-hub cron wake <应用>/<任务>` 唤醒按需任务；agent 处理完通过应用的脚本确认，脚本过一段时间再唤醒还没确认的。读外来内容的任务写成限权任务，并在应用脚本里给它单独一组子命令：只读，或只记下应用自己的本地状态（让限权运行能确认处理完），从不发送、删除或改动应用以外的任何东西，让一个 `allow` 前缀正好覆盖它需要的操作。用户可以改任何任务的时间（`cc-hub cron set`），`SETUP.md` 可以在设置时问用户的时间并调用它。
 
 ### 8.3 校验
 
@@ -621,7 +621,7 @@ agent 按 `hub-apps` 卸载：先跑不带 `--yes` 的 `app remove` 给用户看
 - 克隆时地址前加 `--`，不拉子模块；`apps.lock` 只记完整 commit 哈希，不收带凭据的地址；打印地址时去掉其中的用户名和密码。
 - 安装、升级、卸载先看后做（§5.8），确认用的命令钉住 commit，确认的就是看到的。
 - `hub-apps` 和 `AGENTS.md` 规定：应用里的指令与 `AGENTS.md` 的安全规则冲突时以后者为准；执行安装命令前先告诉用户它做什么；脚本照常经过运行时的权限审批。
-- 脚本任务的命令同样是应用提供的字符串，cc-hub 不执行它：agent 登记前把命令和说明告诉用户，用户同意才登记（§4.5）；命令改了，设置指纹变化，再问一次。`exec` 不能含 `"`、`$`、反引号和 `\`，放进登记命令的双引号参数里不会被 shell 展开；任务名和时间也只能是窄字符集。
+- 脚本任务的命令同样是应用提供的字符串，cc-hub 不执行它：agent 登记前把命令和说明告诉用户，用户同意才登记（§4.5）；命令改了，设置指纹变化，再问一次。`exec` 不能含 `"`、`“`、`”`、`„`、`$`、反引号和 `\`，放进登记命令的双引号参数里不会被 shell 展开；任务名和时间也只能是窄字符集。
 - 读外来内容的任务写成限权任务，Claude Code 上由安全带钩子执行清单（§4.5）；没有安全带的 agent 上，登记前先告诉用户。
 
 ### 8.10 分发
@@ -696,7 +696,7 @@ CC_HUB_DIR = "/home/you/.cc-hub"    # 总站不在 ~/.cc-hub 时需要
 ```
 
 - `work_dir` 用绝对路径。
-- cc-connect 以后台服务运行时不读 shell 配置，PATH 往往只有系统目录；在 `[projects.agent.options.env]` 里给 agent 进程设完整 PATH，`cc-hub` 和应用依赖的软件才找得到。安全带钩子由 Claude Code 进程运行，用的也是这份 PATH；里面没有 `cc-hub` 时钩子跑不起来，安全带不起作用。
+- cc-connect 以后台服务运行时不读 shell 配置，PATH 往往只有系统目录；在 `[projects.agent.options.env]` 里给 agent 进程设完整 PATH，`cc-hub` 和应用依赖的软件才找得到。安全带钩子由 Claude Code 进程运行，但命令里写的是 cc-hub 的绝对路径（§4.5），不依赖这份 PATH。
 - 脚本任务的命令由 cc-connect 守护进程自己执行，工作目录是 `work_dir`（总站，所以 `cc-hub` 不需要 `CC_HUB_DIR`），继承守护进程的环境，**不是** `[projects.agent.options.env]`，也没有 `CC_SESSION_KEY`、`CC_PROJECT`。所以守护进程的 PATH 里也要有 `uv`、`cc-hub` 和 `cc-connect`。`cc-connect daemon install` 把运行它的 shell 的 PATH 写进服务定义（systemd 单元、launchd plist、Windows 计划任务的启动脚本），在这三者都找得到的终端里安装即可；手工设置的方法（systemd 用 `systemctl --user edit cc-connect` 加 `Environment="PATH=…"`，launchd 改 plist 的 `EnvironmentVariables`，Windows 改启动脚本里的 `$env:PATH`）写在 `docs/cc-connect.md`，以手工验收在真机上确认的为准。
 - cc-connect 自己向 agent 说明发文件、定时、中继等用法：对 Claude Code 通过 `--append-system-prompt` 注入；对 Codex 等不支持注入的 agent，用户在聊天里发一次 `/cron setup`，cc-connect 把说明追加到总站 `AGENTS.md` 末尾，`update` 保留它。
 - 定时任务的登记见 §4.5、§7 第 4 个目标和 §8.5。用到的 cc-connect 能力：`cron add` 的 `--exec`、`--timeout-mins`、`--session-mode`、`--silent`，`cron edit <id> mute true`、`cron edit <id> enabled false`，`cron info <id>`，以及 `cron exec <id>`（停用的任务也能触发）。
@@ -732,7 +732,7 @@ cc-hub/
 ├── README.md  README.zh-CN.md  LICENSE  CHANGELOG.md
 ├── .gitattributes            * text=auto eol=lf
 ├── src/cc_hub/
-│   ├── cli.py                typer 分发，where、version
+│   ├── cli.py                入口：`cron guard` 直接交给 cronguard，其余交给 commands/root.py
 │   ├── console.py            定位总站、JSON 输出、rich console
 │   ├── hub.py                定位总站、读写 hub.toml
 │   ├── manifest.py           文件所有权清单、模板渲染
@@ -745,7 +745,8 @@ cc-hub/
 │   ├── crontasks.py          任务定义解析、列出任务、登记命令、cron list 的行、wake
 │   ├── cronoverrides.py      hub.toml 里 [cron."<任务>"] 覆盖的读取和原地编辑
 │   ├── cronguard.py          安全带钩子：识别限权任务的运行、放行或拒绝、guard-setup
-│   ├── commands/             init doctor update memory link tap app cron feedback
+│   ├── commands/             root（typer 分发，where、version）init doctor update memory
+│   │                         link tap app cron feedback
 │   └── templates/            AGENTS.md BOOTSTRAP.md SOUL.md IDENTITY.md USER.md MEMORY.md
 │                             AGENTS.local.md hub.toml _gitignore _gitattributes cron/
 │                             skills/hub-adapt/ hub-memory/ hub-apps/ hub-feedback/
@@ -771,7 +772,7 @@ cc-hub/
   - 把总站 clone 到另一个临时目录后 `app sync`，应用回来并为 `pending`；
   - 提交信息正确，只提交自己的路径；`doctor` 的 `apps`、`cron` 和 `git` 检查；
   - `cron list` 的种类、覆盖、登记命令；`cron set`、`reset` 只改 `hub.toml` 里对应的表并提交，错误输入不写任何东西；`cron wake` 用测试 PATH 里假的 `cc-connect` 验证 id 和每种失败；`app remove` 清理覆盖。
-- 安全带的单元测试：三种任务定义和每种定义错误；限权会话里清单内外的命令、带接续符号的命令、读 `secrets/` 和 `.env*`（含大小写变体）、越出总站的路径和 glob、写文件、其他工具；普通会话和读不到的会话不干预；有指针但任务有错或不存在时全部拒绝；`guard-setup` 合并写入、不重复添加。
+- 安全带的单元测试：三种任务定义和每种定义错误；限权会话里清单内外的命令、带接续符号的命令、读 `secrets/` 和 `.env*`（含大小写变体）、越出总站的路径和 glob、链接安装的应用目录、在总站根目录上搜索的拒绝理由、写文件、其他工具；普通会话和读不到的会话不干预；有指针但任务有错或不存在时全部拒绝；`guard-setup` 合并写入、不重复添加、用绝对路径并改写旧条目；不带参数的 `cron guard` 与 `run_hook` 输出相同且不加载 typer。
 - 模板检查：`AGENTS.md` ≤ 150 行并以分界标记结尾；每个 `SKILL.md` ≤ 100 行、frontmatter 合法且 `name` 与目录名一致；全部 LF、无 BOM；README 提到每个命令；登记文字用 `cc-hub cron list --json`。
 - CI 矩阵：ubuntu、macos、windows × Python 3.11、3.12；ruff；pytest；`uv build` 后用 wheel 冒烟：`version`、`init`、`doctor --json`，以及对现建的测试 tap 跑 `tap add` 和 `app install --yes`。
 - 端到端不自动化，写成 `docs/acceptance.md` 手工验收清单。

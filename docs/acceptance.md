@@ -42,7 +42,8 @@ Same environment, with a test hub; cc-connect installed as a service with
 
 1. Install the new cc-hub, run `cc-hub update` in the test hub and have the
    agent run `hub-adapt` from the direct chat. `cc-hub doctor` is all ok;
-   `.claude/settings.json` has a PreToolUse hook running `cc-hub cron guard`;
+   `.claude/settings.json` has a PreToolUse hook running
+   `"<absolute path of cc-hub>" cron guard`;
    `cc-connect cron info <id>` of `hub:memory-consolidate` shows the pointer
    prompt.
 2. **Script task.** Add `cron/probe.md` with `exec: "cc-hub memory log probe"`,

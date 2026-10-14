@@ -63,11 +63,14 @@ end of this file. Scheduled tasks (`cron/`, `apps/<app>/cron/`) are
 registered, retimed and woken as `cron/README.md` describes.
 
 A scheduled task's prompt names its definition file: read it, skip the
-frontmatter, do what the body says. If the file is missing, or the guard
-says the task has no valid definition, do not guess: reply that
-`hub:<name>` has no definition any more and that `cc-connect cron list`
-(find its id) and `cc-connect cron del <id>` remove it. A task with `allow`
-may run only those commands; skip any step the guard denies.
+frontmatter, do what the body says. If you cannot, do not guess what the
+task is for. If the file is missing (or the guard says there is no task
+named so), reply that `hub:<name>` has no definition any more and that
+`cc-connect cron list` (find its id) and `cc-connect cron del <id>` remove
+it. If the file is broken (the guard says why the task has no valid
+definition), reply with the reason, and that the user can fix it
+(`cc-hub doctor` says how) or remove the job the same way. A task with
+`allow` may run only those commands; skip any step the guard denies.
 
 ## 5. Safety
 

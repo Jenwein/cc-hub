@@ -40,8 +40,9 @@ name is the app name: lowercase letters, digits and hyphens.
 - **Script task** (`exec: "uv run apps/<app>/scripts/poll.py"`, `schedule`,
   optional `timeout_mins`, default 10): runs one command without the agent.
   Write a program and its arguments only (no `&&`, pipes, redirects, `"`,
-  `$`, backtick or `\`); it runs in the hub root with the cc-connect daemon's
-  PATH. Its output is never seen: write your own log in the data directory.
+  `“`, `”`, `„`, `$`, backtick or `\`); it runs in the hub root with the
+  cc-connect daemon's PATH. Its output is never seen: write your own log in
+  the data directory.
 - **On-demand task** (`on_demand: true`, `session`, no `schedule`): runs only
   when a script calls `cc-hub cron wake <app>/<task>`.
 
@@ -54,9 +55,11 @@ Patterns:
   anything not acknowledged. Do not let two runs work on the same items.
 - **Restricted tasks.** A task that reads outside content (mail, web pages)
   gets `allow:` with command prefixes and `session: new_per_run`; its runs
-  may use nothing else. Give such a task a separate read-only command group
-  in your script, such as `uv run apps/<app>/scripts/tool.py bg ...`, so one
-  `allow` prefix covers exactly what it needs.
+  may use nothing else. Give such a task a separate command group that only
+  reads, or records the app's own local state (so a restricted run can
+  acknowledge its work), and never sends, deletes or changes anything
+  outside the app, such as `uv run apps/<app>/scripts/tool.py bg ...`, so
+  one `allow` prefix covers exactly what it needs.
 - The user can change any task's time (`cc-hub cron set <app>/<task>`).
   `SETUP.md` may ask for a time and run that command.
 

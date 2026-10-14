@@ -131,11 +131,18 @@ list by the guard:
   with `cc-hub cron guard-setup`, which adds it to the hub's
   `.claude/settings.json` and leaves your other settings alone. `.claude/` is
   not committed, so this happens on every machine.
+- The hook command names cc-hub by its absolute path, with forward slashes
+  and in double quotes, for example
+  `"/home/you/.local/bin/cc-hub" cron guard`, so it runs whatever PATH
+  Claude Code has. Run `cc-hub cron guard-setup` again after cc-hub moves:
+  it rewrites the command of the guard entry instead of adding another.
 - The hook recognises a restricted task's run by its first message, the
   task's pointer prompt (`Scheduled task hub:<name>: ...`). In such a run a
   Bash command must start with one of the `allow` prefixes and contain none
   of `;`, `&`, `|`, backtick, `$`, `<`, `>` or a line break; Read, Glob and
-  Grep may only look inside the hub, never at `secrets/` or `.env*`; every
+  Grep may only look inside the hub, or inside the directory an app
+  installed with `--link` points to, never at `secrets/` or `.env*`; Glob
+  and Grep must be given a subfolder as `path`, not the whole hub; every
   other tool is denied, with the reason. What it allows it allows outright,
   so a restricted run never asks for approval in the chat under
   `mode = "default"` either.
@@ -143,11 +150,11 @@ list by the guard:
   applies. A run whose pointer names a task that is broken or does not exist
   gets every tool denied; so does a chat whose first message itself contains
   such `Scheduled task hub:<name>:` text (start a new session with `/new`).
-- The hook needs `cc-hub` on the PATH of the Claude Code process, which is
-  the PATH in `[projects.agent.options.env]`. If `cc-hub` is not found
-  there, the hook cannot run and Claude Code carries on without it: the guard
-  does nothing. `cc-hub doctor` warns when a restricted task exists but the
-  hook is not installed.
+- If the program the hook names no longer exists, for example after cc-hub
+  was installed somewhere else, Claude Code cannot start the hook and
+  carries on without it: the guard does nothing. `cc-hub doctor` warns about
+  that, and when a restricted task exists but the hook is not installed; the
+  fix is to run `hub-adapt` or `cc-hub cron guard-setup` again.
 - Codex and other agents have no guard. Before registering a restricted task
   there, the agent tells you that the task would run without this safety belt
   and registers it only if you agree.

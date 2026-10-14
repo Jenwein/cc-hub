@@ -123,8 +123,9 @@ nothing it prints reaches the chat:
     and registers the task only if the user agrees.
 
 `exec` is a program and its arguments only: no `&&`, pipes, redirects or
-nested quotes, and no `"`, `$`, backtick or `\` (single quotes around an
-argument with spaces, `/` in paths). It runs in the hub root through `sh -c`,
+nested quotes, and no `"` (nor `“`, `”`, `„`, which PowerShell reads as
+`"`), `$`, backtick or `\` (single quotes around an argument with spaces,
+`/` in paths). It runs in the hub root through `sh -c`,
 or PowerShell on Windows, with the environment of the cc-connect daemon
 rather than the agent's, so `uv` and `cc-hub` must be on the daemon's PATH
 ([cc-connect.md](cc-connect.md#script-tasks-and-path)). Its output is never
@@ -150,10 +151,13 @@ items.
 
 A prompt or on-demand task with `allow` is **restricted**: its runs may run
 only commands that start with one of the listed prefixes, and may read only
-inside the hub (not `secrets/` or `.env*`). It needs `session: new_per_run`.
+inside the hub, or inside the directory of an app installed with `--link`
+(not `secrets/` or `.env*`). It needs `session: new_per_run`.
 Use it for a task that reads outside content, such as mail from strangers,
-and give that task a separate read-only command group in your script so one
-prefix covers it:
+and give that task, in your script, a separate command group that only
+reads, or records the app's own local state (so a restricted run can
+acknowledge its work), and never sends, deletes or changes anything outside
+the app, so one prefix covers it:
 
     allow:
       - "uv run apps/mail/scripts/mk.py bg"

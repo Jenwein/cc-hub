@@ -30,8 +30,8 @@ muted: nothing it prints reaches the chat, or anywhere else.
     What the command does, for the user and the agent. Not executed, not sent.
 
 - `exec` is a program and its arguments, nothing else: no `&&`, pipes,
-  redirects or nested quotes, and no `"`, `$`, backtick or `\`. Put single
-  quotes around an argument with spaces; use `/` in paths.
+  redirects or nested quotes, and no `"` (nor `“`, `”`, `„`), `$`, backtick
+  or `\`. Put single quotes around an argument with spaces; use `/` in paths.
 - It runs in the hub root, through `sh -c` (PowerShell on Windows), with the
   environment and PATH of the cc-connect daemon, not the agent's.
 - It takes no `session` and no `allow`; `silent` does not apply.
@@ -54,20 +54,25 @@ command prefixes. It needs `session: new_per_run`.
 
 A run of it may only run commands that start with one of the prefixes and
 contain none of `;`, `&`, `|`, backtick, `$`, `<`, `>` or a line break; it
-may read files inside the hub except `secrets/` and `.env*`. Everything else
-(writing, editing, the web, subagents, MCP tools) is denied. On Claude Code
-the guard enforces this: a PreToolUse hook running `cc-hub cron guard`,
-which `cc-hub cron guard-setup` adds to `.claude/settings.json` (`hub-adapt`
-runs it). Other runtimes have no guard.
+may read files inside the hub, and inside the directory an app installed
+with `--link` points to, except `secrets/` and `.env*`. Glob and Grep need
+a subfolder as `path`, such as `apps/<app>`, not the whole hub. Everything
+else (writing, editing, the web, subagents, MCP tools) is denied. On Claude
+Code the guard enforces this: a PreToolUse hook that runs `cc-hub cron guard`
+by cc-hub's absolute path, which `cc-hub cron guard-setup` adds to
+`.claude/settings.json` (`hub-adapt` runs it). Other runtimes have no guard.
 
 ## When a task fires
 
 The registered prompt names the definition file:
 `Scheduled task hub:<name>: follow the body of <file> in the hub.` Read the
-file, skip the frontmatter and do what the body says. If the file does not
-exist, do not guess what the task was for: reply that `hub:<name>` has no
-definition any more, and that `cc-connect cron list` (find its id) and
-`cc-connect cron del <id>` remove it.
+file, skip the frontmatter and do what the body says. If you cannot, do not
+guess what the task is for. If the file is missing (or the guard says there
+is no task named so), reply that `hub:<name>` has no definition any more,
+and that `cc-connect cron list` (find its id) and `cc-connect cron del <id>`
+remove it. If the file is broken (the guard says why the task has no valid
+definition), reply with the reason, and that the user can fix it
+(`cc-hub doctor` says how) or remove the job the same way.
 
 ## Register
 
@@ -97,9 +102,11 @@ If a later command fails, delete the job you just added and tell the user. To de
 1. Run `cc-hub cron list --json` and `cc-connect cron list`. A row is
    registered when a job's description is the row's `desc` (`hub:<name>`).
 2. For each of your rows:
-   - With an `error`: tell the user what is wrong (`cc-hub doctor` says how
-     to fix it). It is `enabled: false`, so it is treated as below.
-   - `enabled: false`: if `hub:<name>` is registered, delete it.
+   - With an `error`: leave its registered job, if any, as it is, and tell
+     the user what is wrong; `cc-hub doctor` says how to fix it. Such a row
+     says `enabled: false` only because it cannot be registered now.
+   - Without an `error`, `enabled: false`: if `hub:<name>` is registered,
+     delete it.
    - `enabled: true`, not registered: register it.
    - `enabled: true`, registered: read the job with `cc-connect cron info <id>`
      and compare it with what the row's `commands` set: the `--cron` time,
@@ -109,8 +116,8 @@ If a later command fails, delete the job you just added and tell the user. To de
      enabled). If anything differs, delete it and register it again.
 3. A registered `hub:` job in your scope that has no row (its file is gone)
    is deleted: `hub:<name>` without a `/` for the hub, `hub:<app>/...` for an
-   app. A `hub:<name>` registered more than once: delete every copy, then
-   register it once if its row is `enabled: true`.
+   app. A `hub:<name>` registered more than once whose row has no `error`:
+   delete every copy, then register it once if its row is `enabled: true`.
 
 ## Change a time
 
@@ -143,7 +150,7 @@ means cc-connect took it, not that the agent has finished: the script
 confirms through its own state (for example a mark the agent sets when it is
 done) and wakes the task again later if it is not confirmed. Exit 1 says why
 on stderr: not an on-demand task, no such task, not registered, turned off,
-or cc-connect not found or not running.
+or cc-connect not found, not running or not answering within 60 seconds.
 
 `cc-hub update` overwrites `README.md` and `memory-consolidate.md`; files you
 add here are yours.

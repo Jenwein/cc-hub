@@ -66,7 +66,7 @@ timeout_mins: 5
 What the command does, for the user and the agent. Not executed, not sent.
 ```
 
-- `exec`：要执行的命令。命令在总站根目录下执行（cc-connect 的 `work_dir`），Linux 和 macOS 上用 `sh -c`，Windows 上用 PowerShell。所以命令只写"程序 + 参数"这种两边都能执行的形式，不用 `&&`、管道、重定向和引号嵌套（Claude 定）。
+- `exec`：要执行的命令。命令在总站根目录下执行（cc-connect 的 `work_dir`），Linux 和 macOS 上用 `sh -c`，Windows 上用 PowerShell。所以命令只写"程序 + 参数"这种两边都能执行的形式，不用 `&&`、管道、重定向和引号嵌套（Claude 定）；登记命令把它放进双引号参数里，所以也不含 `"`、`$`、反引号和 `\`，以及 PowerShell 当作双引号的 `“`、`”`、`„`。
 - `timeout_mins`：可选，缺省为 10（Claude 定）。不写的话 cc-connect 自己的缺省值不稳定（登记时不给是 30 分钟，给 0 时实际是 60 秒），所以登记时总是显式传。
 - 没有 `session`；写了视为定义错误。
 - 正文是给人和 agent 看的说明，登记时不使用。
@@ -129,7 +129,7 @@ cc-hub cron wake mail/triage
 
 - 只接受按需任务；任务名的写法同时间覆盖（总站任务用文件名，应用任务用 `<应用>/<任务>`）。
 - 在 `cc-connect cron list` 里找描述为 `hub:<任务>` 的任务，执行 `cc-connect cron exec <id>`。
-- 退出码：0 表示已交给 cc-connect；1 表示没唤醒，原因写 stderr：不是按需任务、任务不存在、没登记、被用户关掉、找不到 `cc-connect`、cc-connect 没在运行。
+- 退出码：0 表示已交给 cc-connect；1 表示没唤醒，原因写 stderr：不是按需任务、任务不存在、没登记、被用户关掉、找不到 `cc-connect`、cc-connect 没在运行、cc-connect 60 秒内没有应答（每次调用 cc-connect 都最多等 60 秒，脚本不会一直挂着）。
 - 唤醒是"发出去就不管"：退出码 0 只说明 cc-connect 收到了，不说明 agent 已经处理完。应用要靠自己的状态确认处理结果（例如 agent 处理完后调用应用的脚本做标记），没确认的过一段时间再唤醒。重复唤醒同一个按需任务时，避免并发处理同一批数据也是应用自己的事（Claude 定）。
 - 为什么由 cc-hub 来做：解析 `cc-connect cron list` 的输出只放在一个经过测试的地方，各个应用的脚本不必各写一遍（Claude 定）。
 
@@ -162,7 +162,7 @@ allow:
 ```
 
 - 每一项是一个命令前缀，任务里执行的每条命令都必须以清单里的某一项开头。
-- 任务能读总站里的文件（至少要读自己的定义文件），但不能读 `secrets/` 和 `.env*`；写文件、上网、执行清单外的命令都被拒绝。
+- 任务能读总站里的文件（至少要读自己的定义文件），以及链接安装（`cc-hub app install --link`）的应用所指向的目录，但不能读 `secrets/` 和 `.env*`；写文件、上网、执行清单外的命令都被拒绝。
 - 限权任务必须是 `session: new_per_run`：只有独立的会话，才能认出"这是哪个任务的运行"（见下）。
 - 脚本任务不经过 agent，不能写 `allow`，写了视为定义错误。
 
@@ -170,20 +170,22 @@ allow:
 
 **在 Claude Code 上的做法**：用 Claude Code 的 PreToolUse 钩子。钩子在任何权限模式下都会在工具执行前运行，YOLO 也一样。
 
-- 钩子命令是 `cc-hub cron guard`，写在总站的 `.claude/settings.json` 里，由 `hub-adapt` 运行 `cc-hub cron guard-setup` 写入。合并写入，不动用户自己的设置；重复运行不重复添加。`.claude/` 本来就是派生目录，不进 git。
+- 钩子运行 `cc-hub cron guard`，写在总站的 `.claude/settings.json` 里，由 `hub-adapt` 运行 `cc-hub cron guard-setup` 写入。合并写入，不动用户自己的设置；重复运行不重复添加。`.claude/` 本来就是派生目录，不进 git。
+- 钩子命令用 cc-hub 的绝对路径，斜杠写成 `/`，加双引号，例如 `"C:/Users/x/.local/bin/cc-hub.exe" cron guard`：Claude Code 运行钩子时的 PATH 里不一定有 `cc-hub`，找不到命令（退出码 127）在 Claude Code 里不算拦截，安全带就悄悄失效。`guard-setup` 写入运行它的那个 cc-hub 的路径（`cc-hub` 在 PATH 上就用找到的那个，否则用正在运行的程序；都不是 cc-hub 时报错，什么都不写）。已有安全带的条目（命令以 ` cron guard` 结尾、程序是 `cc-hub` 或指向它的路径）时改写那一条的命令，不另加一条；命令相同时什么都不改。`guard-setup` 和 `doctor` 用同一个函数认安全带的条目。
 - 每次工具调用前，钩子读 Claude Code 交给它的会话记录，找第一条用户消息。如果它是某个限权任务的指针提示词（`Scheduled task hub:<名>: …`），这个会话就是那个任务的一次运行，按它的 `allow` 检查；否则什么都不做，交回正常的权限流程。邮件之类的外来内容只会出现在工具结果里，不会成为用户消息，冒充不了。
 - 在限权会话里：
   - Bash 命令必须以清单里的某一项开头，并且不含能接上别的命令的符号（`;`、`&`、`|`、反引号、`$(`、`<`、`>`、换行）；
-  - 读文件（Read、Glob、Grep）只限总站内，不能读 `secrets/` 和 `.env*`；
+  - 读文件（Read、Glob、Grep）只限总站内，以及 `apps.lock` 里记为链接安装（有 `link`）的应用：它的 `apps/<应用>` 链接解析后的目录；不能读 `secrets/` 和 `.env*`，不分大小写，写出的路径（相对总站）和解析后的路径（相对总站或所在的链接目录）各查一次；解析后的目录包含总站本身的链接不算数。Glob 和 Grep 不能在总站根目录上搜索（会搜进 `secrets/`；不给 `path` 时以工作目录为根），拒绝的理由告诉 agent 把一个子目录作为 `path` 传入；
   - 其他工具一律拒绝：写文件、改文件、上网、子 agent、MCP 工具等。
   - 允许的明确放行。这样平时用默认模式的用户，后台任务也不会往聊天里弹批准请求。拒绝时告诉 agent 原因。
 - 用户平时聊天的会话不受影响，也不新增任何放行条目。
 - 认不出会话（例如读不到会话记录）时不干预，交回正常流程（Claude 定）：钩子对所有会话都运行，不能因为它出错就卡住用户平时的聊天。所以下面的验证必须做。
+- 钩子在每个会话的每次工具调用前都运行，所以要快：不带其他参数的 `cc-hub cron guard` 由入口直接交给钩子，不加载命令行框架和各个命令；会话记录逐行读，读到第一条决定性的用户消息就停（最多 200 行）。
 - **必须验证**（手工验收）：YOLO 下钩子确实拒绝清单外的命令；cc-connect 交给 Claude Code 的第一条用户消息确实以指针提示词开头（cc-connect 如果在前面加了别的文字，按实际情况调整识别方式）。验证不通过，这项功能就不算完成：要么找到别的办法，要么回来问用户。
 
 **其他 agent**：Codex 等 agent 的对应做法由实现者调查。找不到等价机制时，限权任务在该 agent 上登记前，agent 告诉用户"这个任务在这里没有安全带"，用户同意才登记（Claude 定）。
 
-**检查**：有限权任务、本机设置过 Claude Code、钩子却不在 `.claude/settings.json` 里时，`doctor` 报警告，修复方法是重跑 `hub-adapt`。`cron list --json` 列出 `allow`。
+**检查**：有限权任务、本机设置过 Claude Code、钩子却不在 `.claude/settings.json` 里时，`doctor` 报警告，修复方法是重跑 `hub-adapt`；钩子记录的程序路径已经不存在时（例如 cc-hub 装到了别处）也报警告，修复方法是重跑 `hub-adapt` 或 `cc-hub cron guard-setup`。`cron list --json` 列出 `allow`。
 
 ## 9. 凭据规则
 
