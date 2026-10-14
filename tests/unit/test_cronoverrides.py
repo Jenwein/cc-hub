@@ -77,6 +77,41 @@ def test_remove_from_the_middle_leaves_neighbours_untouched():
     assert apply(text, "a", None) == BASE + "\n[tail]\nx = 1\n"
 
 
+NOTE_BEFORE_TAIL = (
+    BASE + '\n[cron."a"]\nenabled = false\n\n# tuned for a small model\n[tail]\nx = 1\n'
+)
+
+
+def test_replace_keeps_a_comment_that_follows_the_table():
+    out = apply(NOTE_BEFORE_TAIL, "a", {"enabled": True})
+    assert out == NOTE_BEFORE_TAIL.replace("enabled = false", "enabled = true")
+
+
+def test_remove_keeps_a_comment_that_follows_the_table():
+    out = apply(NOTE_BEFORE_TAIL, "a", None)
+    assert out == BASE + "\n# tuned for a small model\n[tail]\nx = 1\n"
+
+
+@pytest.mark.parametrize("gap", ["", "\n"])
+def test_a_comment_at_the_end_of_the_file_is_kept(gap):
+    text = BASE + f'\n[cron."a"]\nenabled = false\n{gap}# end of file note\n'
+    replaced = apply(text, "a", {"enabled": True})
+    assert replaced == text.replace("enabled = false", "enabled = true")
+    removed = apply(text, "a", None)
+    assert removed == BASE + f"{gap}# end of file note\n"
+    assert tomllib.loads(removed).get("cron", {}) == {}
+
+
+def test_a_comment_between_the_keys_goes_with_the_replaced_body():
+    text = BASE + '\n[cron."a"]\nschedule = "0 1 * * *"\n# between\nenabled = false\n'
+    assert apply(text, "a", {"enabled": True}) == BASE + '\n[cron."a"]\nenabled = true\n'
+
+
+def test_removing_the_last_table_takes_the_blank_lines_after_it():
+    text = BASE + '\n[cron."a"]\nenabled = false\n\n\n'
+    assert apply(text, "a", None) == BASE
+
+
 def test_removing_an_absent_override_changes_nothing():
     assert apply(BASE, "nope", None) == BASE
 

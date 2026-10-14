@@ -50,6 +50,12 @@ def _clean(name: str, values: dict) -> dict:
     return clean
 
 
+def _spacing(line: str) -> bool:
+    """A blank line or a comment line: what trails a table without belonging to its keys."""
+    stripped = line.strip()
+    return not stripped or stripped.startswith("#")
+
+
 def _find(lines: list[str], name: str) -> tuple[int, int] | None:
     """Line range [start, end) of the table headed `[cron."<name>"]`, or None."""
     for start, line in enumerate(lines):
@@ -97,12 +103,12 @@ def apply(text: str, name: str, values: dict | None) -> str:
             lines += [f'[cron."{name}"]{eol}', *body]
     else:
         start, end = span
-        last = end  # one past the table's last line that is not blank
-        while last > start + 1 and not lines[last - 1].strip():
+        last = end  # one past the table's last line that is not blank or a comment
+        while last > start + 1 and _spacing(lines[last - 1]):
             last -= 1
         if clean is None:
-            # a table at the end of the file takes its trailing blank lines with it
-            stop = len(lines) if end == len(lines) else last
+            # blank lines that end the file go with the table; a comment there stays
+            stop = len(lines) if all(not line.strip() for line in lines[last:]) else last
             first = start - 1 if start > 0 and not lines[start - 1].strip() else start
             del lines[first:stop]
         else:
