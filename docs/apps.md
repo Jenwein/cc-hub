@@ -26,8 +26,19 @@ app's scheduled tasks with cc-connect.
 
 `cc-hub app update <name>` shows what changed in the tap; `--yes` applies it.
 `cc-hub app remove <name>` shows what removal involves; `--yes` removes the
-app and keeps its data. `cc-hub app list` shows each app's setup state on this
-machine and any missing software.
+app, keeps its data and drops the times you set for its tasks.
+`cc-hub app list` shows each app's setup state on this machine and any
+missing software.
+
+To run an app's task at another time, or turn it off, ask the agent, or run
+the command and let the agent re-register the task:
+
+    cc-hub cron set plans/morning "0 7 * * *"   # <app>/<task>, then a quoted cron expression
+    cc-hub cron set ledger/prices --off         # --on turns it back on
+    cc-hub cron reset plans/morning             # back to the app's own time
+
+The time is kept in `hub.toml`, so app updates and `cc-hub update` keep it.
+`cc-hub cron list` shows every task with the time in force.
 
 Installed apps are in `apps/`, which is not committed. `apps.lock` is: after
 cloning the hub to another machine, `cc-hub app sync` restores the apps and
@@ -83,6 +94,73 @@ Rules:
 While developing, link your working copy so edits apply at once:
 
     cc-hub app install ~/dev/my-apps/ledger --link --yes
+
+## Scheduled tasks
+
+Each `cron/<task>.md` is one task, registered with cc-connect as
+`hub:<app>/<task>` when the app is set up. The frontmatter decides the kind.
+
+A **prompt task** wakes the agent on a schedule:
+
+    ---
+    schedule: "0 9 1 * *"        # five-field cron expression
+    default: true                # registered at setup; false: only when the user turns it on
+    session: new_per_run         # or reuse: run inside the chat's ongoing session
+    silent: true                 # optional: no "⏰" line in the chat when a run starts
+    ---
+    What the agent does when the task fires.
+
+A **script task** runs one command on a schedule without the agent, and
+nothing it prints reaches the chat:
+
+    ---
+    schedule: "*/5 * * * *"
+    default: true
+    exec: "uv run apps/mail/scripts/mk.py poll"
+    timeout_mins: 5              # optional, default 10
+    ---
+    What the command does. The agent shows the user this text and the command,
+    and registers the task only if the user agrees.
+
+`exec` is a program and its arguments only: no `&&`, pipes, redirects or
+nested quotes, and no `"`, `$`, backtick or `\` (single quotes around an
+argument with spaces, `/` in paths). It runs in the hub root through `sh -c`,
+or PowerShell on Windows, with the environment of the cc-connect daemon
+rather than the agent's, so `uv` and `cc-hub` must be on the daemon's PATH
+([cc-connect.md](cc-connect.md#script-tasks-and-path)). Its output is never
+seen; write your own log in the app's data directory.
+
+An **on-demand task** has no schedule and runs only when woken. It is always
+silent:
+
+    ---
+    on_demand: true
+    default: true
+    session: new_per_run
+    ---
+    What the agent does when a script wakes the task.
+
+A script wakes it with `cc-hub cron wake <app>/<task>`. Exit status 0 means
+cc-connect took the job, not that the agent has finished, so the usual
+pattern is: a script task polls cheaply and records what is pending, wakes
+the on-demand task when there is something, the agent acknowledges each item
+through the app's script when done, and the script wakes the task again
+later for anything not acknowledged. Keep two runs from working on the same
+items.
+
+A prompt or on-demand task with `allow` is **restricted**: its runs may run
+only commands that start with one of the listed prefixes, and may read only
+inside the hub (not `secrets/` or `.env*`). It needs `session: new_per_run`.
+Use it for a task that reads outside content, such as mail from strangers,
+and give that task a separate read-only command group in your script so one
+prefix covers it:
+
+    allow:
+      - "uv run apps/mail/scripts/mk.py bg"
+
+On Claude Code a hook enforces this even when the agent runs without
+approvals ([cc-connect.md](cc-connect.md#restricted-tasks-and-yolo)). An app
+that uses script, on-demand or restricted tasks needs `min_hub = "0.5.0"`.
 
 ## Publish
 

@@ -1,5 +1,60 @@
 # Changelog
 
+## 0.5.0 - unreleased
+
+### Added
+
+- `cc-hub cron list [--json]` lists the scheduled tasks of the hub and of
+  installed apps: kind, the time in the file and the time in force, whether
+  it is on, and the cc-connect commands that register it.
+- Time overrides. `cc-hub cron set <task> "<expr>"`, `--off` and `--on`, and
+  `cc-hub cron reset <task>`, store a task's time or on/off state in
+  `hub.toml` (`[cron."<task>"]`), commit it (`cc-hub: cron set <task>`) and
+  print the steps that re-register the task. `cc-hub update`, app updates
+  and setup keep the overrides.
+- Pointer registration: a task is registered with the prompt
+  `Scheduled task hub:<name>: follow the body of <file> in the hub.`, so an
+  edited body takes effect at the next run.
+- Script tasks (`exec`, optional `timeout_mins`): run one command on a
+  schedule without the agent; registered muted. On-demand tasks
+  (`on_demand: true`): no schedule; registered silent and disabled, run by
+  `cc-hub cron wake <task>`. Prompt tasks may set `silent: true`.
+- Restricted tasks (`allow`, with `session: new_per_run`): their runs may run
+  only the listed command prefixes and read only inside the hub, outside
+  `secrets/` and `.env*`. On Claude Code a PreToolUse hook enforces this,
+  `cc-hub cron guard`; `cc-hub cron guard-setup` adds it to
+  `.claude/settings.json`.
+- `doctor` check `cron`: task definitions with errors, overrides of tasks
+  that do not exist or with invalid expressions, restricted tasks without the
+  guard.
+- App install and update reject task definitions with errors; the install
+  overview shows each task's kind, its command and its `allow` list;
+  `app remove` lists the app's overrides and `--yes` drops them from
+  `hub.toml`.
+- `docs/cc-connect.md`: "Script tasks and PATH" and "Restricted tasks and
+  YOLO".
+
+### Changed
+
+- `hub-adapt` and the `hub-apps` setup register, replace and delete tasks
+  from `cc-hub cron list --json` as `cron/README.md` describes, and ask the
+  user before registering a script task. `hub-adapt` runs
+  `cc-hub cron guard-setup` on Claude Code.
+- `AGENTS.md` Safety: a credential the user gives in chat for an app may be
+  passed to that app's own tool, which stores it under `secrets/`. `AGENTS.md`
+  says what to do when a task's definition file is missing.
+
+### Migration notes
+
+- Run `cc-hub update`, then have the agent run `hub-adapt` and set up each
+  installed app again, in a direct chat. Tasks registered with a copy of
+  their body differ from the pointer prompt, so they are deleted and
+  registered again.
+- On Claude Code, `hub-adapt` runs `cc-hub cron guard-setup`; you can also
+  run it yourself in the hub.
+- An app that uses script, on-demand or restricted tasks needs
+  `min_hub = "0.5.0"`.
+
 ## 0.4.0 - 2026-10-10
 
 ### Added

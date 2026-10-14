@@ -34,3 +34,42 @@ one chat platform (Feishu or any other).
     scheduled tasks and the app is set up again.
 13. Ask the agent to draft an issue about a cc-hub problem: it shows the full
     title and body, without private data, and files it only after you agree.
+
+## Scheduled task kinds
+
+Same environment, with a test hub; cc-connect installed as a service with
+`cc-connect daemon install`. Remove `probe` and `hello` afterwards.
+
+1. Install the new cc-hub, run `cc-hub update` in the test hub and have the
+   agent run `hub-adapt` from the direct chat. `cc-hub doctor` is all ok;
+   `.claude/settings.json` has a PreToolUse hook running `cc-hub cron guard`;
+   `cc-connect cron info <id>` of `hub:memory-consolidate` shows the pointer
+   prompt.
+2. **Script task.** Add `cron/probe.md` with `exec: "cc-hub memory log probe"`,
+   `schedule: "*/2 * * * *"` and `default: true`, and ask the agent to
+   register it: it shows the command and asks first. A `probe` line appears
+   in today's log every 2 minutes and nothing appears in the chat. If the log
+   stays empty, fix the daemon's PATH and make "Script tasks and PATH" in
+   `cc-connect.md` say what worked.
+3. **On-demand task.** Add `cron/hello.md` with `on_demand: true`,
+   `default: true`, `session: new_per_run` and the body "Reply with one line:
+   hello from hub:hello.", have it registered, then run `cc-hub cron wake hello`
+   in a shell: it exits 0 right away, and the chat gets the line with no "⏰"
+   line before it. Change `probe`'s `exec` to `cc-hub cron wake hello` and
+   have it registered again: the line arrives every 2 minutes, so
+   `cc-connect` is on the daemon's PATH too. With cc-connect stopped,
+   `cc-hub cron wake hello` exits 1 and says cc-connect is not running.
+4. **Guard under YOLO.** Set the project's `mode = "bypassPermissions"` and
+   restart cc-connect. Give `hello.md` `allow:` with `- "cc-hub memory log"`
+   and a body asking the agent to run `cc-hub memory log ok`, then `ls ~`,
+   then `cc-hub memory log x; ls`, then to write `x.txt`, Glob `/etc/*` and
+   read `secrets/x`, and to report what happened. Wake it: the log line is
+   written, everything else is denied with the guard's reasons, and no
+   approval request reaches the chat. The first user message in the run's
+   transcript starts with `Scheduled task hub:hello:`. In the direct chat,
+   `ls ~` still runs.
+5. **Time override.** `cc-hub cron set memory-consolidate "30 2 * * *"`, then
+   run the printed steps: `cc-connect cron list` shows `30 2 * * *`. Run
+   `cc-hub update` and `hub-adapt` again: the time stays.
+6. Delete `cron/probe.md` and `cron/hello.md` and run `hub-adapt` again: it
+   deletes `hub:probe` and `hub:hello` from cc-connect. Set `mode` back.

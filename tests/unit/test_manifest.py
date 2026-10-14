@@ -118,14 +118,53 @@ def test_cron_definitions_have_schedule_default_and_session() -> None:
         assert fields["session"] in SESSION_MODES, rel
 
 
-def test_cron_registration_passes_session_mode_and_desc() -> None:
-    """A task's `session` only takes effect when the registration command passes it."""
-    for rel in ("skills/hub-adapt/SKILL.md", "cron/README.md"):
+def test_registration_texts_use_cron_list() -> None:
+    for rel in ("cron/README.md", "skills/hub-adapt/SKILL.md", "skills/hub-apps/SKILL.md"):
         text = manifest.render(rel)
-        assert "--session-mode <session>" in text, rel
-        assert '--desc "hub:<name>"' in text, rel
-    # hub-adapt skips tasks that are already registered instead of adding duplicates.
-    assert "cc-connect cron list" in manifest.render("skills/hub-adapt/SKILL.md")
+        assert "cc-hub cron list --json" in text, rel
+        assert '--prompt "<body>"' not in text, rel
+    assert "cc-hub cron guard-setup" in manifest.render("skills/hub-adapt/SKILL.md")
+    readme = manifest.render("cron/README.md")
+    for word in ("exec:", "on_demand: true", "allow:", "silent: true", "cc-hub cron wake",
+                 "cc-hub cron set"):
+        assert word in readme, word
+
+
+def test_agents_md_credential_exception() -> None:
+    text = " ".join(manifest.render("AGENTS.md").split())
+    assert "passed to that app's own tool, which stores it under `secrets/`" in text
+    assert len(manifest.render("AGENTS.md").splitlines()) <= 150
+
+
+def test_cron_readme_registers_from_the_listed_commands() -> None:
+    """The commands come from `cron list --json`; the README says how to run and compare them."""
+    text = " ".join(manifest.render("cron/README.md").split())
+    for phrase in ("`commands`", "`<id>`", "`hub:<name>`", "cc-connect cron list",
+                   "cc-connect cron info <id>", "cc-connect cron del <id>", "`enabled: false`",
+                   "direct chat"):
+        assert phrase in text, phrase
+
+
+def test_cron_readme_asks_before_script_and_unguarded_restricted_tasks() -> None:
+    text = " ".join(manifest.render("cron/README.md").split())
+    assert "only if they agree" in text
+    assert "without this safety belt" in text
+    assert "cc-hub cron guard-setup" in text
+    # a task fired from a pointer whose file is gone must not be guessed at
+    assert "do not guess" in text
+
+
+def test_agents_md_handles_a_task_without_a_definition() -> None:
+    """In such a run the guard denies every tool, so the rule must be in AGENTS.md itself."""
+    text = " ".join(manifest.render("AGENTS.md").split())
+    assert "do not guess" in text
+    assert "cc-connect cron del <id>" in text
+
+
+def test_hub_adapt_installs_the_guard_on_claude_code() -> None:
+    text = " ".join(manifest.render("skills/hub-adapt/SKILL.md").split())
+    assert "except the guard hook that `cc-hub cron guard-setup` adds" in text
+    assert "whose `source` is `hub`" in text
 
 
 def test_bootstrap_leaves_scheduled_tasks_to_hub_adapt() -> None:
@@ -174,7 +213,7 @@ def test_agents_md_routes_to_apps() -> None:
 
 def test_hub_apps_skill_covers_the_lifecycle() -> None:
     skill = manifest.render("skills/hub-apps/SKILL.md")
-    for phrase in ("--yes", "setup-state", '--desc "hub:<name>/<task>"', "cc-connect cron del",
+    for phrase in ("--yes", "setup-state", "hub:<name>/*", "cc-connect cron del",
                    "direct chat", "authoring.md", "cc-hub app sync"):
         assert phrase in skill, phrase
     authoring = manifest.render("skills/hub-apps/authoring.md")
@@ -218,7 +257,17 @@ def test_agents_md_undo_recipe_restores_the_version_before_the_change() -> None:
 def test_hub_apps_setup_replaces_stale_scheduled_tasks() -> None:
     skill = manifest.render("skills/hub-apps/SKILL.md")
     setup = " ".join(skill.split("## Set up", 1)[1].split("\n## ", 1)[0].split())
-    assert "whose schedule or prompt differs from `apps/<name>/cron/<task>.md`" in setup
-    assert "or whose file no longer exists" in setup
-    assert "is deleted with `cc-connect cron del <id>`" in setup
-    assert "added again when the file exists and has `default: true`" in setup
+    assert "follow `cron/README.md` for every row whose `source` is the app" in setup
+    readme = " ".join(manifest.render("cron/README.md").split())
+    # a registered task that differs is deleted and added again; one without a row is deleted
+    assert "delete it and register it again" in readme
+    assert "has no row" in readme
+    remove = " ".join(skill.split("## Remove", 1)[1].split("\n## ", 1)[0].split())
+    assert "time overrides" in remove
+
+
+def test_authoring_covers_the_task_kinds() -> None:
+    text = " ".join(manifest.render("skills/hub-apps/authoring.md").split())
+    for phrase in ("exec:", "on_demand: true", "allow:", "cc-hub cron wake", "min_hub = \"0.5.0\"",
+                   "own log"):
+        assert phrase in text, phrase

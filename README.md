@@ -29,6 +29,9 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
 
 ## Commands
 
+In the table, `<…>` is a value you must give, `[…]` is optional, and `a|b`
+lists the subcommands of a group.
+
 | Command | Purpose |
 |---|---|
 | `cc-hub init [dir]` | Seed a hub. Existing files are never overwritten. |
@@ -43,15 +46,31 @@ address you, registers its scheduled tasks, and deletes the bootstrap file.
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |
 
+Examples:
+
+    cc-hub cron list                                # every scheduled task and the time in force
+    cc-hub cron set plans/morning "0 7 * * *"       # run the plans app's morning task at 07:00
+    cc-hub cron set ledger/prices --off             # turn a task off (--on turns it back on)
+    cc-hub cron reset plans/morning                 # back to the time the app's file gives
+    cc-hub cron wake mail/triage                    # run an on-demand task now; scripts do this
+
+Quote the cron expression, or the shell splits it. A task's name is its file
+name without `.md` for the hub's own tasks (`cron/<name>.md`), and
+`<app>/<task>` for an app's. Times you set are kept in `hub.toml`, so
+`cc-hub update` and app updates keep them; `set` and `reset` print the steps
+that re-register the task with cc-connect, which the agent runs. Usually you
+just ask the agent. `cc-hub cron guard-setup` installs the guard for
+restricted tasks on Claude Code (see [docs/cc-connect.md](docs/cc-connect.md)).
+
 ## Hub layout
 
     ~/.cc-hub/
     ├── AGENTS.md  AGENTS.local.md  BOOTSTRAP.md      instructions
     ├── SOUL.md  IDENTITY.md  USER.md                 persona and user
     ├── MEMORY.md  memory/YYYY-MM-DD.md               memory
-    ├── skills/  cron/  scripts/                      skills, scheduled prompts, your scripts
+    ├── skills/  cron/  scripts/                      skills, scheduled tasks, your scripts
     ├── apps/  apps.lock                              installed apps and their record
-    └── hub.toml                                      configuration
+    └── hub.toml                                      configuration and task times you set
 
 `cc-hub update` replaces only framework-owned files: `AGENTS.md` above its
 closing marker, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`,

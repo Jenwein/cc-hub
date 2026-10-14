@@ -9,8 +9,8 @@ name is the app name: lowercase letters, digits and hyphens.
         ├── SETUP.md               optional: setup steps only this app needs
         ├── REMOVE.md              optional: what to undo before removal
         ├── skills/<skill>/SKILL.md
-        ├── cron/<task>.md         same format as the hub's cron/ files
-        ├── scripts/               called by the skills and SETUP.md
+        ├── cron/<task>.md         scheduled tasks, same format as the hub's cron/ files
+        ├── scripts/               called by the skills, the tasks and SETUP.md
         └── seed/<data dir>/...    copied into the hub once, never overwritten
 
 ## app.toml
@@ -30,6 +30,39 @@ name is the app name: lowercase letters, digits and hyphens.
     bin = "bean-check"                     # looked up on PATH, never run by cc-hub
     install = "uv tool install beancount"  # or a table with linux, macos, windows
 
+## Scheduled tasks
+
+`cron/<task>.md` is registered as `hub:<app>/<task>`. The hub's
+`cron/README.md` has the full format; there are three kinds:
+
+- **Prompt task** (`schedule`, `session`): wakes the agent on a schedule.
+  `silent: true` drops cc-connect's "⏰" line at the start of each run.
+- **Script task** (`exec: "uv run apps/<app>/scripts/poll.py"`, `schedule`,
+  optional `timeout_mins`, default 10): runs one command without the agent.
+  Write a program and its arguments only (no `&&`, pipes, redirects, `"`,
+  `$`, backtick or `\`); it runs in the hub root with the cc-connect daemon's
+  PATH. Its output is never seen: write your own log in the data directory.
+- **On-demand task** (`on_demand: true`, `session`, no `schedule`): runs only
+  when a script calls `cc-hub cron wake <app>/<task>`.
+
+Patterns:
+
+- **Poll, then wake.** A script task does the frequent, cheap check and wakes
+  an on-demand task only when there is something for the agent. A wake only
+  means cc-connect took it: record what is pending, have the agent
+  acknowledge it through your script when done, and wake again later for
+  anything not acknowledged. Do not let two runs work on the same items.
+- **Restricted tasks.** A task that reads outside content (mail, web pages)
+  gets `allow:` with command prefixes and `session: new_per_run`; its runs
+  may use nothing else. Give such a task a separate read-only command group
+  in your script, such as `uv run apps/<app>/scripts/tool.py bg ...`, so one
+  `allow` prefix covers exactly what it needs.
+- The user can change any task's time (`cc-hub cron set <app>/<task>`).
+  `SETUP.md` may ask for a time and run that command.
+
+An app that uses script, on-demand or restricted tasks needs
+`min_hub = "0.5.0"`.
+
 ## Rules
 
 - Skill names are unique in the hub and must not start with `hub-`.
@@ -40,7 +73,8 @@ name is the app name: lowercase letters, digits and hyphens.
   only in letter case.
 - Personal settings live in a file in the data directory, such as
   `ledger/config.toml`. Credentials go in `.env` or `secrets/`, never in the
-  data directory, which is committed.
+  data directory, which is committed. For a credential the user gives in
+  chat, provide a command that stores it under `secrets/`.
 - Every `SETUP.md` step checks before acting, so setup can run again after an
   update. Prefer installs that need no root, such as `uv tool install`, so the
   agent can finish them once the user approves.
