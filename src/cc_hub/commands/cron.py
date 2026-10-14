@@ -138,5 +138,21 @@ def reset_cmd(
         typer.echo(line)
 
 
+@cron_app.command("wake")
+def wake_cmd(
+    ctx: typer.Context,
+    task: str = typer.Argument(
+        ..., help="On-demand task name, as `cc-hub cron list` shows it, e.g. mail/triage."
+    ),
+) -> None:
+    """Run an on-demand task now, through cc-connect; exit 0 once cc-connect has taken it."""
+    hub = resolve_hub(ctx)
+    try:
+        job = crontasks.wake(hub, task)
+    except (crontasks.CronError, LockError, OSError, UnicodeDecodeError) as exc:
+        fail(exc)
+    typer.echo(f"woke hub:{task} ({job})")
+
+
 def register(app: typer.Typer) -> None:
     app.add_typer(cron_app, name="cron")

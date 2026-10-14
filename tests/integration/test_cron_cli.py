@@ -247,3 +247,39 @@ def test_reregister_steps_for_a_row_that_is_off_or_gone() -> None:
         "  cc-connect cron add ...",
         "  cc-connect cron edit <id> x",
     ]
+
+
+def test_wake_prints_the_job_id(hub_with_mail: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    woken: list = []
+
+    def fake_wake(hub: Path, name: str) -> str:
+        woken.append((hub, name))
+        return "a1b2c3"
+
+    monkeypatch.setattr("cc_hub.crontasks.wake", fake_wake)
+    r = run(hub_with_mail, "cron", "wake", "mail/triage")
+    assert r.exit_code == 0, r.output
+    assert r.stdout == "woke hub:mail/triage (a1b2c3)\n"
+    assert woken == [(hub_with_mail, "mail/triage")]
+
+
+def test_wake_failure_goes_to_stderr_with_exit_1(
+    hub_with_mail: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # an empty PATH: cc-connect is not found, and nothing real is run
+    monkeypatch.setenv("PATH", "")
+    r = run(hub_with_mail, "cron", "wake", "mail/triage")
+    assert r.exit_code == 1
+    assert r.stdout == "" and "cc-connect" in r.stderr and "not found" in r.stderr
+
+
+def test_wake_refuses_a_task_that_is_not_on_demand(hub_with_mail: Path) -> None:
+    r = run(hub_with_mail, "cron", "wake", "mail/poll")
+    assert r.exit_code == 1
+    assert r.stdout == "" and "not an on-demand task" in r.stderr
+
+
+def test_wake_with_an_unreadable_hub_toml_fails(hub: Path) -> None:
+    (hub / "hub.toml").write_text("[cron\n", encoding="utf-8")
+    r = run(hub, "cron", "wake", "mail/triage")
+    assert r.exit_code == 1 and "hub.toml" in r.stderr

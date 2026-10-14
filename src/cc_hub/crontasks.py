@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +32,9 @@ NAME_RULE = (
     "lowercase letters, digits and hyphens, starting with a letter or digit, "
     "at most 64 characters"
 )
+# a job line of `cc-connect cron list`: enabled mark, id, cron expression, description,
+# separated by two spaces (the expression itself holds single spaces)
+JOB_LINE = re.compile(r"^\s*\S+\s+(?P<id>\S+)\s{2}(?P<expr>.+?)\s{2}(?P<desc>\S.*?)\s*$")
 
 
 class CronError(Exception):
@@ -329,3 +334,69 @@ def rows(hub: Path) -> list[dict]:
     except tomllib.TOMLDecodeError as exc:
         raise CronError(f"hub.toml is not valid TOML: {exc}") from None
     return [_row(task, overrides.get(task.name, {})) for task in discover(hub)]
+
+
+def find_job_id(listing: str, name: str) -> str:
+    """The id cc-connect gave `hub:<name>`, read from the output of `cc-connect cron list`."""
+    ids = []
+    for line in listing.splitlines():
+        m = JOB_LINE.match(line)
+        if m is not None and m.group("desc") == f"hub:{name}":
+            ids.append(m.group("id"))
+    if not ids:
+        raise CronError(
+            f"hub:{name} is not registered in cc-connect; "
+            "have the agent register it (hub-adapt, or hub-apps for an app's task)"
+        )
+    if len(ids) > 1:
+        raise CronError(
+            f"hub:{name} is registered more than once in cc-connect (ids {', '.join(ids)}); "
+            "delete the extras with cc-connect cron del <id>"
+        )
+    return ids[0]
+
+
+def _cc_connect(run, cc: str, *args: str) -> subprocess.CompletedProcess:
+    try:
+        return run(
+            [cc, *args], capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except OSError as exc:
+        raise CronError(f"cannot run cc-connect: {exc}") from None
+
+
+def _detail(proc: subprocess.CompletedProcess) -> str:
+    text = (proc.stderr or proc.stdout or "").strip()
+    return f": {text}" if text else ""
+
+
+def wake(hub: Path, name: str, *, which=shutil.which, run=subprocess.run) -> str:
+    """Trigger the on-demand task `name` in cc-connect; returns the job id it was run by.
+
+    Success means cc-connect took the job, not that the agent has finished it.
+    """
+    row = next((r for r in rows(hub) if r["name"] == name), None)
+    if row is None:
+        raise CronError(f"no task named {name}; see cc-hub cron list")
+    if row["error"]:
+        raise CronError(f"cannot wake {name}: {row['error']}")
+    if row["kind"] != "on_demand":
+        raise CronError(f"{name} is not an on-demand task, so it cannot be woken")
+    if not row["enabled"]:
+        raise CronError(f"hub:{name} is turned off; cc-hub cron set {name} --on")
+    cc = which("cc-connect")
+    if cc is None:
+        raise CronError("cc-connect not found on PATH")
+    listed = _cc_connect(run, cc, "cron", "list")
+    if listed.returncode != 0:
+        raise CronError(
+            f"cc-connect cron list failed (exit {listed.returncode}); "
+            f"cc-connect is probably not running{_detail(listed)}"
+        )
+    job = find_job_id(listed.stdout or "", name)
+    woken = _cc_connect(run, cc, "cron", "exec", job)
+    if woken.returncode != 0:
+        raise CronError(
+            f"cc-connect cron exec {job} failed (exit {woken.returncode}){_detail(woken)}"
+        )
+    return job
