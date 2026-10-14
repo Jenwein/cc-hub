@@ -130,3 +130,42 @@ def register_tap():
         save_lock(hub, lock)
 
     return _register
+
+
+def write(path: Path, text: str) -> None:
+    """Write a UTF-8 file with LF endings, creating the parent directories."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def fake_app(hub: Path, name: str, files: dict[str, str]) -> None:
+    """Install an app into the hub as apps.lock and apps/<name>/ show it, without a tap."""
+    lock = hub / "apps.lock"
+    old = lock.read_text(encoding="utf-8") if lock.exists() else ""
+    write(lock, old + f'[apps.{name}]\nlink = "~/fake/{name}"\n')
+    for rel, text in files.items():
+        write(hub / "apps" / name / rel, text)
+
+
+MAIL_CRON = {
+    "cron/poll.md": (
+        '---\nschedule: "*/5 * * * *"\ndefault: true\n'
+        'exec: "uv run apps/mail/scripts/mk.py poll"\n---\nCheck the mailboxes.\n'
+    ),
+    "cron/triage.md": (
+        "---\non_demand: true\ndefault: true\nsession: new_per_run\n"
+        'allow:\n  - "uv run apps/mail/scripts/mk.py bg"\n---\nSort the new mail.\n'
+    ),
+}
+
+
+@pytest.fixture
+def hub_with_mail(hub: Path) -> Path:
+    fake_app(hub, "mail", MAIL_CRON)
+    return hub
+
+
+@pytest.fixture
+def git_hub_with_mail(git_hub: Path) -> Path:
+    fake_app(git_hub, "mail", MAIL_CRON)
+    return git_hub

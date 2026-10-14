@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
 import pytest
 
+from cc_hub.cronoverrides import save
 from cc_hub.crontasks import (
     DEFAULT_TIMEOUT_MINS,
     PLACEHOLDER_SCHEDULE,
     CronError,
+    Task,
     TaskDef,
     check_schedule,
+    discover,
     parse_task,
+    pointer_prompt,
+    registration_commands,
+    rows,
 )
+from tests.conftest import MAIL_CRON, fake_app, write
 
 
 def test_prompt_task():
@@ -146,3 +153,231 @@ def test_check_schedule_rejects_the_wrong_field_count(expr):
 def test_check_schedule_rejects_bad_fields(expr):
     with pytest.raises(CronError):
         check_schedule(expr)
+
+
+def test_pointer_prompt():
+    assert pointer_prompt("plans/morning", "apps/plans/cron/morning.md") == (
+        "Scheduled task hub:plans/morning: follow the body of apps/plans/cron/morning.md "
+        "in the hub."
+    )
+
+
+def test_rows_for_each_kind(hub):
+    fake_app(hub, "mail", MAIL_CRON)
+    by = {r["name"]: r for r in rows(hub)}
+    mc = by["memory-consolidate"]
+    assert mc["prompt"] == (
+        "Scheduled task hub:memory-consolidate: follow the body of cron/memory-consolidate.md "
+        "in the hub."
+    )
+    assert mc["commands"] == [
+        'cc-connect cron add --cron "0 3 * * *" --prompt "' + mc["prompt"]
+        + '" --session-mode new_per_run --desc "hub:memory-consolidate"'
+    ]
+    poll = by["mail/poll"]
+    assert poll["prompt"] is None and poll["commands"] == [
+        'cc-connect cron add --cron "*/5 * * * *" --exec "uv run apps/mail/scripts/mk.py poll" '
+        '--timeout-mins 10 --desc "hub:mail/poll"',
+        "cc-connect cron edit <id> mute true",
+    ]
+    triage = by["mail/triage"]
+    assert triage["schedule"] is None and triage["allow"] == ["uv run apps/mail/scripts/mk.py bg"]
+    assert triage["commands"] == [
+        'cc-connect cron add --cron "0 0 1 1 *" --prompt "' + triage["prompt"]
+        + '" --session-mode new_per_run --silent --desc "hub:mail/triage"',
+        "cc-connect cron edit <id> enabled false",
+    ]
+
+
+def test_row_fields_of_each_kind(hub):
+    fake_app(hub, "mail", MAIL_CRON)
+    by = {r["name"]: r for r in rows(hub)}
+    keys = {
+        "name", "source", "file", "kind", "default", "file_schedule", "schedule", "overridden",
+        "enabled", "session", "silent", "exec", "timeout_mins", "allow", "desc", "prompt",
+        "commands", "error",
+    }
+    assert all(set(r) == keys for r in by.values())
+
+    mc = by["memory-consolidate"]
+    assert (mc["source"], mc["file"], mc["kind"], mc["desc"]) == (
+        "hub", "cron/memory-consolidate.md", "prompt", "hub:memory-consolidate",
+    )
+    assert (mc["default"], mc["enabled"], mc["overridden"], mc["session"]) == (
+        True, True, False, "new_per_run",
+    )
+    assert (mc["silent"], mc["exec"], mc["timeout_mins"], mc["allow"], mc["error"]) == (
+        False, None, None, [], None,
+    )
+
+    poll = by["mail/poll"]
+    assert (poll["source"], poll["file"], poll["kind"]) == (
+        "mail", "apps/mail/cron/poll.md", "exec",
+    )
+    assert (poll["exec"], poll["timeout_mins"], poll["session"]) == (
+        "uv run apps/mail/scripts/mk.py poll", 10, None,
+    )
+    assert (poll["file_schedule"], poll["schedule"]) == ("*/5 * * * *", "*/5 * * * *")
+
+    triage = by["mail/triage"]
+    assert triage["kind"] == "on_demand" and triage["file_schedule"] is None
+    assert triage["session"] == "new_per_run"
+    assert triage["silent"] is True  # an on-demand task is always registered silent
+
+
+def test_rows_are_sorted_by_name(hub):
+    fake_app(hub, "mail", MAIL_CRON)
+    names = [r["name"] for r in rows(hub)]
+    assert names == sorted(names) == ["mail/poll", "mail/triage", "memory-consolidate"]
+
+
+def test_readme_is_not_a_task(hub):
+    assert (hub / "cron" / "README.md").is_file()
+    assert "README" not in {r["name"] for r in rows(hub)}
+
+
+def test_silent_prompt_task_registers_silent(hub):
+    write(hub / "cron/quiet.md", '---\nschedule: "0 8 * * *"\nsilent: true\n---\nHi.\n')
+    r = next(r for r in rows(hub) if r["name"] == "quiet")
+    assert r["silent"] is True and r["commands"] == [
+        'cc-connect cron add --cron "0 8 * * *" --prompt "' + r["prompt"]
+        + '" --session-mode reuse --silent --desc "hub:quiet"'
+    ]
+
+
+def test_on_demand_task_is_silent_whatever_it_declares(hub):
+    write(hub / "cron/wakeful.md", "---\non_demand: true\nsilent: false\n---\nHi.\n")
+    r = next(r for r in rows(hub) if r["name"] == "wakeful")
+    assert r["silent"] is True and "--silent" in r["commands"][0]
+    assert r["default"] is False and r["enabled"] is False
+
+
+def test_overrides_change_schedule_and_enabled(hub):
+    save(hub, "memory-consolidate", {"schedule": "30 2 * * *"})
+    r = next(r for r in rows(hub) if r["name"] == "memory-consolidate")
+    assert (r["file_schedule"], r["schedule"], r["overridden"], r["enabled"]) == (
+        "0 3 * * *", "30 2 * * *", True, True,
+    )
+    assert r["commands"][0].startswith('cc-connect cron add --cron "30 2 * * *" --prompt')
+    save(hub, "memory-consolidate", {"enabled": False})
+    r = next(r for r in rows(hub) if r["name"] == "memory-consolidate")
+    assert (r["schedule"], r["overridden"], r["enabled"]) == ("0 3 * * *", False, False)
+
+
+def test_override_changes_the_schedule_of_a_script_task(hub):
+    fake_app(hub, "mail", MAIL_CRON)
+    save(hub, "mail/poll", {"schedule": "0 8 * * *"})
+    r = next(r for r in rows(hub) if r["name"] == "mail/poll")
+    assert (r["file_schedule"], r["schedule"], r["overridden"]) == (
+        "*/5 * * * *", "0 8 * * *", True,
+    )
+    assert r["commands"][0].startswith('cc-connect cron add --cron "0 8 * * *" --exec')
+
+
+def test_enabled_true_turns_on_a_default_false_task(hub):
+    write(hub / "cron/optional.md", '---\nschedule: "0 8 * * *"\ndefault: false\n---\nHi.\n')
+    assert next(r for r in rows(hub) if r["name"] == "optional")["enabled"] is False
+    save(hub, "optional", {"enabled": True})
+    assert next(r for r in rows(hub) if r["name"] == "optional")["enabled"] is True
+
+
+def test_on_demand_task_ignores_a_schedule_override(hub):
+    fake_app(hub, "mail", MAIL_CRON)
+    save(hub, "mail/triage", {"schedule": "0 8 * * *"})
+    r = next(r for r in rows(hub) if r["name"] == "mail/triage")
+    assert (r["schedule"], r["overridden"]) == (None, False)
+    assert '--cron "0 0 1 1 *"' in r["commands"][0]
+
+
+def test_bad_override_makes_an_error_row_not_a_command(hub):
+    hub_toml = hub / "hub.toml"
+    hub_toml.write_text(
+        hub_toml.read_text(encoding="utf-8")
+        + '\n[cron."memory-consolidate"]\nschedule = "0 3 * * *\\" --exec \\"rm -rf ~"\n',
+        encoding="utf-8", newline="\n",
+    )
+    r = next(r for r in rows(hub) if r["name"] == "memory-consolidate")
+    assert r["error"] and "hub.toml" in r["error"]
+    assert (r["enabled"], r["commands"]) == (False, [])
+
+
+def test_override_with_a_wrong_type_makes_an_error_row(hub):
+    hub_toml = hub / "hub.toml"
+    hub_toml.write_text(
+        hub_toml.read_text(encoding="utf-8")
+        + '\n[cron."memory-consolidate"]\nenabled = "no"\n',
+        encoding="utf-8", newline="\n",
+    )
+    r = next(r for r in rows(hub) if r["name"] == "memory-consolidate")
+    assert r["error"] and "enabled" in r["error"] and r["enabled"] is False
+
+
+def test_bad_hub_task_is_an_error_row(hub):
+    write(hub / "cron/Bad Name.md", "no frontmatter")
+    write(hub / "cron/broken.md", "---\ndefault: true\n---\n")
+    errs = {r["name"]: r["error"] for r in rows(hub) if r["error"]}
+    assert set(errs) == {"Bad Name", "broken"} and "schedule is required" in errs["broken"]
+    assert errs["broken"].startswith("cron/broken.md: ")
+    bad = next(r for r in rows(hub) if r["name"] == "broken")
+    assert (bad["source"], bad["file"], bad["kind"], bad["enabled"]) == (
+        "hub", "cron/broken.md", None, False,
+    )
+    assert (bad["commands"], bad["prompt"], bad["allow"]) == ([], None, [])
+    # a good task next to a bad one is still listed
+    assert next(r for r in rows(hub) if r["name"] == "memory-consolidate")["error"] is None
+
+
+def test_bad_app_task_is_an_error_row(hub):
+    fake_app(hub, "mail", {
+        "cron/ok.md": '---\nschedule: "0 8 * * *"\n---\nHi.\n',
+        "cron/Odd Name.md": '---\nschedule: "0 8 * * *"\n---\n',
+        "cron/broken.md": '---\nschedule: "every day"\n---\n',
+    })
+    by = {r["name"]: r for r in rows(hub)}
+    assert by["mail/ok"]["error"] is None
+    assert "task name" in by["mail/Odd Name"]["error"]
+    assert by["mail/broken"]["error"].startswith("apps/mail/cron/broken.md: schedule")
+
+
+def test_unreadable_task_file_is_an_error_row(hub):
+    path = hub / "cron" / "latin.md"
+    path.write_bytes(b'---\nschedule: "0 8 * * *"\n---\n\xe9\n')
+    r = next(r for r in rows(hub) if r["name"] == "latin")
+    assert "UTF-8" in r["error"]
+
+
+def test_apps_without_cron_files_or_directory_add_no_rows(hub):
+    fake_app(hub, "mail", {"app.toml": "x"})
+    lock = hub / "apps.lock"
+    lock.write_text(
+        lock.read_text(encoding="utf-8") + '[apps.ghost]\nlink = "~/gone"\n',
+        encoding="utf-8", newline="\n",
+    )
+    assert [r["name"] for r in rows(hub)] == ["memory-consolidate"]
+
+
+def test_app_name_that_is_not_a_valid_name_is_an_error_row(hub):
+    write(hub / "apps.lock", '[apps."../x\\" y"]\nlink = "~/x"\n')
+    errs = [r for r in rows(hub) if r["error"]]
+    assert len(errs) == 1 and errs[0]["file"] == "apps.lock" and errs[0]["commands"] == []
+
+
+def test_discover_returns_tasks_with_definitions(hub):
+    fake_app(hub, "mail", MAIL_CRON)
+    tasks = discover(hub)
+    assert all(isinstance(t, Task) for t in tasks)
+    by = {t.name: t for t in tasks}
+    assert by["mail/poll"].definition.kind == "exec" and by["mail/poll"].error is None
+    assert (by["mail/poll"].source, by["mail/poll"].file) == ("mail", "apps/mail/cron/poll.md")
+
+
+def test_registration_commands_default_to_the_file_time(hub):
+    task = next(t for t in discover(hub) if t.name == "memory-consolidate")
+    assert registration_commands(task, None) == registration_commands(task, "0 3 * * *")
+
+
+def test_task_name_rule_matches_the_app_name_rule():
+    from cc_hub.apps import NAME
+    from cc_hub.crontasks import TASK_NAME
+
+    assert TASK_NAME.pattern == NAME.pattern

@@ -4,7 +4,12 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
+
+from cc_hub.applock import LOCK_FILE, load_lock
+from cc_hub.encoding import read_text
 
 DEFAULT_TIMEOUT_MINS = 10
 # cc-connect wants a time even for a task that only runs when woken
@@ -17,6 +22,12 @@ ITEM = re.compile(r"\s*-(?:\s+(?P<value>.*))?")
 _CRON_ITEM = r"(?:\*|[0-9A-Za-z]+(?:-[0-9A-Za-z]+)?)(?:/[0-9]+)?"
 CRON_FIELD = re.compile(rf"{_CRON_ITEM}(?:,{_CRON_ITEM})*")
 POSITIVE_INT = re.compile(r"[0-9]+")
+# the rule for app names (apps.NAME): a task name ends up inside quoted command arguments
+TASK_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+NAME_RULE = (
+    "lowercase letters, digits and hyphens, starting with a letter or digit, "
+    "at most 64 characters"
+)
 
 
 class CronError(Exception):
@@ -156,3 +167,157 @@ def parse_task(text: str, *, where: str) -> TaskDef:
         raise CronError(f"{where}: schedule is required")
     schedule = _schedule(fields["schedule"], where=where)
     return TaskDef("prompt", schedule, default, session, silent, None, None, restricted)
+
+
+@dataclass
+class Task:
+    name: str  # a file name without .md for the hub's tasks, <app>/<task> for an app's
+    source: str  # "hub", or the app's name
+    file: str  # the definition file, relative to the hub, with /
+    definition: TaskDef | None
+    error: str | None
+
+
+def _load(name: str, source: str, file: str, path: Path) -> Task:
+    """One task; a file that cannot be used becomes a Task with `error`, never an exception."""
+    stem = name.rpartition("/")[2]
+    if not TASK_NAME.fullmatch(stem):
+        return Task(name, source, file, None, f"{file}: task name {stem!r}: use {NAME_RULE}")
+    try:
+        text = read_text(path)
+    except UnicodeDecodeError:
+        return Task(name, source, file, None, f"{file}: is not UTF-8")
+    except OSError as exc:
+        return Task(name, source, file, None, f"{file}: cannot be read: {exc}")
+    try:
+        return Task(name, source, file, parse_task(text, where=file), None)
+    except CronError as exc:
+        return Task(name, source, file, None, str(exc))
+
+
+def _definition_files(directory: Path) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    return sorted(p for p in directory.glob("*.md") if p.is_file() and p.name != "README.md")
+
+
+def discover(hub: Path) -> list[Task]:
+    """The tasks of the hub (cron/*.md) and of every installed app, sorted by name."""
+    hub = Path(hub)
+    tasks = [
+        _load(p.stem, "hub", f"cron/{p.name}", p) for p in _definition_files(hub / "cron")
+    ]
+    for app in sorted(load_lock(hub).apps):
+        if not TASK_NAME.fullmatch(app):
+            error = f"{LOCK_FILE}: app name {app!r}: use {NAME_RULE}"
+            tasks.append(Task(app, app, LOCK_FILE, None, error))
+            continue
+        for p in _definition_files(hub / "apps" / app / "cron"):
+            tasks.append(_load(f"{app}/{p.stem}", app, f"apps/{app}/cron/{p.name}", p))
+    return sorted(tasks, key=lambda t: t.name)
+
+
+def pointer_prompt(name: str, file: str) -> str:
+    """What a task is registered with: a pointer to its definition, not a copy of the body."""
+    return f"Scheduled task hub:{name}: follow the body of {file} in the hub."
+
+
+def registration_commands(task: Task, schedule: str | None) -> list[str]:
+    """The cc-connect commands that register `task` to run at `schedule`.
+
+    Values never hold a double quote (names are checked, so are schedules and exec), so double
+    quotes are safe delimiters on every shell. `<id>` is the id that `cron add` prints.
+    """
+    d = task.definition
+    if d is None:
+        return []
+    desc = f'--desc "hub:{task.name}"'
+    if d.kind == "exec":
+        return [
+            f'cc-connect cron add --cron "{schedule or d.schedule}" --exec "{d.exec}" '
+            f"--timeout-mins {d.timeout_mins} {desc}",
+            "cc-connect cron edit <id> mute true",
+        ]
+    prompt = pointer_prompt(task.name, task.file)
+    on_demand = d.kind == "on_demand"
+    cron = PLACEHOLDER_SCHEDULE if on_demand else (schedule or d.schedule)
+    silent = " --silent" if on_demand or d.silent else ""
+    add = (
+        f'cc-connect cron add --cron "{cron}" --prompt "{prompt}" '
+        f"--session-mode {d.session}{silent} {desc}"
+    )
+    return [add, "cc-connect cron edit <id> enabled false"] if on_demand else [add]
+
+
+def _override_error(name: str, values: dict) -> str | None:
+    """Why the override of `name` in hub.toml cannot be used, or None."""
+    where = f'hub.toml: [cron."{name}"]'
+    if "schedule" in values:
+        if not isinstance(values["schedule"], str):
+            return f"{where}: schedule must be a text cron expression"
+        try:
+            check_schedule(values["schedule"])
+        except CronError as exc:
+            return f"{where}: {exc}"
+    if "enabled" in values and not isinstance(values["enabled"], bool):
+        return f"{where}: enabled must be true or false"
+    return None
+
+
+def _row(task: Task, override: dict) -> dict:
+    row = {
+        "name": task.name,
+        "source": task.source,
+        "file": task.file,
+        "kind": None,
+        "default": None,
+        "file_schedule": None,
+        "schedule": None,
+        "overridden": False,
+        "enabled": False,
+        "session": None,
+        "silent": None,
+        "exec": None,
+        "timeout_mins": None,
+        "allow": [],
+        "desc": f"hub:{task.name}",
+        "prompt": None,
+        "commands": [],
+        "error": task.error,
+    }
+    d = task.definition
+    if d is None:
+        return row
+    row.update(
+        kind=d.kind,
+        default=d.default,
+        file_schedule=d.schedule,
+        session=d.session,
+        # whether it is registered with --silent: always for on demand, and a script is muted
+        silent=d.kind == "on_demand" or (d.kind == "prompt" and d.silent),
+        exec=d.exec,
+        timeout_mins=d.timeout_mins,
+        allow=list(d.allow),
+        prompt=None if d.kind == "exec" else pointer_prompt(task.name, task.file),
+    )
+    row["error"] = _override_error(task.name, override)
+    if row["error"]:
+        return row
+    # an on-demand task has no time, so a schedule in its override means nothing
+    if d.kind != "on_demand":
+        row["overridden"] = "schedule" in override
+        row["schedule"] = check_schedule(override["schedule"]) if row["overridden"] else d.schedule
+    row["enabled"] = override.get("enabled", d.default)
+    row["commands"] = registration_commands(task, row["schedule"])
+    return row
+
+
+def rows(hub: Path) -> list[dict]:
+    """One dict per task: its definition, the overrides applied, and how to register it."""
+    from cc_hub import cronoverrides  # here, because cronoverrides imports this module
+
+    try:
+        overrides = cronoverrides.load(hub)
+    except tomllib.TOMLDecodeError as exc:
+        raise CronError(f"hub.toml is not valid TOML: {exc}") from None
+    return [_row(task, overrides.get(task.name, {})) for task in discover(hub)]
