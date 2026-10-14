@@ -24,8 +24,9 @@ ITEM = re.compile(r"\s*-(?:\s+(?P<value>.*))?")
 _CRON_ITEM = r"(?:\*|[0-9A-Za-z]+(?:-[0-9A-Za-z]+)?)(?:/[0-9]+)?"
 CRON_FIELD = re.compile(rf"{_CRON_ITEM}(?:,{_CRON_ITEM})*")
 POSITIVE_INT = re.compile(r"[0-9]+")
-# what a shell reads inside double quotes: `exec` goes into one, so none of these may occur
-UNSAFE_EXEC_CHARS = ('"', "$", "`", "\\")
+# what a shell reads inside double quotes: `exec` goes into one, so none of these may occur;
+# PowerShell, which runs a script task on Windows, also reads typographic double quotes as `"`
+UNSAFE_EXEC_CHARS = ('"', "\u201c", "\u201d", "\u201e", "$", "`", "\\")
 # the rule for app names (apps.NAME): a task name ends up inside quoted command arguments
 TASK_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 NAME_RULE = (
@@ -146,9 +147,9 @@ def parse_task(text: str, *, where: str) -> TaskDef:
             raise CronError(f"{where}: exec must not be empty")
         if any(char in command for char in UNSAFE_EXEC_CHARS):
             raise CronError(
-                f"{where}: exec must not contain a double quote, $, a backtick or a backslash "
-                "(a shell would expand them); write a plain program and arguments, "
-                "with single quotes for spaces and / in paths"
+                f"{where}: exec must not contain a double quote (also \u201c \u201d \u201e), "
+                "$, a backtick or a backslash (a shell would expand them); write a plain "
+                "program and arguments, with single quotes for spaces and / in paths"
             )
         if "session" in fields:
             raise CronError(f"{where}: a script task has no session; remove session")
@@ -356,11 +357,24 @@ def find_job_id(listing: str, name: str) -> str:
     return ids[0]
 
 
+WAKE_TIMEOUT_SECS = 60
+
+
 def _cc_connect(run, cc: str, *args: str) -> subprocess.CompletedProcess:
     try:
         return run(
-            [cc, *args], capture_output=True, text=True, encoding="utf-8", errors="replace"
+            [cc, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=WAKE_TIMEOUT_SECS,
         )
+    except subprocess.TimeoutExpired:
+        raise CronError(
+            f"cc-connect {' '.join(args)} did not answer within {WAKE_TIMEOUT_SECS} seconds; "
+            "check that cc-connect is running and responsive"
+        ) from None
     except OSError as exc:
         raise CronError(f"cannot run cc-connect: {exc}") from None
 

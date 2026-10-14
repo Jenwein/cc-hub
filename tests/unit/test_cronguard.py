@@ -2,15 +2,26 @@
 import itertools
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from cc_hub.cli import app
-from cc_hub.cronguard import HOOK_COMMAND, decide, run_hook, setup, task_from_transcript
+from cc_hub.cronguard import (
+    decide,
+    find_program,
+    guard_program,
+    hook_command,
+    installed_programs,
+    run_hook,
+    setup,
+    task_from_transcript,
+)
 from cc_hub.crontasks import CronError
-from tests.conftest import write
+from tests.conftest import MAIL_CRON, write
 
 FIRST = {
     "type": "user",
@@ -105,6 +116,13 @@ def test_task_from_transcript_reads_only_the_first_200_lines(tmp_path: Path) -> 
         encoding="utf-8",
     )
     assert task_from_transcript(path) is None
+
+
+def test_task_from_transcript_stops_at_the_first_user_message(tmp_path: Path) -> None:
+    path = transcript(tmp_path, {"type": "summary"}, FIRST)
+    with path.open("ab") as handle:
+        handle.write(b"\xff\xfe not UTF-8, never read\n")
+    assert task_from_transcript(path) == "mail/triage"
 
 
 def test_task_from_transcript_needs_a_task_name_and_a_colon(tmp_path: Path) -> None:
@@ -220,16 +238,11 @@ DENY_READS = [
     ("Read", {"file_path": 5}),
     ("Read", {"file_path": ""}),
     ("Read", {}),
-    # Grep/Glob: the search root is the hub itself (would recurse into secrets), or is secrets,
-    # or a .. in the pattern/glob, or outside the hub
-    ("Grep", {"pattern": "password"}),
-    ("Grep", {"pattern": "password", "path": "."}),
-    ("Grep", {"pattern": "password", "path": "mail/.."}),
+    # Grep/Glob: the search root is secrets, or a .. in the pattern/glob, or outside the hub
     ("Grep", {"pattern": "x", "path": "secrets"}),
     ("Grep", {"pattern": "x", "path": "mail", "glob": "../secrets/*"}),
     ("Grep", {"pattern": "a..b", "path": "mail"}),
     ("Grep", {"pattern": "x", "path": "~"}),
-    ("Glob", {"pattern": "*"}),
     ("Glob", {"pattern": "../**/*"}),
     ("Glob", {"pattern": "*", "path": "secrets"}),
     ("Glob", {"pattern": "..", "path": "mail"}),
@@ -282,6 +295,43 @@ def test_case_variants_of_secrets_are_denied_on_every_platform(
     session = transcript(tmp_path, FIRST)
     out = decide(event(tool, inp, session, git_hub_with_mail), git_hub_with_mail)
     assert decision(out) == "deny"
+
+
+WHOLE_HUB = (
+    "hub:mail/triage may not search the whole hub, which holds secrets/; "
+    "pass a subfolder as path, such as apps/mail"
+)
+
+
+@pytest.mark.parametrize("tool, inp", [
+    ("Grep", {"pattern": "password"}),
+    ("Grep", {"pattern": "password", "path": "."}),
+    ("Grep", {"pattern": "password", "path": "mail/.."}),
+    ("Grep", {"pattern": "password", "path": "apps/.."}),
+    ("Glob", {"pattern": "*"}),
+    ("Glob", {"pattern": "apps/mail/**/*.md"}),
+    ("Glob", {"pattern": "*", "path": "."}),
+])
+def test_a_search_of_the_whole_hub_says_to_pass_a_subfolder(
+    git_hub_with_mail: Path, tmp_path: Path, tool: str, inp: dict
+) -> None:
+    hub = git_hub_with_mail
+    out = decide(event(tool, inp, transcript(tmp_path, FIRST), hub), hub)
+    assert decision(out) == "deny"
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == WHOLE_HUB
+    # the same search with the hub as an absolute path, and a hub task's example
+    absolute = {**inp, "path": str(hub)}
+    out = decide(event(tool, absolute, transcript(tmp_path, FIRST), hub), hub)
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == WHOLE_HUB
+    write(hub / "cron/digest.md", (
+        '---\nschedule: "0 8 * * *"\nsession: new_per_run\n'
+        'allow:\n  - "cc-hub memory recent"\n---\nDigest.\n'
+    ))
+    out = decide(event(tool, inp, pointer(tmp_path, "digest"), hub), hub)
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == (
+        "hub:digest may not search the whole hub, which holds secrets/; "
+        "pass a subfolder as path, such as memory"
+    )
 
 
 def test_an_absolute_glob_into_the_hub_secrets_is_denied(
@@ -349,6 +399,106 @@ def test_a_link_into_secrets_is_followed(git_hub_with_mail: Path, tmp_path: Path
     # a root inside the hub but not secrets is allowed
     ok = decide(event("Glob", {"pattern": "*.md", "path": "mail"}, session, hub), hub)
     assert decision(ok) == "allow"
+
+
+def linked_mail(hub: Path, tmp_path: Path) -> Path:
+    """Install the mail app as `cc-hub app install --link` does: apps/mail links outside the hub.
+
+    Returns the link's target, the app's source directory."""
+    from cc_hub.platform import LinkError, link_dir
+
+    source = tmp_path / "dev" / "mail"
+    for rel, text in MAIL_CRON.items():
+        write(source / rel, text)
+    write(source / "secrets" / "mail.toml", 'password = "x"\n')
+    write(source / ".env", "TOKEN=x\n")
+    write(tmp_path / "dev" / "other.txt", "not the app's\n")
+    lock = hub / "apps.lock"
+    old = lock.read_text(encoding="utf-8") if lock.exists() else ""
+    write(lock, old + f'[apps.mail]\nlink = "{source.as_posix()}"\n')
+    try:
+        link_dir(source, hub / "apps" / "mail")
+    except LinkError:
+        pytest.skip("cannot create directory links here")
+    return source
+
+
+@pytest.mark.parametrize("tool, inp, expected", [
+    ("Read", {"file_path": "apps/mail/cron/triage.md"}, "allow"),
+    ("Grep", {"pattern": "x", "path": "apps/mail"}, "allow"),
+    ("Grep", {"pattern": "x", "path": "apps/mail/cron", "glob": "*.md"}, "allow"),
+    ("Glob", {"pattern": "*.md", "path": "apps/mail/cron"}, "allow"),
+    ("Glob", {"pattern": "**/*.md", "path": "apps/mail"}, "allow"),
+    # secrets/ and .env* of the link's target are as closed as the hub's own
+    ("Read", {"file_path": "apps/mail/secrets/mail.toml"}, "deny"),
+    ("Read", {"file_path": "apps/mail/SECRETS/mail.toml"}, "deny"),
+    ("Grep", {"pattern": "x", "path": "apps/mail/Secrets"}, "deny"),
+    ("Read", {"file_path": "apps/mail/.env"}, "deny"),
+    ("Read", {"file_path": "apps/mail/.ENV.local"}, "deny"),
+])
+def test_a_linked_app_is_read_through_its_link(
+    hub: Path, tmp_path: Path, tool: str, inp: dict, expected: str
+) -> None:
+    linked_mail(hub, tmp_path)
+    out = decide(event(tool, inp, transcript(tmp_path, FIRST), hub), hub)
+    assert decision(out) == expected, out
+
+
+def test_a_linked_app_by_absolute_path_and_what_lies_beside_it(
+    hub: Path, tmp_path: Path
+) -> None:
+    source = linked_mail(hub, tmp_path)
+    session = transcript(tmp_path, FIRST)
+
+    def read(path) -> str | None:
+        return decision(decide(event("Read", {"file_path": str(path)}, session, hub), hub))
+
+    assert read(hub / "apps" / "mail" / "cron" / "triage.md") == "allow"
+    assert read(source / "cron" / "triage.md") == "allow"
+    assert read(source / "secrets" / "mail.toml") == "deny"
+    assert read(source / ".env") == "deny"
+    assert read(tmp_path / "dev" / "other.txt") == "deny"  # beside the target, not in it
+    # only the link of an app that apps.lock records as linked counts
+    write(hub / "apps.lock", '[apps.mail]\ntap = "my-apps"\ncommit = "0123abc"\n')
+    out = decide(event("Read", {"file_path": "apps/mail/cron/triage.md"}, session, hub), hub)
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == (
+        "hub:mail/triage may not read apps/mail/cron/triage.md"
+    )
+
+
+def test_a_link_whose_target_holds_the_hub_opens_nothing(
+    hub_with_mail: Path, tmp_path: Path
+) -> None:
+    from cc_hub.platform import LinkError, link_dir
+
+    hub = hub_with_mail
+    beside = tmp_path / "beside.txt"
+    write(beside, "x\n")
+    lock = hub / "apps.lock"
+    write(lock, lock.read_text(encoding="utf-8") + f'[apps.wide]\nlink = "{tmp_path.as_posix()}"\n')
+    try:
+        link_dir(tmp_path, hub / "apps" / "wide")
+    except LinkError:
+        pytest.skip("cannot create directory links here")
+    session = transcript(tmp_path, FIRST)
+    out = decide(event("Read", {"file_path": str(beside)}, session, hub), hub)
+    assert out["hookSpecificOutput"]["permissionDecisionReason"] == (
+        f"hub:mail/triage may not read {beside}"
+    )
+
+
+def test_a_file_written_as_env_is_denied_even_if_it_links_elsewhere(
+    git_hub_with_mail: Path, tmp_path: Path
+) -> None:
+    hub = git_hub_with_mail
+    write(hub / "apps/mail/notes.txt", "x\n")
+    try:
+        os.symlink(hub / "apps/mail/notes.txt", hub / "apps/mail/.env")
+    except (OSError, NotImplementedError):
+        pytest.skip("cannot create symlinks here")
+    session = transcript(tmp_path, FIRST)
+    out = decide(event("Read", {"file_path": "apps/mail/.env"}, session, hub), hub)
+    assert decision(out) == "deny"
 
 
 @pytest.mark.parametrize("tool", [
@@ -580,6 +730,15 @@ def test_run_hook_output_is_ascii_json(git_hub_with_mail: Path, tmp_path: Path) 
 # --- .claude/settings.json -----------------------------------------------------------------
 
 
+PROGRAM = "/opt/中文 tools/bin/cc-hub"
+GUARD = f'"{PROGRAM}" cron guard'
+
+
+def guard_commands(settings: Path) -> list[str]:
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    return [h["command"] for e in data["hooks"]["PreToolUse"] for h in e["hooks"]]
+
+
 def test_setup_merges_and_is_idempotent(hub: Path) -> None:
     settings = hub / ".claude" / "settings.json"
     settings.parent.mkdir(parents=True)
@@ -590,22 +749,20 @@ def test_setup_merges_and_is_idempotent(hub: Path) -> None:
         ]},
     }
     settings.write_text(json.dumps(existing), encoding="utf-8")
-    assert setup(hub) is True and setup(hub) is False
+    assert setup(hub, PROGRAM) is True and setup(hub, PROGRAM) is False
     data = json.loads(settings.read_text(encoding="utf-8"))
     assert data["permissions"] == {"allow": ["Bash(ls:*)"]}
-    commands = [h["command"] for e in data["hooks"]["PreToolUse"] for h in e["hooks"]]
-    assert commands == ["my-hook", "cc-hub cron guard"]
+    assert guard_commands(settings) == ["my-hook", GUARD]
 
 
 def test_setup_creates_the_settings_file(hub: Path) -> None:
-    assert setup(hub) is True
+    assert setup(hub, PROGRAM) is True
     settings = hub / ".claude" / "settings.json"
     text = settings.read_text(encoding="utf-8")
     assert json.loads(text) == {"hooks": {"PreToolUse": [
-        {"matcher": "*", "hooks": [{"type": "command", "command": HOOK_COMMAND}]}
+        {"matcher": "*", "hooks": [{"type": "command", "command": GUARD}]}
     ]}}
     assert text == json.dumps(json.loads(text), indent=2, ensure_ascii=False) + "\n"
-    assert HOOK_COMMAND == "cc-hub cron guard"
 
 
 def test_setup_keeps_non_ascii_text_and_other_hooks(hub: Path) -> None:
@@ -614,7 +771,7 @@ def test_setup_keeps_non_ascii_text_and_other_hooks(hub: Path) -> None:
         "env": {"NOTE": "中文"},
         "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]},
     }))
-    assert setup(hub) is True
+    assert setup(hub, PROGRAM) is True
     text = settings.read_text(encoding="utf-8")
     assert "中文" in text
     data = json.loads(text)
@@ -627,11 +784,99 @@ def test_setup_finds_the_guard_under_any_matcher(hub: Path) -> None:
     write(settings, json.dumps({"hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": "not a list"},
         "not an entry",
-        {"matcher": "Read|Bash", "hooks": [{"type": "command", "command": HOOK_COMMAND}]},
+        {"matcher": "Read|Bash", "hooks": [{"type": "command", "command": GUARD}]},
     ]}}))
     before = settings.read_text(encoding="utf-8")
-    assert setup(hub) is False
+    assert setup(hub, PROGRAM) is False
     assert settings.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("old", [
+    "cc-hub cron guard",  # the bare form, which fails open when cc-hub is not on the PATH
+    '"C:/Users/x/AppData/old/cc-hub.exe" cron guard',
+    "/usr/local/bin/cc-hub cron guard",
+])
+def test_setup_rewrites_an_older_guard_command_in_place(hub: Path, old: str) -> None:
+    settings = hub / ".claude" / "settings.json"
+    write(settings, json.dumps({"hooks": {"PreToolUse": [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "my-hook"}]},
+        {"matcher": "Read|Bash", "hooks": [{"type": "command", "command": old, "timeout": 9}]},
+    ]}}))
+    assert setup(hub, PROGRAM) is True
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["hooks"]["PreToolUse"] == [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "my-hook"}]},
+        {"matcher": "Read|Bash", "hooks": [{"type": "command", "command": GUARD, "timeout": 9}]},
+    ]
+    assert setup(hub, PROGRAM) is False
+
+
+@pytest.mark.parametrize("command, program", [
+    ("cc-hub cron guard", "cc-hub"),
+    ("cc-hub.exe cron guard", "cc-hub.exe"),
+    ('"C:/Users/x/.local/bin/cc-hub.exe" cron guard', "C:/Users/x/.local/bin/cc-hub.exe"),
+    ("C:\\Users\\x\\.local\\bin\\CC-HUB.EXE cron guard", "C:\\Users\\x\\.local\\bin\\CC-HUB.EXE"),
+    ("/home/x/.local/bin/cc-hub cron guard", "/home/x/.local/bin/cc-hub"),
+    ("'/opt/my tools/cc-hub' cron guard", "/opt/my tools/cc-hub"),
+    (f"  {GUARD}  ", PROGRAM),
+    ("cc-hub cron guard-setup", None),
+    ("cc-hub cron guard --verbose", None),
+    ("cc-hubx cron guard", None),
+    ("/opt/cc-hub/python cron guard", None),
+    ("/x/cc-hub.py cron guard", None),
+    ("my-hook", None),
+    ("cron guard", None),
+    (5, None),
+    (None, None),
+])
+def test_guard_program_recognises_cc_hub_or_a_path_to_it(command, program) -> None:
+    assert guard_program(command) == program
+
+
+def test_hook_command_quotes_an_absolute_path_with_forward_slashes(tmp_path: Path) -> None:
+    exe = tmp_path / "中文 bin" / "cc-hub.exe"
+    command = hook_command(str(exe))
+    assert command == f'"{exe.as_posix()}" cron guard'
+    assert "\\" not in command and guard_program(command) == exe.as_posix()
+
+
+@pytest.mark.parametrize("program", ['/opt/a"b/cc-hub', "/opt/$x/cc-hub", "/opt/`x`/cc-hub"])
+def test_hook_command_refuses_what_a_shell_would_expand(program: str) -> None:
+    with pytest.raises(CronError, match="cc-hub"):
+        hook_command(program)
+
+
+def test_find_program_prefers_the_path_then_the_running_program(tmp_path: Path) -> None:
+    on_path = tmp_path / "bin" / "cc-hub.exe"
+    assert find_program(which=lambda _: str(on_path), argv0="x") == on_path.as_posix()
+    running = tmp_path / "venv" / "cc-hub"
+    write(running, "")
+    assert find_program(which=lambda _: None, argv0=str(running)) == running.as_posix()
+    # a launcher started without its extension, as Windows does
+    launcher = tmp_path / "scripts" / "cc-hub.exe"
+    write(launcher, "")
+    found = find_program(which=lambda _: None, argv0=str(tmp_path / "scripts" / "cc-hub"))
+    assert found == launcher.as_posix()
+
+
+@pytest.mark.parametrize("argv0", ["", "pytest", "-c", "missing/cc-hub"])
+def test_find_program_fails_without_a_cc_hub(tmp_path: Path, argv0: str) -> None:
+    write(tmp_path / "pytest", "")
+    arg = str(tmp_path / argv0) if argv0 not in ("", "-c") else argv0
+    with pytest.raises(CronError, match="cannot find the cc-hub program"):
+        find_program(which=lambda _: None, argv0=arg)
+
+
+def test_installed_programs(hub: Path) -> None:
+    assert installed_programs(hub) == []
+    write(hub / ".claude" / "settings.json", json.dumps({"hooks": {"PreToolUse": [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "my-hook"}]},
+        {"matcher": "*", "hooks": [{"type": "command", "command": GUARD}]},
+        {"matcher": "Read", "hooks": [{"type": "command", "command": "cc-hub cron guard"}]},
+    ]}}))
+    assert installed_programs(hub) == [PROGRAM, "cc-hub"]
+    write(hub / ".claude" / "settings.json", "{not json")
+    assert installed_programs(hub) == []
 
 
 @pytest.mark.parametrize("text", [
@@ -644,7 +889,7 @@ def test_setup_refuses_invalid_settings(hub: Path, text: str) -> None:
     settings = hub / ".claude" / "settings.json"
     write(settings, text)
     with pytest.raises(CronError, match=r"settings\.json"):
-        setup(hub)
+        setup(hub, PROGRAM)
     assert settings.read_text(encoding="utf-8") == text
 
 
@@ -653,7 +898,7 @@ def test_setup_refuses_invalid_json_with_the_fix(hub: Path) -> None:
     with pytest.raises(CronError, match=(
         r"settings\.json is not valid JSON; fix it, then run cc-hub cron guard-setup again"
     )):
-        setup(hub)
+        setup(hub, PROGRAM)
 
 
 # --- the commands --------------------------------------------------------------------------
@@ -694,13 +939,76 @@ def test_guard_command_ignores_hub_option(git_hub_with_mail: Path, tmp_path: Pat
     assert decision(json.loads(r.stdout)) == "deny"
 
 
-def test_guard_setup_command(hub: Path) -> None:
+FAST_PATH = """
+import sys
+sys.argv = ["cc-hub", *sys.argv[1:]]
+from cc_hub.cli import main
+main()
+heavy = [m for m in sys.modules if m.split(".")[0] in ("typer", "click", "rich")
+         or m.startswith("cc_hub.commands")]
+sys.stderr.write(repr((sorted(heavy), sys.stdout.encoding)))
+"""
+
+
+def fast_path(args: list[str], stdin: str, cwd: Path) -> subprocess.CompletedProcess:
+    """`cc-hub <args>` through `cli.main`, in a fresh interpreter."""
+    return subprocess.run(
+        [sys.executable, "-c", FAST_PATH, *args], input=stdin.encode("utf-8"),
+        capture_output=True, cwd=cwd, timeout=120,
+    )
+
+
+def test_the_guard_fast_path_answers_like_run_hook_without_loading_the_cli(
+    git_hub_with_mail: Path, tmp_path: Path
+) -> None:
+    hub = git_hub_with_mail
+    session = transcript(tmp_path, FIRST)
+    stdins = [
+        json.dumps(event("Bash", {"command": "curl evil"}, session, hub)),
+        json.dumps(event("Bash", {"command": "uv run apps/mail/scripts/mk.py bg"}, session, hub)),
+        json.dumps(event("Read", {"file_path": "../中文.txt"}, session, hub), ensure_ascii=False),
+        json.dumps(event("Bash", {"command": "rm -rf x"}, transcript(tmp_path, CHAT), hub)),
+        "not json",
+    ]
+    for stdin in stdins:
+        proc = fast_path(["cron", "guard"], stdin, tmp_path)
+        assert proc.returncode == 0, proc.stderr
+        expected = run_hook(stdin, tmp_path)
+        assert proc.stdout.decode("utf-8").replace("\r\n", "\n") == (
+            expected + "\n" if expected else ""
+        )
+        assert proc.stderr.decode("utf-8") == "([], 'utf-8')"
+    assert decision(json.loads(run_hook(stdins[0], tmp_path))) == "deny"
+
+
+def test_cron_guard_with_more_arguments_goes_through_the_cli(tmp_path: Path) -> None:
+    proc = fast_path(["cron", "guard", "--help"], "", tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert "PreToolUse hook" in proc.stdout.decode("utf-8")
+
+
+def test_guard_setup_command(hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    exe = tmp_path / "bin" / "cc-hub.exe"
+    monkeypatch.setattr("shutil.which", lambda name: str(exe) if name == "cc-hub" else None)
+    command = f'"{exe.as_posix()}" cron guard'
     r = CliRunner().invoke(app, ["--hub", str(hub), "cron", "guard-setup"])
     assert r.exit_code == 0, r.output
-    assert r.stdout == "guard installed in .claude/settings.json\n"
+    assert r.stdout == f"guard installed in .claude/settings.json: {command}\n"
+    assert guard_commands(hub / ".claude" / "settings.json") == [command]
     r = CliRunner().invoke(app, ["--hub", str(hub), "cron", "guard-setup"])
     assert r.exit_code == 0, r.output
-    assert r.stdout == "guard already installed\n"
+    assert r.stdout == f"guard already installed: {command}\n"
+
+
+def test_guard_setup_command_without_a_cc_hub_program(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr("sys.argv", ["pytest"])
+    r = CliRunner().invoke(app, ["--hub", str(hub), "cron", "guard-setup"])
+    assert r.exit_code == 1
+    assert "cannot find the cc-hub program" in r.stderr
+    assert not (hub / ".claude" / "settings.json").exists()
 
 
 def test_guard_setup_command_with_invalid_settings(hub: Path) -> None:

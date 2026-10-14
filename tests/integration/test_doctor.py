@@ -12,7 +12,7 @@ from cc_hub.cli import app
 from cc_hub.commands.doctor import run_checks
 from cc_hub.commands.init import init_hub
 from cc_hub.commands.link import sync_skill_links
-from cc_hub.cronguard import HOOK_COMMAND
+from cc_hub.cronguard import hook_command
 from tests.conftest import write
 
 NO_AGENTS = dict(which=lambda name: None)
@@ -343,6 +343,13 @@ def _hook(matcher: str, command: str) -> dict:
     return {"matcher": matcher, "hooks": [{"type": "command", "command": command}]}
 
 
+def _program(tmp_path: Path) -> str:
+    """An existing cc-hub executable for the guard hook to point at."""
+    exe = tmp_path / "bin" / "cc-hub"
+    write(exe, "")
+    return str(exe)
+
+
 def test_cron_check_is_ok_for_a_hub_with_tasks_and_a_valid_override(
     hub_with_mail: Path, tmp_path: Path
 ) -> None:
@@ -442,7 +449,7 @@ def test_cron_check_warns_of_a_restricted_task_without_the_guard(
     assert check.status == "warn"
     assert "mail/triage" in check.message and ".claude/settings.json" in check.message
     assert "hub-adapt" in check.fix
-    assert cronguard.setup(hub_with_mail) is True
+    assert cronguard.setup(hub_with_mail, _program(tmp_path)) is True
     assert _cron_check(hub_with_mail, tmp_path).status == "ok"
 
 
@@ -486,8 +493,34 @@ def test_cron_check_finds_the_guard_next_to_the_users_own_hooks(
     hub_with_mail: Path, tmp_path: Path
 ) -> None:
     write(hub_with_mail / "CLAUDE.md", "@AGENTS.md\n")
+    for command in (hook_command(_program(tmp_path)), "cc-hub cron guard"):
+        guard = _hook("*", command)
+        write(
+            hub_with_mail / ".claude" / "settings.json",
+            json.dumps({"hooks": {"PreToolUse": [_hook("Bash", "mine"), guard]}}),
+        )
+        assert _cron_check(hub_with_mail, tmp_path).status == "ok", command
+
+
+def test_cron_check_warns_when_the_guard_program_is_gone(
+    hub_with_mail: Path, tmp_path: Path
+) -> None:
+    gone = (tmp_path / "old" / "cc-hub.exe").as_posix()
+    write(hub_with_mail / "CLAUDE.md", "@AGENTS.md\n")
     write(
         hub_with_mail / ".claude" / "settings.json",
-        json.dumps({"hooks": {"PreToolUse": [_hook("Bash", "mine"), _hook("*", HOOK_COMMAND)]}}),
+        json.dumps({"hooks": {"PreToolUse": [_hook("*", hook_command(gone))]}}),
+    )
+    check = _cron_check(hub_with_mail, tmp_path)
+    assert check.status == "warn"
+    assert "mail/triage" in check.message
+    assert f"the guard hook runs {gone}, which does not exist" in check.message
+    assert "hub-adapt" in check.fix and "cc-hub cron guard-setup" in check.fix
+    # a program recorded without the .exe that Windows adds is still found
+    write(tmp_path / "old" / "cc-hub.exe", "")
+    no_ext = (tmp_path / "old" / "cc-hub").as_posix()
+    write(
+        hub_with_mail / ".claude" / "settings.json",
+        json.dumps({"hooks": {"PreToolUse": [_hook("*", hook_command(no_ext))]}}),
     )
     assert _cron_check(hub_with_mail, tmp_path).status == "ok"

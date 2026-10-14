@@ -87,6 +87,14 @@ def test_exec_with_single_quotes_and_slashes_is_accepted():
     assert d.exec == "uv run 'apps/my app/x.py' --flag"
 
 
+@pytest.mark.parametrize("quote", ["“", "”", "„"])
+def test_exec_rejects_typographic_double_quotes(quote):
+    # PowerShell, which runs a script task on Windows, reads these as double quotes
+    with pytest.raises(CronError, match="double quote") as info:
+        parse_task(f'---\nschedule: "* * * * *"\nexec: "say {quote}hi"\n---\n', where="x")
+    assert str(info.value).startswith("x: exec must not contain")
+
+
 def test_comment_after_a_quoted_value_may_hold_quotes():
     d = parse_task('---\nschedule: "0 3 * * *"\nexec: "echo a"  # say "hi"\n---\n', where="x")
     assert d.exec == "echo a"

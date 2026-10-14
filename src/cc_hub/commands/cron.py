@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import sys
 import tomllib
 from pathlib import Path
 
@@ -157,41 +156,35 @@ def wake_cmd(
     typer.echo(f"woke hub:{task} ({job})")
 
 
-def _read_stdin() -> str:
-    """The hook's JSON from stdin, decoded as UTF-8; never raises."""
-    try:
-        return sys.stdin.buffer.read().decode("utf-8", "replace")
-    except Exception:
-        try:
-            return sys.stdin.read()
-        except Exception:
-            return ""
-
-
 @cron_app.command("guard")
 def guard_cmd() -> None:
     """PreToolUse hook: read a hook event on stdin, allow or deny a restricted task's tool call.
 
     Prints a decision only for a recognised restricted session; otherwise prints nothing. It
     runs on every tool call of every session, so it never fails: it does not resolve the hub
-    the usual way (which would error outside a hub) and always exits 0.
+    the usual way (which would error outside a hub) and always exits 0. A plain
+    `cc-hub cron guard` is answered by `cli.main` without loading the command line.
     """
-    decision = cronguard.run_hook(_read_stdin(), Path.cwd())
-    if decision:
-        typer.echo(decision)
+    cronguard.hook_main()
 
 
 @cron_app.command("guard-setup")
 def guard_setup_cmd(ctx: typer.Context) -> None:
-    """Install the guard hook into the hub's .claude/settings.json (merging, idempotent)."""
+    """Install the guard hook into the hub's .claude/settings.json (merging, idempotent).
+
+    The hook runs this cc-hub by its absolute path, so it works whatever PATH the agent has.
+    """
     hub = resolve_hub(ctx)
     try:
-        changed = cronguard.setup(hub)
-    except crontasks.CronError as exc:
+        program = cronguard.find_program()
+        command = cronguard.hook_command(program)
+        changed = cronguard.setup(hub, program)
+    except (crontasks.CronError, OSError, UnicodeDecodeError) as exc:
         fail(exc)
-    typer.echo(
-        "guard installed in .claude/settings.json" if changed else "guard already installed"
-    )
+    if changed:
+        typer.echo(f"guard installed in {cronguard.SETTINGS_REL}: {command}")
+    else:
+        typer.echo(f"guard already installed: {command}")
 
 
 def register(app: typer.Typer) -> None:

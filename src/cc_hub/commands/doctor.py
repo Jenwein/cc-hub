@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -116,25 +115,28 @@ def apps_check(hub: Path, which: Which) -> Check:
     return _ok("apps", f"{len(rows)} app(s) set up")
 
 
-def _guard_installed(hub: Path) -> bool:
-    """Whether .claude/settings.json has a PreToolUse hook that runs the restricted-task guard."""
-    try:
-        data = json.loads(read_text(hub / cronguard.SETTINGS_REL).lstrip("﻿"))
-    except (OSError, ValueError):
-        return False
-    hooks = data.get("hooks") if isinstance(data, dict) else None
-    entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
-    if not isinstance(entries, list):
-        return False
-    return any(
-        isinstance(entry, dict)
-        and isinstance(entry.get("hooks"), list)
-        and any(
-            isinstance(h, dict) and h.get("command") == cronguard.HOOK_COMMAND
-            for h in entry["hooks"]
+def _guard_problem(hub: Path) -> tuple[str, str] | None:
+    """What keeps the restricted-task guard from running, and the fix; None if nothing does.
+
+    A guard hook runs the program it records; when that path no longer exists, Claude Code
+    cannot start it and carries on without it. A bare `cc-hub` is looked up on the PATH, which
+    cannot be checked from here.
+    """
+    programs = cronguard.installed_programs(hub)
+    if not programs:
+        return (
+            f"the guard hook is not in {cronguard.SETTINGS_REL}",
+            "run the hub-adapt skill from the agent",
         )
-        for entry in entries
-    )
+    for program in programs:
+        if re.search(r"[\\/]", program) and not (
+            os.path.isfile(program) or os.path.isfile(program + ".exe")
+        ):
+            return (
+                f"the guard hook runs {program}, which does not exist",
+                "run the hub-adapt skill from the agent, or `cc-hub cron guard-setup`",
+            )
+    return None
 
 
 def cron_check(hub: Path) -> Check:
@@ -179,12 +181,13 @@ def cron_check(hub: Path) -> Check:
 
     restricted = [row["name"] for row in task_rows if row["allow"]]
     claude_set_up = any((hub / rel).exists() for rel in POINTERS["claude"] if rel)
-    if restricted and claude_set_up and not _guard_installed(hub):
+    guard = _guard_problem(hub) if restricted and claude_set_up else None
+    if guard is not None:
         problems.append(
-            f"restricted task(s) {', '.join(restricted)}: the guard hook is not in "
-            f"{cronguard.SETTINGS_REL}, so nothing enforces their allow list"
+            f"restricted task(s) {', '.join(restricted)}: {guard[0]}, "
+            "so nothing enforces their allow list"
         )
-        fixes.append("run the hub-adapt skill from the agent")
+        fixes.append(guard[1])
     if problems:
         return Check("cron", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
     return _ok("cron", f"{len(task_rows)} task(s) checked")

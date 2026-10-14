@@ -67,9 +67,27 @@ def test_wake_reads_cc_connect_output_as_utf8(hub_with_mail: Path) -> None:
         return subprocess.CompletedProcess(argv, 0, stdout=LISTING, stderr="")
 
     wake(hub_with_mail, "mail/triage", which=lambda _: CC, run=run)
+    assert len(seen) == 2
     for kwargs in seen:
         assert kwargs["capture_output"] is True and kwargs["text"] is True
         assert kwargs["encoding"] == "utf-8" and kwargs["errors"] == "replace"
+        assert kwargs["timeout"] == 60
+
+
+@pytest.mark.parametrize("stuck", ["list", "exec"])
+def test_wake_gives_up_on_a_cc_connect_that_does_not_answer(
+    hub_with_mail: Path, stuck: str
+) -> None:
+    def run(argv, **kwargs):
+        if argv[2] == stuck:
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, stdout=LISTING, stderr="")
+
+    with pytest.raises(CronError) as info:
+        wake(hub_with_mail, "mail/triage", which=lambda _: CC, run=run)
+    message = str(info.value)
+    assert f"cc-connect cron {stuck}" in message
+    assert "did not answer within 60 seconds" in message
 
 
 def prepare(hub: Path, case: str) -> tuple[str, dict]:

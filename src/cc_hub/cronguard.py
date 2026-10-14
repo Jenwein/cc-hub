@@ -2,14 +2,18 @@
 """The restricted-task guard: a Claude Code PreToolUse hook (`cc-hub cron guard`).
 
 A restricted scheduled task declares an ``allow`` list of command prefixes; its unattended
-agent run may only execute those commands and may only read inside the hub. Because the hub's
-sessions run in ``bypassPermissions`` mode, enforcement is a PreToolUse hook that runs before
-every tool call of every session. The hook recognises a scheduled run by the pointer prompt
-in the first user message of the transcript; a session without one gets no opinion.
+agent run may only execute those commands and may only read inside the hub (and inside the
+directories its linked apps point to). Because the hub's sessions run in
+``bypassPermissions`` mode, enforcement is a PreToolUse hook that runs before every tool call
+of every session. The hook recognises a scheduled run by the pointer prompt in the first user
+message of the transcript; a session without one gets no opinion.
 
 Nothing here may raise or print a traceback. Without a pointer prompt any failure means
 "no opinion" (``run_hook`` returns ``""``). With one, a task that cannot be evaluated denies
 every tool, and a valid task without ``allow`` gets no opinion.
+
+This module is imported on the hook's fast path (``cli.main``), so it must not import typer,
+rich or the command modules.
 """
 
 from __future__ import annotations
@@ -18,13 +22,16 @@ import itertools
 import json
 import os
 import re
+import shutil
+import sys
 from pathlib import Path
 
-from cc_hub.crontasks import CronError, discover
+from cc_hub.applock import load_lock
+from cc_hub.crontasks import TASK_NAME, UNSAFE_EXEC_CHARS, CronError, discover
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import find_hub
 
-HOOK_COMMAND = "cc-hub cron guard"
+GUARD_SUFFIX = " cron guard"  # a hook command is `"<path to cc-hub>" cron guard`
 SETTINGS_REL = ".claude/settings.json"
 
 # the pointer prompt a restricted task's session opens with (crontasks.pointer_prompt)
@@ -67,26 +74,31 @@ def task_from_transcript(path: Path) -> str | None:
     content arriving later in tool results cannot impersonate a task's pointer prompt.
     """
     try:
-        with Path(path).open(encoding="utf-8") as handle:
-            lines = list(itertools.islice(handle, _TRANSCRIPT_LINES))
+        with Path(path).open("rb") as handle:
+            # read and decode line by line, and stop at the deciding entry: a transcript grows
+            # with every tool call, and its lines can be large
+            for raw in itertools.islice(handle, _TRANSCRIPT_LINES):
+                text = _deciding_text(raw.decode("utf-8"))
+                if text is not _SKIP:
+                    match = POINTER.search(text)
+                    return match.group("name") if match else None
     except (OSError, UnicodeError, ValueError):
         return None
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isMeta"):
-            continue
-        text = _entry_text(entry)
-        if text is _SKIP:
-            continue
-        match = POINTER.search(text)
-        return match.group("name") if match else None
     return None
+
+
+def _deciding_text(line: str):
+    """The text of the first real user message if `line` is it, else ``_SKIP``."""
+    line = line.strip()
+    if not line:
+        return _SKIP
+    try:
+        entry = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return _SKIP
+    if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isMeta"):
+        return _SKIP
+    return _entry_text(entry)
 
 
 def _out(decision: str, reason: str) -> dict:
@@ -159,24 +171,74 @@ def _read(name: str, tool: str, tool_input, hub: Path, cwd) -> dict:
 
     denied = _out("deny", f"hub:{name} may not read {raw}")
     try:
-        resolved = os.path.realpath(os.path.join(str(base), os.path.expanduser(raw)))
+        joined = os.path.join(str(base), os.path.expanduser(raw))
+        written = os.path.normpath(joined)
+        resolved = os.path.realpath(joined)
         hub_real = os.path.realpath(str(hub))
     except (OSError, ValueError):
         return denied
-    nc_resolved = os.path.normcase(resolved)
-    nc_hub = os.path.normcase(hub_real)
-    if nc_resolved != nc_hub and not nc_resolved.startswith(nc_hub + os.sep):
-        return denied  # outside the hub
-    rel = os.path.relpath(resolved, hub_real)
-    parts = [] if rel in (".", "") else rel.replace("\\", "/").split("/")
-    if parts and _norm_part(parts[0]) == "secrets":
+    # the path as written and the path it resolves to: either one naming secrets/ or a .env*
+    # file is enough to deny
+    if _closed(written, [str(hub), hub_real]) or _closed(resolved, [hub_real]):
         return denied
-    if _norm_part(os.path.basename(resolved)).startswith(".env"):
-        return denied
+    if _below(resolved, hub_real) is None:
+        roots = _link_roots(hub, hub_real)
+        if not any(_below(resolved, root) is not None for root in roots):
+            return denied  # outside the hub and outside every linked app
+        if _closed(resolved, roots):
+            return denied
     # a recursive tool rooted at the hub itself would reach secrets/; make it name a subtree
-    if search and nc_resolved == nc_hub:
-        return denied
+    if search and _below(resolved, hub_real) == []:
+        app, slash, _ = name.partition("/")
+        example = f"apps/{app}" if slash else "memory"
+        return _out(
+            "deny",
+            f"hub:{name} may not search the whole hub, which holds secrets/; "
+            f"pass a subfolder as path, such as {example}",
+        )
     return _out("allow", f"allowed for hub:{name}")
+
+
+def _below(path: str, root: str) -> list[str] | None:
+    """The parts of `path` below `root` ([] for `root` itself), or None if it is not inside."""
+    nc_path, nc_root = os.path.normcase(path), os.path.normcase(root).rstrip("\\/")
+    if nc_path.rstrip("\\/") == nc_root:
+        return []
+    if not nc_path.startswith(nc_root + os.sep):
+        return None
+    return [part for part in re.split(r"[\\/]", nc_path[len(nc_root) + 1:]) if part]
+
+
+def _closed(path: str, roots: list[str]) -> bool:
+    """Whether `path` is a .env* file or lies in the secrets/ folder of one of `roots`."""
+    if _norm_part(os.path.basename(path)).startswith(".env"):
+        return True
+    for root in roots:
+        parts = _below(path, root)
+        if parts and _norm_part(parts[0]) == "secrets":
+            return True
+    return False
+
+
+def _link_roots(hub: Path, hub_real: str) -> list[str]:
+    """The resolved targets of the `apps/<app>` links of apps that apps.lock records as linked
+    (`cc-hub app install --link`). A target that holds the hub, or lies inside it, is left out:
+    it would open the hub's surroundings, or adds nothing."""
+    try:
+        apps = load_lock(hub).apps
+    except Exception:
+        return []
+    roots = []
+    for app, entry in apps.items():
+        if not TASK_NAME.fullmatch(app) or "link" not in entry:
+            continue
+        try:
+            target = os.path.realpath(os.path.join(hub_real, "apps", app))
+        except (OSError, ValueError):
+            continue
+        if _below(target, hub_real) is None and _below(hub_real, target) is None:
+            roots.append(target)
+    return roots
 
 
 def _no_tools(name: str, problem: str) -> dict:
@@ -251,16 +313,130 @@ def run_hook(stdin_text: str, cwd: Path) -> str:
         return ""
 
 
+def hook_main() -> None:
+    """``cc-hub cron guard``: read the hook event on stdin, print the decision if there is one.
+
+    ``cli.main`` calls this directly, without importing typer or the command modules, because
+    the hook runs before every tool call of every session. Never raises.
+    """
+    decision = run_hook(_read_stdin(), Path.cwd())
+    if decision:
+        try:
+            sys.stdout.write(decision + "\n")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+
+def _read_stdin() -> str:
+    """The hook's JSON from stdin, decoded as UTF-8; never raises."""
+    try:
+        return sys.stdin.buffer.read().decode("utf-8", "replace")
+    except Exception:
+        try:
+            return sys.stdin.read()
+        except Exception:
+            return ""
+
+
+# --- .claude/settings.json -----------------------------------------------------------------
+
+
+def guard_program(command: object) -> str | None:
+    """The program of a hook command that runs the guard, or None if it does not run it.
+
+    A guard command is ``<program> cron guard`` whose program is ``cc-hub`` or a path to it
+    (``cc-hub.exe`` on Windows), bare or quoted; the program is returned without its quotes.
+    """
+    if not isinstance(command, str):
+        return None
+    command = command.strip()
+    if not command.endswith(GUARD_SUFFIX):
+        return None
+    program = command[: -len(GUARD_SUFFIX)].strip()
+    if len(program) >= 2 and program[0] == program[-1] and program[0] in "\"'":
+        program = program[1:-1]
+    name = re.split(r"[\\/]", program)[-1].casefold()
+    return program if name in ("cc-hub", "cc-hub.exe") else None
+
+
+def hook_command(program: str) -> str:
+    """The hook command that runs the guard with the cc-hub at ``program``.
+
+    The path gets forward slashes and double quotes, which Git Bash, sh and cmd all read the
+    same way, so the hook does not depend on the PATH Claude Code runs it with.
+    """
+    path = Path(program).as_posix()
+    if any(char in path for char in UNSAFE_EXEC_CHARS):
+        raise CronError(
+            f"the path of the cc-hub program, {path}, holds a character a shell would expand "
+            '(", $, a backtick or a backslash); install cc-hub in another directory, '
+            "then run cc-hub cron guard-setup again"
+        )
+    return f'"{path}"{GUARD_SUFFIX}'
+
+
+def find_program(*, which=None, argv0: str | None = None) -> str:
+    """The absolute path of cc-hub, with forward slashes: the one on the PATH, else the running
+    program. CronError if neither is a cc-hub."""
+    found = (which or shutil.which)("cc-hub")
+    if not found:
+        arg = sys.argv[0] if argv0 is None else argv0
+        path = os.path.abspath(arg) if arg and arg != "-c" else ""
+        for candidate in (path, path + ".exe") if path else ():
+            if guard_program(f"{candidate}{GUARD_SUFFIX}") and os.path.isfile(candidate):
+                found = candidate
+                break
+    if not found:
+        raise CronError(
+            "cannot find the cc-hub program: it is not on the PATH and this is not it; "
+            "put cc-hub on the PATH, then run cc-hub cron guard-setup again"
+        )
+    return Path(os.path.abspath(found)).as_posix()
+
+
+def guard_hooks(settings: object) -> list[dict]:
+    """The hooks in parsed ``.claude/settings.json`` data that run the guard, under any
+    matcher."""
+    hooks = settings.get("hooks") if isinstance(settings, dict) else None
+    entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [
+        hook
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("hooks"), list)
+        for hook in entry["hooks"]
+        if isinstance(hook, dict) and guard_program(hook.get("command")) is not None
+    ]
+
+
+def installed_programs(hub: Path) -> list[str]:
+    """The programs the guard hooks of the hub's ``.claude/settings.json`` run; [] when there
+    is none, or the file cannot be read."""
+    try:
+        data = json.loads(read_text(Path(hub) / SETTINGS_REL).lstrip("\ufeff"))
+    except (OSError, ValueError):
+        return []
+    return [guard_program(hook["command"]) for hook in guard_hooks(data)]
+
+
 def _invalid(detail: str) -> CronError:
     return CronError(f"{SETTINGS_REL} {detail}; fix it, then run cc-hub cron guard-setup again")
 
 
-def setup(hub: Path) -> bool:
-    """Add the guard hook to ``.claude/settings.json`` (merging, idempotent). True if changed."""
-    settings = Path(hub) / ".claude" / "settings.json"
+def setup(hub: Path, program: str | None = None) -> bool:
+    """Make ``.claude/settings.json`` run the guard with the cc-hub at ``program`` (default:
+    ``find_program()``), merging; True if the file changed.
+
+    A guard hook that is already there, with the bare ``cc-hub`` or another path, gets the new
+    command in place; otherwise a hook is added.
+    """
+    command = hook_command(find_program() if program is None else program)
+    settings = Path(hub) / SETTINGS_REL
     data: dict = {}
     if settings.exists():
-        raw = read_text(settings).lstrip("﻿")
+        raw = read_text(settings).lstrip("\ufeff")
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -273,14 +449,12 @@ def setup(hub: Path) -> bool:
     pretool = hooks.setdefault("PreToolUse", [])
     if not isinstance(pretool, list):
         raise _invalid('has a "hooks.PreToolUse" that is not a list')
-    for entry in pretool:
-        if not isinstance(entry, dict):
-            continue
-        inner = entry.get("hooks")
-        if isinstance(inner, list) and any(
-            isinstance(h, dict) and h.get("command") == HOOK_COMMAND for h in inner
-        ):
-            return False
-    pretool.append({"matcher": "*", "hooks": [{"type": "command", "command": HOOK_COMMAND}]})
+    found = guard_hooks(data)
+    if found and all(hook["command"] == command for hook in found):
+        return False
+    for hook in found:
+        hook["command"] = command
+    if not found:
+        pretool.append({"matcher": "*", "hooks": [{"type": "command", "command": command}]})
     write_text(settings, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return True
