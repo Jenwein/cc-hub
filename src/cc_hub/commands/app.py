@@ -9,6 +9,7 @@ import typer
 
 from cc_hub import apps
 from cc_hub.console import echo_json, fail, resolve_hub, warn
+from cc_hub.crontasks import TaskDef
 
 app_app = typer.Typer(no_args_is_help=True, help="Install and manage apps from taps.")
 
@@ -18,6 +19,20 @@ def _software(reqs: list[apps.Requirement]) -> list[str]:
         f"  {r.name} ({r.bin}): {r.install_line() or 'no install steps for this platform'}"
         for r in reqs
     ]
+
+
+def _task_line(name: str, task: TaskDef) -> str:
+    choice = "default" if task.default else "optional"
+    if task.kind == "exec":
+        line = f"  {name}: {task.schedule} runs `{task.exec}` ({choice}, script, silent)"
+    elif task.kind == "on_demand":
+        line = f"  {name}: on demand ({choice}, {task.session})"
+    else:
+        silent = ", silent" if task.silent else ""
+        line = f"  {name}: {task.schedule} ({choice}, {task.session}{silent})"
+    if task.allow:
+        line += f" allow: {', '.join(task.allow)}"
+    return line
 
 
 def overview(plan: apps.AppPlan) -> list[str]:
@@ -30,8 +45,7 @@ def overview(plan: apps.AppPlan) -> list[str]:
     if plan.crons:
         lines.append("scheduled tasks:")
         for task, cron in sorted(plan.crons.items()):
-            kind = "default" if cron["default"] else "optional"
-            lines.append(f"  hub:{m.name}/{task}: {cron['schedule']} ({kind}, {cron['session']})")
+            lines.append(_task_line(f"hub:{m.name}/{task}", cron))
     else:
         lines.append("scheduled tasks: none")
     lines.append("setup steps: " + ("SETUP.md" if plan.has_setup else "none"))
@@ -211,6 +225,8 @@ def remove_cmd(
             typer.echo(f"remove apps/{name}{linked}")
             typer.echo("data kept: " + (", ".join(plan.data_dirs) or "none"))
             typer.echo("scheduled tasks to unregister: " + (", ".join(plan.cron_tasks) or "none"))
+            overrides = ", ".join(plan.overrides) + " (removed from hub.toml)"
+            typer.echo("overrides: " + (overrides if plan.overrides else "none"))
             typer.echo("software it used: " + (", ".join(r.name for r in plan.software) or "none"))
             if plan.remove_md:
                 typer.echo("REMOVE.md:")

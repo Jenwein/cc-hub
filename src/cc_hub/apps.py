@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 
 import tomli_w
 
-from cc_hub import __version__, gitops, manifest, taps
+from cc_hub import __version__, cronoverrides, gitops, manifest, taps
 from cc_hub.applock import (
     LOCK_FILE,
     Lock,
@@ -30,13 +30,13 @@ from cc_hub.applock import (
     to_tilde,
 )
 from cc_hub.commands.link import POINTERS, sync_skill_links
+from cc_hub.crontasks import CronError, TaskDef, parse_task
 from cc_hub.encoding import read_text, write_text
-from cc_hub.hub import hub_name
+from cc_hub.hub import HUB_FILE, hub_name
 from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link, rmtree
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 VERSION = re.compile(r"^\d+(?:\.\d+){0,2}$")
-CRON = re.compile(r"^---\n(?P<head>.*?)\n---\n(?P<body>.*)$", re.S)
 NAME_RULE = (
     "lowercase letters, digits and hyphens, starting with a letter or digit, "
     "at most 64 characters"
@@ -256,22 +256,11 @@ def parse_manifest(text: str, *, dirname: str) -> AppManifest:
     )
 
 
-def parse_cron(text: str, *, where: str) -> dict:
-    m = CRON.match(text.replace("\r\n", "\n"))
-    if not m:
-        raise AppError(f"{where}: needs a frontmatter block between --- lines")
-    fields: dict[str, str] = {}
-    for line in m.group("head").splitlines():
-        key, sep, value = line.partition(":")
-        if sep:
-            fields[key.strip()] = value.split("#", 1)[0].strip().strip('"')
-    if not fields.get("schedule"):
-        raise AppError(f"{where}: schedule is required")
-    return {
-        "schedule": fields["schedule"],
-        "default": fields.get("default", "false") == "true",
-        "session": fields.get("session", "reuse"),
-    }
+def parse_cron(text: str, *, where: str) -> TaskDef:
+    try:
+        return parse_task(text, where=where)
+    except CronError as exc:
+        raise AppError(str(exc)) from exc
 
 
 HUB_ERRORS: tuple[type[Exception], ...] = (
@@ -354,7 +343,7 @@ class AppPlan:
     manifest: AppManifest
     source: GitSource | DirSource
     skills: list[str]
-    crons: dict[str, dict]
+    crons: dict[str, TaskDef]
     scripts: list[str]
     seed: list[str]  # hub-relative paths
     has_setup: bool
@@ -908,6 +897,12 @@ class RemovePlan:
     cron_tasks: list[str]
     software: list[Requirement]
     remove_md: str
+    overrides: list[str] = field(default_factory=list)  # keys of hub.toml's [cron."<app>/<task>"]
+
+
+def _override_keys(hub: Path, app: str) -> list[str]:
+    """The tasks of `app` that hub.toml holds a [cron."<app>/<task>"] override for."""
+    return sorted(key for key in cronoverrides.load(hub) if key.startswith(f"{app}/"))
 
 
 def plan_remove(hub: Path, name: str) -> RemovePlan:
@@ -923,10 +918,40 @@ def plan_remove(hub: Path, name: str) -> RemovePlan:
         remove_md = (app_dir / "REMOVE.md").read_bytes().decode("utf-8", errors="replace")
     except OSError:
         remove_md = ""
+    try:
+        overrides = _override_keys(hub, name)
+    except (OSError, ValueError, CronError):
+        overrides = []  # an unreadable hub.toml is for doctor to report, not a reason to refuse
     return RemovePlan(
         name, "link" in entry, m.data_dirs if m else [], [f"hub:{name}/{t}" for t in tasks],
-        m.requires if m else [], remove_md,
+        m.requires if m else [], remove_md, overrides,
     )
+
+
+def _drop_overrides(hub: Path, app: str) -> tuple[bool, str | None]:
+    """Remove `app`'s overrides from hub.toml: whether it changed, and a warning if it could not.
+
+    The new text is worked out in full before anything is written, so hub.toml either loses all
+    of them or none.
+    """
+    try:
+        keys = _override_keys(hub, app)
+        if not keys:
+            return False, None
+        path = Path(hub) / HUB_FILE
+        old = path.read_bytes().decode("utf-8")  # read_text would turn CRLF into LF
+        new = old
+        for key in keys:
+            new = cronoverrides.apply(new, key, None)
+        write_text(path, new)
+    except FileNotFoundError:
+        return False, None
+    except (OSError, ValueError, CronError) as exc:
+        return False, (
+            f"{HUB_FILE}: could not drop the overrides of {app}'s tasks ({exc}); "
+            f'delete any [cron."{app}/<task>"] tables by hand'
+        )
+    return True, None
 
 
 def apply_remove(hub: Path, name: str) -> list[str]:
@@ -945,8 +970,12 @@ def apply_remove(hub: Path, name: str) -> list[str]:
         if states.pop(name, None) is not None:
             save_state(hub, states)
         warnings = relink(hub)
-        warning = gitops.commit_paths(hub, [LOCK_FILE], f"cc-hub: app remove {name}")
-    return warnings + ([warning] if warning else [])
+        paths = [LOCK_FILE]
+        changed, dropped = _drop_overrides(hub, name)
+        if changed:
+            paths.append(HUB_FILE)  # only then: the user's other edits to hub.toml stay theirs
+        warning = gitops.commit_paths(hub, paths, f"cc-hub: app remove {name}")
+    return warnings + [w for w in (dropped, warning) if w]
 
 
 @dataclass

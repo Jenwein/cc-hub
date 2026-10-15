@@ -156,6 +156,17 @@ def test_update_edits_hub_toml_in_place(hub: Path) -> None:
     assert data["hub"]["template_version"] == "9.9.9"
 
 
+def test_update_keeps_cron_overrides_and_comments(hub: Path) -> None:
+    path = hub / "hub.toml"
+    text = path.read_text(encoding="utf-8").replace("[memory]", "# my note\n[memory]")
+    text += '\n[cron."ledger/prices"]  # off for now\nenabled = false\n'
+    path.write_text(text, encoding="utf-8", newline="\n")
+    update_hub(hub, version="9.9.9")
+    after = path.read_text(encoding="utf-8")
+    expected = text.replace(f'template_version = "{__version__}"', 'template_version = "9.9.9"')
+    assert after == expected
+
+
 def test_update_adds_a_missing_table(hub: Path) -> None:
     import tomllib
 

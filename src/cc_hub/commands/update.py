@@ -96,6 +96,8 @@ def edit_config_text(text: str, current: dict, merged: dict) -> str:
     appended: list[str] = []
     inserts: dict[int, list[str]] = {}
     for table, values in merged.items():
+        if values == current.get(table):
+            continue  # unchanged, including tables _HEADER cannot see, like [cron."a/b"]
         if not isinstance(values, dict) or table not in headers:
             if isinstance(values, dict):
                 appended += ["", f"[{table}]"]

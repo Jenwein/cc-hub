@@ -18,6 +18,8 @@
 
 ## 命令
 
+表里 `<…>` 是必须给出的值，`[…]` 是可选项，`a|b` 列出一组命令里的子命令。
+
 | 命令 | 用途 |
 |---|---|
 | `cc-hub init [dir]` | 播种总站，已有文件不覆盖 |
@@ -27,9 +29,20 @@
 | `cc-hub link <skills-dir>` | 把总站的每个 skill 链接进 agent 的 skills 目录 |
 | `cc-hub tap add\|list\|remove` | 登记放应用的 git 仓库（tap） |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | 从 tap 安装、升级、卸载应用 |
+| `cc-hub cron list\|set\|reset\|wake\|guard-setup` | 定时任务：列出、改时间、唤醒按需任务、限权任务的安全带 |
 | `cc-hub feedback [--app NAME] [--json]` | 反馈问题的去处和环境信息，不发送任何东西 |
 | `cc-hub where` | 打印总站目录和包的安装位置 |
 | `cc-hub version` | 打印版本号 |
+
+例子：
+
+    cc-hub cron list                                # 列出所有定时任务和实际生效的时间
+    cc-hub cron set plans/morning "0 7 * * *"       # 让 plans 应用的 morning 任务每天 07:00 运行
+    cc-hub cron set ledger/prices --off             # 关掉一个任务（--on 重新打开）
+    cc-hub cron reset plans/morning                 # 回到应用定义文件里的时间
+    cc-hub cron wake mail/triage                    # 立即运行一个按需任务，通常由脚本调用
+
+cron 表达式要加引号，否则会被 shell 拆开。总站自带的任务名是 `cron/<名>.md` 的文件名（不含 `.md`），应用的任务名是 `<应用>/<任务>`。你设的时间存在 `hub.toml` 里，`cc-hub update` 和应用升级都不会改掉；`set` 和 `reset` 会打印在 cc-connect 里重新登记这个任务的步骤，由 agent 执行。平时直接跟 agent 说就行。`cc-hub cron guard-setup` 在 Claude Code 上装好限权任务的安全带（见 [docs/cc-connect.md](docs/cc-connect.md)）。
 
 ## 总站布局
 
@@ -39,7 +52,7 @@
     ├── MEMORY.md  memory/YYYY-MM-DD.md               记忆
     ├── skills/  cron/  scripts/                      skills、定时任务、你的脚本
     ├── apps/  apps.lock                              已安装的应用及其记录
-    └── hub.toml                                      配置
+    └── hub.toml                                      配置，以及你设的定时任务时间
 
 `cc-hub update` 只替换框架拥有的文件：`AGENTS.md` 结尾标记以上的部分、`BOOTSTRAP.md`、`skills/hub-*`、`cron/README.md`、`cron/memory-consolidate.md`、`.gitignore` 和 `.gitattributes`。`apps/` 和 `apps.lock` 由 `cc-hub app` 管理；应用声明的数据目录归你。其余都归你，包括你或 cc-connect 写在 `AGENTS.md` 结尾标记以下的内容。
 
