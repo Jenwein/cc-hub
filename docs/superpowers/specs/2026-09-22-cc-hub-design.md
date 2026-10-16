@@ -1,6 +1,6 @@
 # cc-hub 设计规格
 
-适用版本：0.6.0
+适用版本：0.7.0
 
 ---
 
@@ -30,7 +30,7 @@ cc-hub 的职责有三件：
 - **agent 无关**：总站不带任何 agent 专属文件。指向总站的指针由 agent 首次运行时按自己的生态生成（`hub-adapt`）。
 - **bot 无关**：几个 bot、几个 agent、谁连谁，都是 cc-connect 的配置。
 - **框架可升级，用户文件永不被覆盖**：所有权按清单判定，`update` 只碰清单里的框架文件；应用命令只碰应用自己的目录。
-- **只搬文件，不执行**：cc-hub 对应用只做复制、链接和读取 `app.toml`。应用里的指令、脚本和安装命令只由 agent 执行，执行安装命令要经用户批准。
+- **只搬文件，不执行**：cc-hub 对应用只做复制、链接和读取 `app.toml`。应用里的指令、脚本和安装命令只由 agent 执行，执行安装命令要经用户批准。唯一的例外是报告（§4.6）：用户在这台机器上批准过的报告命令，由 cc-hub 在出报告时运行。
 - **先看后做**：安装、升级、卸载应用都分两步，先打印将要发生的事，确认后加 `--yes` 才执行。
 - **可回滚、可迁移**：总站是 git 仓库，谁改谁提交；应用代码不进总站的 git，换机器时按 `apps.lock` 恢复。
 - **小**：Python 包 `cc-hub`，用 `uv tool install` 安装；`init` 播种，`doctor` 体检，`update` 升级。框架拥有的文件用英文，用户文件语言不限。
@@ -50,13 +50,14 @@ cc-hub 的职责有三件：
 ├── skills/<name>/SKILL.md  混合              hub- 前缀的归框架，其余归用户
 ├── cron/                   混合              README.md 与内置任务归框架，其余归用户
 ├── scripts/                用户              用户和 agent 自己写的脚本
+├── reports/<年>/…          cc-hub 维护       已发出的报告，每份一个文件，进 git（§4.6）
 ├── apps/<name>/            应用              已安装的应用，不进 git（§8）
 ├── apps.lock               cc-hub 维护       已登记的 tap 和已安装的应用，进 git
 ├── <数据目录>/             用户              应用声明的数据目录，如 ledger/；安装时播种，之后归用户
-├── hub.toml                框架管结构        值归用户，含定时任务的时间覆盖；update 只合并新键和改版本号
+├── hub.toml                框架管结构        值归用户，含定时任务的时间覆盖和报告设置；update 只合并新键和改版本号
 ├── .gitignore              框架
 ├── .gitattributes          框架              `* -text`：git 不转换换行符
-├── .cc-hub/                派生              backups/、taps/、apps-state.toml、临时目录、锁文件
+├── .cc-hub/                派生              backups/、taps/、apps-state.toml、reports/（批准、留言、草稿、运行记录）、临时目录、锁文件
 ├── .cc-connect/            派生              cc-connect 自己建的附件目录
 └── CLAUDE.md .claude/ .agents/ .codex/   派生   agent 按自身生态生成的指针
 ```
@@ -78,11 +79,11 @@ cc-hub 的职责有三件：
 
 唯一常驻的规程。各节顺序就是 agent 每次会话的执行顺序：
 
-1. **你在哪**：一句话定义总站，加文件地图（含 `apps/`、`apps.lock` 和应用的数据目录）。
+1. **你在哪**：一句话定义总站，加文件地图（含 `apps/`、`apps.lock`、`reports/` 和应用的数据目录）。
 2. **会话开始**：`BOOTSTRAP.md` 存在就先执行它；读 `IDENTITY.md`、`SOUL.md`、`USER.md`、`MEMORY.md`；跑 `cc-hub memory recent`；自己生态的指针缺失就跑 `hub-adapt`；存在 `apps.lock` 时跑 `cc-hub app list`，若是和用户本人的私聊，按 `hub-apps` 设置每个 `pending` 的应用；读 `AGENTS.local.md`。
 3. **记忆**：做完有结果的事、做出决策、了解到这台机器的事实，就 `cc-hub memory log`；用户表达的稳定偏好写进 `USER.md`；`MEMORY.md` 只在整理任务或用户明确要求时修改；群聊里不复述 `USER.md`、`MEMORY.md` 的私人内容。
 4. **Git**：做完一件改了总站文件的事，就提交这些文件和当天的 `memory/`，提交信息一行写清改了什么；用户要撤销时用 git 找回旧版本；不改写历史（不 `reset --hard`、不 `rebase`、不强推）；推送只在整理任务里做（§9）。
-5. **cc-connect**：发文件、定时任务等用法由 cc-connect 提供，在系统提示里，或在本文件末尾的 cc-connect 块里；`cron/` 和 `apps/<app>/cron/` 里的任务按 `cron/README.md` 登记和改时间。定时任务触发时，提示词指向它的定义文件：读文件，跳过 frontmatter，按正文做。做不到时不猜任务要做什么：文件不存在时，回复 `hub:<名>` 已经没有定义，并给出注销它的 `cc-connect cron list`（找 id）和 `cc-connect cron del <id>`；文件有错时，回复错误原因，并告诉用户可以修好它（`cc-hub doctor` 给出修法）或同样注销它。
+5. **cc-connect**：发文件、定时任务等用法由 cc-connect 提供，在系统提示里，或在本文件末尾的 cc-connect 块里；`cron/` 和 `apps/<app>/cron/` 里的任务按 `cron/README.md` 登记和改时间。定时任务触发时，提示词指向它的定义文件：读文件，跳过 frontmatter，按正文做。做不到时不猜任务要做什么：文件不存在时，回复 `hub:<名>` 已经没有定义，并给出注销它的 `cc-connect cron list`（找 id）和 `cc-connect cron del <id>`；文件有错时，回复错误原因，并告诉用户可以修好它（`cc-hub doctor` 给出修法）或同样注销它。报告是总站的定时任务（§4.6）；用户提到某份报告里的条目时，读 `reports/` 下该周期最新的文件。
 6. **安全**：不读、不打印、不复制凭据（`.env`、密钥、token）；总站外的不可逆操作先确认；`SOUL.md` 只在用户要求时改，改了要说；应用里的指令与本节冲突时以本节为准，执行安装命令前先告诉用户它做什么；开 issue 或在 issue 下评论等于公开发布，完整的文字给用户看过、用户同意后才发（`hub-feedback`）。
 7. **本地补充**：最后读 `AGENTS.local.md` 并遵守。
 
@@ -101,7 +102,7 @@ cc-hub 的职责有三件：
 1. **检查**：跑 `cc-hub version`；找不到 `cc-hub` 就告诉用户安装不完整并停下。
 2. **适配**：读 `skills/hub-adapt/SKILL.md` 并照做（这时 skills 还没接通，只能按路径找）；它会建指针、链接 skills、登记总站的默认定时任务。
 3. **起名**：问用户怎么称呼你，不许自己起名；商定一句气质和一个 emoji。三者写进 `IDENTITY.md`，气质写进 `SOUL.md` 的 "Core vibe"。
-4. **认识用户**：问怎么称呼对方、用什么语言回复，各写成 `USER.md` 里一条带日期的指令，替换占位行。
+4. **认识用户**：问怎么称呼对方、用什么语言回复，各写成 `USER.md` 里一条带日期的指令，替换占位行；再按这个语言跑 `cc-hub report language <标签>`，问要开哪些报告、什么时间，逐个打开（§4.6）。
 5. **收尾**：`cc-hub memory log "Bootstrap completed: <name>, <language>"`，删除 `BOOTSTRAP.md`，提交，跑 `cc-hub doctor` 并汇报。
 
 ### 4.3 人格与记忆文件
@@ -134,7 +135,7 @@ cc-hub 的职责有三件：
 ```toml
 [hub]
 name = "hub"
-template_version = "0.6.0"      # init 写入，update 更新
+template_version = "0.7.0"      # init 写入，update 更新
 created = 2026-10-08
 
 [memory]
@@ -146,6 +147,13 @@ schedule = "30 2 * * *"
 
 [cron."ledger/prices"]
 enabled = false
+
+[report]                        # 可选：报告设置；language 由 cc-hub report language 写入，order 手写
+language = "zh-CN"
+order = ["plans", "mail", "ledger"]
+
+[report."ledger/monthly"]       # 可选：关掉应用的某一段，由 cc-hub report section 写入
+enabled = false
 ```
 
 `[cron."<任务>"]` 是用户对定时任务的覆盖（§4.5、§5.9），模板里没有：
@@ -154,6 +162,13 @@ enabled = false
 - `schedule`：五段式 cron 表达式；`enabled`：`false` 关掉，`true` 可以打开 `default: false` 的任务。
 - 实际生效的时间：有覆盖用覆盖，否则用定义文件里的；是否登记：有 `enabled` 用它，否则看定义文件的 `default`。
 - `cron set`、`cron reset` 只原地编辑对应的一个表，文件的其他内容（注释、排版、换行符）一个字节都不动；改完解析回来与预期不一致时拒绝，提示手工编辑。`update` 不碰这些表，`app remove --yes` 删掉该应用的覆盖（§8.7）。
+
+`[report]` 是报告的设置（§4.6、§5.10），模板里没有：
+
+- `language`：语言标签（如 `zh-CN`），决定 cc-hub 写的标题和出错说明用哪种语言；没设置时报告用英文，`report list --json` 给出 `null`。
+- `order`：应用名的列表，决定段落的顺序；没列出的应用排在后面，按应用名。没有命令写它，用户手写。
+- `[report."<应用>/<周期>"]`：`enabled = false` 把这个应用在这个周期里的那一段关掉；打开就是删掉这张表。
+- `report language`、`report section` 和 `cron set` 一样只原地编辑对应的键或表；`update` 不碰这些设置，`app remove --yes` 删掉该应用的段落设置（§8.7）。
 
 ### 4.5 cron 任务定义
 
@@ -181,29 +196,58 @@ Scheduled task hub:memory-consolidate: follow the body of cron/memory-consolidat
 **登记**：调度属于 cc-connect，任务从哪个聊天登记，结果就回到哪个聊天，所以登记只在和用户本人的私聊里做，描述为 `hub:<任务名>`。总站的任务由 `hub-adapt` 登记（§7），应用的由 `hub-apps` 在设置时登记（§8.5），两者都按 `cron/README.md` 做：
 
 1. 跑 `cc-hub cron list --json` 和 `cc-connect cron list`。`cron list --json` 每个任务一行，字段 `name`、`source`（`hub` 或应用名）、`file`、`default`、`file_schedule`、`schedule`（实际生效的时间）、`overridden`、`enabled`（是否该登记）、`session`、`desc`、`prompt`、`command`、`error`。有 `error` 的行 `enabled` 为 false，`schedule` 和 `command` 为 null。
-2. 有 `error` 的行，已登记的任务不动，把问题告诉用户（`cc-hub doctor` 给出修法）：它的 `enabled: false` 只表示现在登记不了，删掉会让一个正常运行的任务因为（比如）覆盖里的笔误停掉。没有 `error`、`enabled: false` 的，已登记就删掉；该登记而没登记的，登记；已登记的用 `cc-connect cron info <id>` 和该行 `command` 要设的值比对（时间、提示词、`session`），任何一项不同就删掉重登。属于本次范围（总站：`hub:` 后不含 `/`；应用：`hub:<应用>/…`）却没有对应行的已登记任务（定义文件已删）删掉；同一个描述登记了不止一次、行没有 `error` 的，删掉重登一次。
+2. 有 `error` 的行，已登记的任务不动，把问题告诉用户（`cc-hub doctor` 给出修法）：它的 `enabled: false` 只表示现在登记不了，删掉会让一个正常运行的任务因为（比如）覆盖里的笔误停掉。没有 `error`、`enabled: false` 的，已登记就删掉；该登记而没登记的，登记；已登记的用 `cc-connect cron info <id>` 和该行 `command` 要设的值比对（时间、提示词、`session`、是否静默：`cc-connect cron info <id> silent` 要输出 `true`），任何一项不同就删掉重登。属于本次范围（总站：`hub:` 后不含 `/`；应用：`hub:<应用>/…`）却没有对应行的已登记任务（定义文件已删）删掉；同一个描述登记了不止一次、行没有 `error` 的，删掉重登一次。
 3. 登记就是执行该行的 `command`：
 
 ```
-cc-connect cron add --cron "<schedule>" --prompt "<指针>" --session-mode <session> --desc "hub:<name>"
+cc-connect cron add --cron "<schedule>" --prompt "<指针>" --session-mode <session> --desc "hub:<name>" --silent
 ```
+
+登记一律带 `--silent`：cc-connect 触发任务时默认先在聊天里发一行"⏰ <描述>"，带了它，聊天里只有 agent 的回复，回复 `NO_REPLY` 则什么都没有。需要让用户知道"任务开始了"的应用，自己在回复里说。
 
 定义文件不存在时（例如任务已删而登记还在），任务触发后 agent 不猜要做什么，只回报这个任务已经没有定义，并给出注销它的步骤；定义文件有错时回报错误原因，告诉用户可以修好它或注销它（§4.1）。
 
-内置 `cron/memory-consolidate.md`，每天 03:00，`new_per_run`，执行 `hub-memory` 的整理流程并汇报是否已推送。`cron/README.md` 说明格式、触发时怎么做、登记和比对、改时间。
+内置 `cron/memory-consolidate.md`，每天 03:00，`new_per_run`，执行 `hub-memory` 的整理流程，写一段话说明改了什么、是否已推送：推送失败就直接回复这段话，否则用 `cc-hub report note daily` 留给日报，留言被带走就回复 `NO_REPLY`，没有报告开着时照旧回复这段话。另有五个报告任务（§4.6）。`cron/README.md` 说明格式、触发时怎么做、登记和比对、改时间、报告和留言。
+
+### 4.6 报告
+
+按日、周、月、季、年出一份报告发到用户的私聊，已安装的应用按周期往里加自己的一段，后台任务把结果留给下一份报告，不再各自发消息。设计与理由见 `docs/superpowers/specs/2026-10-16-reports-design.md`，这里写现在的做法。
+
+**周期和开关。** 五个内置定时任务 `cron/report-daily.md`、`report-weekly.md`、`report-monthly.md`、`report-quarterly.md`、`report-yearly.md`，框架拥有，`default: false`、`new_per_run`，格式同 §4.5；默认时间依次是每天 08:00、周日 20:00、每月 1 号 09:00、1/4/7/10 月 1 号 09:10、1 月 1 号 09:20。开关和改时间就是 `cc-hub cron set report-<周期> --on` 或 `"<表达式>"`（§5.9）。首次设置总站时（`BOOTSTRAP.md`）问用户要开哪些，应用设置时（§8.5）发现它供稿的周期没开就问要不要打开。
+
+**应用供稿。** 应用在 `reports/<周期>.md` 里声明一段（§8.2）：frontmatter 有 `command` 的是脚本段，cc-hub 在总站根目录运行这条命令，标准输出原样成为这一段的正文；没有 `command` 的是指示段，正文是给 agent 的指示，由 agent 照着写。段落的标题由 cc-hub 加（应用名，或 `title`）。输出为空表示这一期没有这一段。用户可以按应用关掉某一期的某一段（`cc-hub report section`，§4.4）。
+
+**批准。** 脚本段命令是 cc-hub 运行应用提供的字符串的唯一情况，所以每条都要用户在这台机器上批准（`cc-hub report approve <应用>`，由 `hub-apps` 的设置流程在用户同意后执行，§8.5）。批准记的是命令的确切文字，存在 `.cc-hub/reports/state.toml`（每台机器自己的，不进 git），命令变了就失效。没批准的命令不运行，这一段换成一行说明和批准的办法。指示段不需要批准：它是给 agent 读的文字，和应用的 skill 一样。
+
+**一份报告怎么出。** 报告任务（`cron/report-<周期>.md` 的正文）触发时，agent 依次：
+
+1. `cc-hub report plan <周期> --json`：列出这一期的段落和留言数；`empty` 为真就回复 `NO_REPLY`，结束。
+2. 对每个指示段，照指示写好正文，用 `cc-hub report put <周期> <应用>` 暂存。
+3. `cc-hub report send <周期>`：cc-hub 运行脚本段、读暂存的指示段正文和留言，拼成报告，用 `cc-connect send` 发到当前私聊，存档并提交，清掉带走的留言和草稿。它只打印发了几段、几条留言，不打印报告内容，所以脚本段的输出不进 agent 的上下文。
+4. agent 回复 `NO_REPLY`。
+
+拼装、超时和重复发送的规则见 §5.10。
+
+**留言。** 后台任务做完没有紧急的话要说时，用 `cc-hub report note <周期> --from <来源> -- "<文字>"` 留一句话给下一份报告：该周期的报告没开就转给下一份开着的、周期更长的；一份都没开时不保存，退出码 3，任务照旧自己回复。出错、要用户马上处理的事不留言，直接回复。
+
+**存档。** 发出的报告存成 `reports/<年>/<日期>-<周期>.md`（同一天再发加 `-2`），随总站提交。用户回复报告里的某一条时，agent 读该周期最新的存档来理解指的是什么；写指示段的 agent 不读存档（存档里有脚本段的内容，而报告任务是无人值守的）。
+
+**语言。** cc-hub 写的文字（报告标题、出错说明、"留言"小标题）直接到达用户，agent 没机会翻译，所以总站要知道用户的语言：`hub.toml` 的 `[report] language`（§4.4），内置中文和英文，其他语言用英文。脚本段从环境变量 `CC_HUB_LANGUAGE` 拿到语言；指示段由 agent 用用户的语言写。
+
+**例外。** 本节是 §2 "只搬文件，不执行"、§5.9 "cc-hub 自己不调用 cc-connect" 和 §8.9 "cc-hub 从不执行应用提供的字符串" 的例外所在：cc-hub 运行用户批准过的报告命令，并为 `report send` 调用 `cc-connect send`，仅此两处；登记和删除定时任务仍然由 agent 做。
 
 ## 5. CLI
 
-命令：`init`、`doctor`、`update`、`memory log|search|recent`、`link`、`tap add|list|remove`、`app search|install|list|update|remove|sync|setup-state`、`cron list|set|reset`、`feedback`、`where`、`version`。下面用 `<…>` 表示必填的值，`[…]` 表示可选。
+命令：`init`、`doctor`、`update`、`memory log|search|recent`、`link`、`tap add|list|remove`、`app search|install|list|update|remove|sync|setup-state`、`cron list|set|reset`、`report list|plan|put|send|note|section|language|approve`、`feedback`、`where`、`version`。下面用 `<…>` 表示必填的值，`[…]` 表示可选。
 
 ### 5.1 通用约定
 
 - **定位总站**，按顺序：`--hub <path>`、环境变量 `CC_HUB_DIR`、从当前目录向上找 `hub.toml`、`~/.cc-hub`（存在 `hub.toml` 时）。找不到退出 1，并列出这四种方式。
-- **输出**：给 agent 读的命令（`memory`、`link`、`tap`、`app`、`cron`、`feedback`）输出纯文本，查询类命令支持 `--json`。给人看的 `init`、`doctor`、`update` 用 rich 表格。错误写 stderr，退出 1。
+- **输出**：给 agent 读的命令（`memory`、`link`、`tap`、`app`、`cron`、`report`、`feedback`）输出纯文本，查询类命令支持 `--json`。给人看的 `init`、`doctor`、`update` 用 rich 表格。错误写 stderr，退出 1。
 - **依赖**：typer、rich、tomli-w。Python ≥ 3.11（`tomllib` 在标准库）。git 命令行用于总站提交和 tap。
 - **写文件**：一律先写同目录临时文件再 `os.replace`。
 - **提交**：总站是 git 仓库时，改动总站的命令只提交自己改的路径（`git commit -- <路径>`），提交信息以 `cc-hub: ` 开头（§9）。提交失败（没有 git 身份、索引被别的进程锁住）只打印警告，命令照常成功；遇到索引锁时重试一次。
-- **互斥**：同一时间只允许一个 `tap`、`app` 或 `cron set|reset` 命令修改总站，用 `.cc-hub/` 下的锁文件实现；另一个直接报错退出，提示稍后重试。
+- **互斥**：同一时间只允许一个 `tap`、`app`、`cron set|reset` 或 `report section|language` 命令修改总站，用 `.cc-hub/` 下的锁文件实现；另一个直接报错退出，提示稍后重试。
 
 ### 5.2 init
 
@@ -229,6 +273,7 @@ cc-connect cron add --cron "<schedule>" --prompt "<指针>" --session-mode <sess
 | pointers | 对本机装了的、且已在总站里设置过的 agent，检查指令文件和每个 skill 的链接，包括已安装应用的 skills（见 §7） |
 | apps | `apps.lock` 可解析（否则 fail）；记录里的应用都在 `apps/` 下（缺了提示 `cc-hub app sync`）；链接安装的源目录存在；cc-hub 版本满足各应用的 `min_hub`；`requires` 里的可执行文件在 PATH 上（缺了给出本平台的安装命令）；有 `pending` 或 `waiting` 的应用 |
 | cron | 任务定义有错（总站的提示修文件，应用的提示修文件或 `cc-hub app update`）；`hub.toml` 里的覆盖指向不存在的任务（应用卸载后残留）或表达式不合法（提示 `cc-hub cron reset <任务>`）；只报 warn |
+| reports | 各应用 `reports/*.md` 的周期、编码和 frontmatter 合法（否则提示修文件或 `cc-hub app update`）；没关掉的脚本段命令在这台机器上已批准（没批准的提示 `cc-hub report approve <应用>`）；`hub.toml` 的 `[report]` 能解析，`[report."<应用>/<周期>"]` 指向存在的段（应用卸载后残留的提示 `cc-hub report section <应用> <周期> --on`）；只报 warn；`hub.toml` 或 `apps.lock` 读不了时只指向 `hub-toml`、`apps` 检查 |
 | git | 总站是 git 仓库、有可用的 git 身份、没有未提交的改动、配置了远程（没有远程就没有备份）；只报 warn |
 | nested-git | 总站是否在别的 git 仓库内 |
 
@@ -302,7 +347,7 @@ cc-hub app setup-state ledger waiting --note "user installs beancount"
 
 `app install <tap>/<app> [--ref REF] [--yes]`
 
-- 不带 `--yes`：拉取远程 tap，把 REF（默认是默认分支的最新提交）解析成 commit，读取该 commit 下的应用并校验（§8.3），打印概览后退出，不改动总站。概览包括：来源和 commit、版本、描述、数据目录、`requires` 及本平台的安装命令、`scripts/` 清单、定时任务及其时间、有没有 `SETUP.md` 和 `REMOVE.md`；最后一行是确认用的完整命令，带 `--ref <commit> --yes`。
+- 不带 `--yes`：拉取远程 tap，把 REF（默认是默认分支的最新提交）解析成 commit，读取该 commit 下的应用并校验（§8.3），打印概览后退出，不改动总站。概览包括：来源和 commit、版本、描述、数据目录、`requires` 及本平台的安装命令、`scripts/` 清单、定时任务及其时间、报告段（周期，脚本段附命令）、有没有 `SETUP.md` 和 `REMOVE.md`；最后一行是确认用的完整命令，带 `--ref <commit> --yes`。
 - 带 `--yes`：不再拉取，按 REF（没给时用本地克隆当前的默认分支）安装（§8.4）。
 
 `app install <path> --link [--yes]`：从本机一个含 `app.toml` 的目录安装，`apps/<app>` 是指向它的目录链接，改动即时生效，用于开发自己的应用；概览和确认同上。路径不带 `--link` 时报错，并提示把所在仓库登记成 tap。
@@ -311,7 +356,7 @@ cc-hub app setup-state ledger waiting --note "user installs beancount"
 
 `app update <name>|--all [--ref REF] [--yes]`
 
-- 不带 `--yes`：拉取 tap，列出从已安装 commit 到新 commit 之间应用目录里改动的文件；`app.toml`、`SETUP.md`、`REMOVE.md`、`skills/`、`scripts/`、`cron/` 下的改动给出完整 diff，新增的 `requires` 单独列出；同时列出 `apps/<name>/` 里与已安装 commit 不一致的文件（本地改动）。最后一行是确认用的完整命令。不改动总站。
+- 不带 `--yes`：拉取 tap，列出从已安装 commit 到新 commit 之间应用目录里改动的文件；`app.toml`、`SETUP.md`、`REMOVE.md`、`skills/`、`scripts/`、`cron/`、`reports/` 下的改动给出完整 diff，新增的 `requires` 单独列出；同时列出 `apps/<name>/` 里与已安装 commit 不一致的文件（本地改动）。最后一行是确认用的完整命令。不改动总站。
 - 带 `--yes`：不再拉取，执行升级（§8.6）。
 - 应用目录在两个 commit 之间没有改动时（例如 tap 里只改了别的应用或 README），报告已是最新，什么都不做。
 - 链接安装的应用跳过并说明。
@@ -319,7 +364,7 @@ cc-hub app setup-state ledger waiting --note "user installs beancount"
 
 `app remove <name> [--yes]`
 
-- 不带 `--yes`：打印将删除的目录、保留的数据目录、要注销的定时任务（`hub:<name>/*`）、`hub.toml` 里要删掉的该应用的时间覆盖、`requires` 里的软件，以及 `REMOVE.md` 的全文（有的话）。
+- 不带 `--yes`：打印将删除的目录、保留的数据目录、要注销的定时任务（`hub:<name>/*`）、`hub.toml` 里要删掉的该应用的时间覆盖和报告设置、`requires` 里的软件，以及 `REMOVE.md` 的全文（有的话）。
 - 带 `--yes`：执行卸载（§8.7）。
 
 `app sync`：让 `apps/` 与 `apps.lock` 一致。本机没有 git 身份时先同 init 只在总站仓库里设置（clone 不带 `.git/config` 里的身份）。克隆缺少的 tap，按记录的 commit 安装缺少的应用，链接安装的重建链接（源目录不存在就报告），然后对已存在的 skills 目录重新链接。不升级，不播种（数据目录已在总站的 git 里），不需要确认，不提交（它不改动进 git 的文件）。`apps/` 下不在记录里的目录只报告不删除。单个应用失败不影响其它应用。
@@ -335,7 +380,7 @@ cc-hub cron set ledger/prices --off
 cc-hub cron reset plans/morning
 ```
 
-任务名的写法同 §4.4：总站任务用文件名，应用任务用 `<应用>/<任务>`。cc-hub 自己不调用 cc-connect，登记和删除 cc-connect 里的任务由 agent 执行（§4.5）。
+任务名的写法同 §4.4：总站任务用文件名，应用任务用 `<应用>/<任务>`。cc-hub 自己不调用 cc-connect 来登记和删除任务，这由 agent 执行（§4.5）；唯一的例外是发送报告时的 `cc-connect send`（§5.10）。
 
 `cron list [--json]`：总站 `cron/` 和每个已安装应用的任务，每个一行：任务名、实际生效的时间（被覆盖时附上文件里的时间）、是否登记；定义有错的只给出错误。`--json` 的字段见 §4.5。`hub.toml` 不是合法的 TOML 时报错。
 
@@ -345,11 +390,51 @@ cc-hub cron reset plans/morning
 
 `cron guard`：供 `.claude/settings.json` 里的 PreToolUse 钩子调用的入口：读入事件，不输出，退出 0，不做任何判断。它不在帮助里列出；`cli.py` 遇到它时不加载 typer 直接返回，所以每次工具调用只多花很少的时间。
 
-### 5.10 feedback
+### 5.10 report
+
+```
+cc-hub report list
+cc-hub report plan daily
+cc-hub report put daily ledger
+cc-hub report send daily
+cc-hub report note daily --from memory-consolidate -- "merged 3 memories, pushed"
+cc-hub report section ledger monthly --off
+cc-hub report language zh-CN
+cc-hub report approve ledger
+```
+
+周期是 `daily`、`weekly`、`monthly`、`quarterly`、`yearly`，别的值按用法错误拒绝。供稿的约定见 §4.6 和 §8.2，这里是命令。
+
+`report list [--json]`：五个周期各一行（周期、任务名、实际生效的时间、开或关），然后每个段落一行（`<应用>/<周期>`、种类 `command` 或 `instruction`、开或关、脚本段是否已批准）；文件有错的段只给错误。`--json` 给 `language`（没设置为 null）、`periods`、`sections`。
+
+`report plan <周期> [--json]`：这一期的报告会有什么：开着的有效段落（应用、种类、标题、文件、是否已批准）、留言数、时间窗口 `since` 到 `until`（从上一次这个周期的报告运行时起，第一次是一个周期之前，到现在）、语言；没有段落也没有留言时 `empty` 为真。它不运行任何命令。
+
+`report put <周期> <应用> [--text TEXT]`：暂存 agent 为某个指示段写的正文，默认读标准输入。只接受开着的、有效的指示段；脚本段、关掉的段、不存在的段都拒绝。
+
+`report send <周期> [--again]`：
+
+- 在总站根目录运行已批准的脚本段：命令按 POSIX 规则拆成参数，不经 shell；环境变量有 `CC_HUB_DIR`、`CC_HUB_REPORT_PERIOD`、`CC_HUB_REPORT_SINCE`、`CC_HUB_REPORT_UNTIL`（ISO 8601，带时区偏移）和 `CC_HUB_LANGUAGE`；超时 300 秒；输出超过 20000 个字符就截断并加一行说明。命令出错（找不到、退出码非零、超时）时，这一段换成一行"这一段出错了"加错误输出的第一行；没批准的命令不运行，换成一行说明。
+- 拼装：标题 `# <报告名> · <日期>`，各段 `## <标题>`（`order` 列出的应用在前，其余按应用名），最后是 `## 留言`（周期没开的更短周期的留言也并进来，按时间排）。没有内容的段不出现；全空时不发、不存档，只记下这次运行，打印 `nothing to send`。
+- 发送：`cc-connect send -p $CC_PROJECT -s $CC_SESSION_KEY --stdin`，报告走标准输入（§11），60 秒超时。失败时报错退出，什么都不改；错误信息里不含报告的文字。
+- 发出之后：记录这次发送，存档到 `reports/<年>/<日期>-<周期>.md` 并提交（`cc-hub: report <周期>`），清掉带走的留言和草稿。这些步骤的失败只是警告，报告不会因此再发一遍。
+- 只打印发了几段、几条留言（`sent: 3 section(s), 1 note(s)`），不打印报告内容，所以脚本段的输出不进 agent 的上下文。
+- 同一周期同一天已经发过时拒绝（`already sent today`，并清掉为这份不会来的报告写的草稿），除非加 `--again`；同一周期同一时间只有一个 `send`。
+
+`report note <周期> --from <来源> <文字>`：留一句话给下一份报告。`--from` 是调用者的名字（小写字母、数字、`-` 和 `/`，最长 100 个字符，如 `memory-consolidate`、`plans/morning`）。留言放在 `.cc-hub/reports/notes/<周期>.jsonl`（每台机器自己的，不进 git），被带走它的报告发出后清掉。该周期的报告没开时转给周期更长的、第一份开着的（打印 `kept for the weekly report`）；一份都没开时不保存，退出码 3，让任务自己回复。
+
+`report section <应用> <周期> --on|--off`：二选一。`--off` 写 `[report."<应用>/<周期>"] enabled = false`（该段必须存在），`--on` 删掉这张表；提交 `hub.toml`（`cc-hub: report section <应用>/<周期>`）。
+
+`report language <标签>`：校验是语言标签（如 `en`、`zh-CN`），写 `[report] language`，提交（`cc-hub: report language`）。
+
+`report approve <应用>`：把该应用现有的每条脚本段命令的确切文字记为这台机器已批准，记在 `.cc-hub/reports/state.toml`；应用须已安装，没有脚本段时输出 `nothing to approve`。命令后来变了，批准就不再适用，要重新批准。
+
+cc-hub 调用 cc-connect 只有 `report send` 这一处，`cc-connect` 在 agent 进程的 PATH 上找（§11）。
+
+### 5.11 feedback
 
 `feedback [--app NAME] [--json]`：打印反馈去处和一段环境信息，不发送任何东西（§10）。`--json` 输出 `target`（issue 列表地址或 null）、`new_issue_url`、`github_repo`（`owner/repo` 或 null）、`environment`。
 
-### 5.11 where / version
+### 5.12 where / version
 
 `where` 打印总站根目录和包的安装位置；找不到总站时仍打印包位置，退出 1。`version` 打印包版本。
 
@@ -361,7 +446,7 @@ cc-hub cron reset plans/morning
 |---|---|---|
 | `hub-adapt` | 首次运行、换 agent、换机器、增删 skill 后、`doctor` 报指针缺失 | 见 §7 |
 | `hub-memory` | 记东西、找东西、整理记忆 | 何时 `memory log`；`memory search`、`memory recent` 用法；整理流程 |
-| `hub-apps` | 找、装、设置、升级、卸载应用；改应用任务的时间；编写应用 | 见 §8；编写指南放在同目录的 `authoring.md`，也归框架 |
+| `hub-apps` | 找、装、设置、升级、卸载应用；改应用任务的时间；批准应用的报告命令；编写应用 | 见 §8；编写指南放在同目录的 `authoring.md`，也归框架 |
 | `hub-feedback` | cc-hub 或某个应用出了问题，或用户有建议 | 见 §10 |
 
 `hub-memory` 的整理流程：读近 7 天日志；把仍然成立、跨天有用的条目并入 `MEMORY.md` 四节；超预算时合并同类、删去被后来条目推翻或已不成立的条目；`USER.md` 里被新观察取代的行标 `superseded`；写一条 memory log 记录本次整理；提交；总站配置了远程就 `git push`，推送失败时不拉取也不合并，记一条 memory log、提交这条日志，并在汇报里说明。任何记忆文件里都不写凭据。
@@ -375,7 +460,7 @@ cc-hub cron reset plans/morning
 1. **指令**：生态有自己的指令文件，就建它，内容只有导入 `AGENTS.md` 的一行；只读 `AGENTS.md` 的生态什么都不用做。
 2. **skills**：运行 `cc-hub link <自己的 skills 目录>`（§5.6），总站和已安装应用的 skills 一并链接。skills 靠 frontmatter 被发现、正文按需加载，每个 skill 一个目录链接能让 frontmatter、正文和辅助文件都从总站读到。新 skill 一律建在 `skills/<name>/`，增删 skill 后重跑。本次会话开始时 skills 目录还不存在的话，运行时可能要重新加载或开新会话才看得到，告诉用户。
 3. **信任**：运行时若需要一次交互式信任才读这个目录的指令或 skills，明确告诉用户怎么做。
-4. **定时任务**：只在和用户本人的私聊里做。对 `cc-hub cron list --json` 里 `source` 为 `hub` 的每一行，按 `cron/README.md` 做（§4.5）：缺的登记，不一致的删掉重登，关掉的和定义已删的删掉。cc-connect 不可用就记一条 memory log 留待以后。应用的定时任务由 `hub-apps` 登记（§8.5）。
+4. **定时任务**：只在和用户本人的私聊里做。对 `cc-hub cron list --json` 里 `source` 为 `hub` 的每一行，按 `cron/README.md` 做（§4.5）：缺的登记，不一致的（时间、提示词、`session`、是否静默）删掉重登，关掉的和定义已删的删掉。cc-connect 不可用就记一条 memory log 留待以后。应用的定时任务由 `hub-apps` 登记（§8.5）。
 
 权限和沙箱设置归用户和运行时，`hub-adapt` 不改它们。
 
@@ -408,6 +493,7 @@ ledger/                         tap 根目录下的子目录
 ├── REMOVE.md                   可选：卸载前要撤掉的东西（如服务）
 ├── skills/<name>/SKILL.md      可选：每个子目录一个 skill
 ├── cron/<task>.md              可选：定时任务定义，格式同 §4.5
+├── reports/<周期>.md           可选：给总站某个周期的报告供稿的一段（§4.6）
 ├── scripts/                    可选：skills、定时任务和 SETUP 调用的脚本
 └── seed/<数据目录>/…           可选：数据骨架，按总站相对路径摆放
 ```
@@ -446,11 +532,13 @@ windows = "winget install hledger"
 
 **命名规则**：应用名、skill 名、定时任务名、tap 名只用小写字母、数字和连字符，以字母或数字开头，最长 64 个字符；skill 名还不能以 `hub-` 开头（框架 skills 的命名空间）。
 
-**数据目录**：总站下的相对路径，用 `/` 分隔，不含 `..`；每一段只用 `[A-Za-z0-9._-]`，任何一段都不以 `.` 开头、不以点结尾、不是 Windows 设备名（`con`、`prn`、`aux`、`nul`、`com1`-`com9`、`lpt1`-`lpt9`，带不带扩展名都算）——这样 Windows 的 8.3 短名（如 `GIT~1` 就是 `.git`）也进不来；第一段不能是保留名（总站的框架文件和用户文件、`hub.toml`、`apps.lock`、`memory`、`skills`、`cron`、`scripts`、`apps`、`secrets`，以及任何以 `.` 开头的名字）；不能与别的应用的数据目录相同或互相包含。`seed/` 下的每个文件都必须落在本应用声明的某个数据目录里。
+**数据目录**：总站下的相对路径，用 `/` 分隔，不含 `..`；每一段只用 `[A-Za-z0-9._-]`，任何一段都不以 `.` 开头、不以点结尾、不是 Windows 设备名（`con`、`prn`、`aux`、`nul`、`com1`-`com9`、`lpt1`-`lpt9`，带不带扩展名都算）——这样 Windows 的 8.3 短名（如 `GIT~1` 就是 `.git`）也进不来；第一段不能是保留名（总站的框架文件和用户文件、`hub.toml`、`apps.lock`、`memory`、`skills`、`cron`、`reports`、`scripts`、`apps`、`secrets`，以及任何以 `.` 开头的名字）；不能与别的应用的数据目录相同或互相包含。`seed/` 下的每个文件都必须落在本应用声明的某个数据目录里。
 
 **设置和凭据**：个人设置（账户、币种等）放在数据目录里，比如 `ledger/config.toml`，skills 从那里读。数据目录进 git，所以凭据不放在那里，放 `.env` 或 `secrets/`。
 
 **定时任务**：每个任务的正文可以调用应用的脚本。用户可以改任何任务的时间（`cc-hub cron set`），`SETUP.md` 可以在设置时问用户的时间并调用它，这样的应用要写 `min_hub = "0.5.0"`。
+
+**报告段**：`reports/<周期>.md` 给总站某个周期的报告供稿，周期是 `daily`、`weekly`、`monthly`、`quarterly`、`yearly` 之一（§4.6）。frontmatter 有 `command` 的是脚本段，`title` 可选，默认是应用名；没有 `command` 的是指示段，正文写给 agent（英文）。脚本段命令不经 shell，周期、时间窗口和语言从环境变量拿（§5.10）；`command` 的值里有 `#` 时要加双引号，否则空格后的 `#` 起是注释。声明了 `reports/` 的应用要写 `min_hub = "0.7.0"`。
 
 ### 8.3 校验
 
@@ -460,6 +548,7 @@ windows = "winget install hledger"
 - cc-hub 版本满足 `min_hub`；
 - 应用名未被占用（升级时除外）；每个 skill 名与 `skills/` 和其它应用的 skills 都不重名；数据目录符合 §8.2；
 - `cron/` 下每个任务名符合命名规则，定义是 UTF-8 且没有 §4.5 列出的定义错误；
+- `reports/` 下每个 `<周期>.md`（`README.md` 除外）的周期是五个之一，文件是 UTF-8，frontmatter 合法（有 `command` 时不为空）；
 - 应用目录在该 commit 下只含普通文件和目录，没有符号链接和子模块；
 - 应用里的每个路径都不含空段、`.`、`..`、`.git`（不分大小写）、`~`、`\`、`:`、控制字符和 Windows 设备名，没有以点或空格结尾的段，也没有只差大小写的两个路径。
 
@@ -505,14 +594,15 @@ link = "~/dev/hub-apps/machines"   # 链接安装
 - **waiting**：设置做到一半，剩下的要用户自己做，附说明；
 - **done**：设置完成，记录当时的指纹。
 
-设置指纹是 `SETUP.md`、`app.toml` 的 `requires` 和 `cron/` 下全部任务定义合起来的哈希，其中任何一项变了，应用就回到 `pending`。
+设置指纹是 `SETUP.md`、`app.toml` 的 `requires`、`cron/` 下全部任务定义和 `reports/` 下全部段落合起来的哈希，其中任何一项变了，应用就回到 `pending`。
 
 `hub-apps` 规定的设置流程由 agent 执行，只在和用户本人的私聊里做（要问问题、要批准、会写入私人信息）；`app list` 说某个应用不在 `apps/` 下（例如刚 clone 的总站）时先跑 `cc-hub app sync`。每一步先检查再做，可以重复执行：
 
 1. **依赖**：`cc-hub app list --json` 给出缺少的依赖和本平台的安装命令。告诉用户每条命令做什么，请求批准；批准就执行并再查一遍；不批准或做不到（例如需要 sudo）就把步骤列给用户，执行 `cc-hub app setup-state <name> waiting --note "<还差什么>"` 并停下。
 2. **应用自己的步骤**：照 `SETUP.md` 做，例如问用户的账户和币种并写进数据目录，按用户的意愿配置服务。
-3. **定时任务**：跑 `cc-hub cron list --json`，对 `source` 为该应用的每一行按 `cron/README.md` 做（§4.5）：按实际生效的时间登记缺的，与 `cc-connect cron list`、`cc-connect cron info <id>` 不一致的删掉重登，关掉的和定义已删的 `hub:<name>/…` 删掉。所以设置重跑、应用升级都不会把用户设的时间改回去。
-4. **收尾**：`cc-hub app setup-state <name> done`，写一条 memory log，再提交数据目录的改动和当天的日志。
+3. **报告**：跑 `cc-hub report list --json`，对该应用 `kind` 为 `command` 而 `approved` 为 false 的每一段，把命令和它做什么告诉用户，同意后执行 `cc-hub report approve <name>`；它供稿的周期里还没开的（`periods`），问用户要不要打开（§4.6）；有 `error` 的段告诉用户哪里错了。
+4. **定时任务**：跑 `cc-hub cron list --json`，对 `source` 为该应用的每一行按 `cron/README.md` 做（§4.5）：按实际生效的时间登记缺的，与 `cc-connect cron list`、`cc-connect cron info <id>` 不一致的删掉重登，关掉的和定义已删的 `hub:<name>/…` 删掉。所以设置重跑、应用升级都不会把用户设的时间改回去。
+5. **收尾**：`cc-hub app setup-state <name> done`，写一条 memory log，再提交数据目录的改动和当天的日志。
 
 `waiting` 的应用不在会话开始时自动重跑；用户说已经做好，或 `app list` 显示缺的依赖已经出现，agent 再跑一遍。
 
@@ -530,7 +620,7 @@ link = "~/dev/hub-apps/machines"   # 链接安装
 
 确认时 `apps.lock` 里记录的 commit 已经不是预览时的那个（中间有别的命令改过），就拒绝并要求重新预览。
 
-设置指纹变了，应用回到 `pending`，agent 随即重新设置；因为每一步先检查再做，实际只做新增的部分。
+设置指纹变了，应用回到 `pending`，agent 随即重新设置；因为每一步先检查再做，实际只做新增的部分。报告段的命令变了，批准随之失效，设置时重新问用户。
 
 本地改动按 git blob 哈希与已安装 commit 比对，不带 `--yes` 时列出；升级后它们留在备份里。
 
@@ -541,8 +631,9 @@ agent 按 `hub-apps` 卸载：先跑不带 `--yes` 的 `app remove` 给用户看
 1. 删除 `apps/<name>/`（链接安装只删链接）；
 2. 从 `apps.lock` 和本机状态里移除；
 3. 重新链接，删除失效的 skill 链接；
-4. 从 `hub.toml` 删掉该应用的时间覆盖（`[cron."<name>/…"]`），要么全删要么不动；删不掉只警告，提示手工删除；
-5. 提交 `apps.lock`，覆盖有改动时连同 `hub.toml`（`cc-hub: app remove <name>`）。
+4. 从 `hub.toml` 删掉该应用的时间覆盖（`[cron."<name>/…"]`）和报告设置（`[report."<name>/…"]`），两者各自要么全删要么不动；删不掉只警告，提示手工删除；
+5. 提交 `apps.lock`，覆盖或报告设置有改动时连同 `hub.toml`（`cc-hub: app remove <name>`）；
+6. 清掉这台机器上该应用的报告命令批准和暂存的草稿（`.cc-hub/reports/`）；清不掉只警告。
 
 数据目录保留，agent 告诉用户它在哪里。
 
@@ -555,7 +646,8 @@ agent 按 `hub-apps` 卸载：先跑不带 `--yes` 的 `app remove` 给用户看
 
 ### 8.9 安全
 
-- cc-hub 从不执行应用提供的字符串；依赖检查只在 PATH 里查找 `bin`。
+- cc-hub 从不执行应用提供的字符串，只有一个例外：用户在这台机器上批准过的报告脚本段命令（§4.6）。批准记命令的确切文字，每台机器自己一份，文字一变就失效；命令不经 shell，在总站根目录运行，有 300 秒超时和 20000 字符的输出上限；没批准的命令不运行。依赖检查只在 PATH 里查找 `bin`。
+- 脚本段的输出不进 agent 的上下文：`report send` 自己发送，只打印段数和留言数，发送失败的错误信息里也不含报告的文字（§5.10）；写指示段的 agent 不读存档。
 - 只接受普通文件；路径逐条检查（§8.2、§8.3），不越出应用目录和声明的数据目录；播种前再按真实路径确认数据目录没有指到别处。
 - 克隆时地址前加 `--`，不拉子模块；`apps.lock` 只记完整 commit 哈希，不收带凭据的地址；打印地址时去掉其中的用户名和密码。
 - 安装、升级、卸载先看后做（§5.8），确认用的命令钉住 commit，确认的就是看到的。
@@ -579,12 +671,14 @@ agent 按 `hub-apps` 卸载：先跑不带 `--yes` 的 `app remove` 给用户看
 | `init` | 播种后 | 所有不被忽略的文件 | `cc-hub: init` |
 | `update` | 更新后 | 改动或删除的框架文件、`hub.toml` | `cc-hub: update 0.3.1 -> 0.4.0` |
 | `tap add`、`tap remove` | 完成后 | `apps.lock` | `cc-hub: tap add hub-apps` |
-| `app install`、`app update`、`app remove` | 完成后 | `apps.lock`、新播种的文件；卸载删了覆盖时连同 `hub.toml` | `cc-hub: app install ledger (hub-apps@3f2a9c1)` |
+| `app install`、`app update`、`app remove` | 完成后 | `apps.lock`、新播种的文件；卸载删了覆盖或报告设置时连同 `hub.toml` | `cc-hub: app install ledger (hub-apps@3f2a9c1)` |
 | `cron set`、`cron reset` | 完成后 | `hub.toml` | `cc-hub: cron set plans/morning` |
+| `report send` | 发出后 | 存档的报告文件 | `cc-hub: report daily` |
+| `report section`、`report language` | 完成后 | `hub.toml` | `cc-hub: report section ledger/monthly`、`cc-hub: report language` |
 | `doctor --fix` | 修复后 | 它补建或重写的文件 | `cc-hub: doctor --fix` |
 | agent | 每做完一件改了总站文件的事 | 它改的文件和当天的 `memory/` | 一行说明，如 `ledger: 3 transactions from 10-09` |
 
-- `memory log`、`app sync`、`app setup-state` 不提交。
+- `memory log`、`app sync`、`app setup-state`、`report put|note|approve` 不提交。
 - 只提交自己改的路径：同一个总站可能同时有几个会话（私聊、群聊、定时任务），别的会话改到一半的东西不会被带进去。
 - 推送只在 `hub-memory` 的整理流程末尾做，配置了远程才推；被拒（远程有本机没有的提交）时记日志并汇报，不自动拉取或合并。
 - 远程由用户配置，必须是私有仓库：总站里有 `USER.md`、`MEMORY.md` 和应用数据。建议用只对这个仓库有写权限的 deploy key（`docs/backup.md`）。
@@ -636,7 +730,8 @@ CC_HUB_DIR = "/home/you/.cc-hub"    # 总站不在 ~/.cc-hub 时需要
 - `work_dir` 用绝对路径。
 - cc-connect 以后台服务运行时不读 shell 配置，PATH 往往只有系统目录；在 `[projects.agent.options.env]` 里给 agent 进程设完整 PATH，`cc-hub` 和应用依赖的软件才找得到。
 - cc-connect 自己向 agent 说明发文件、定时、中继等用法：对 Claude Code 通过 `--append-system-prompt` 注入；对 Codex 等不支持注入的 agent，用户在聊天里发一次 `/cron setup`，cc-connect 把说明追加到总站 `AGENTS.md` 末尾，`update` 保留它。
-- 定时任务的登记见 §4.5、§7 第 4 个目标和 §8.5。用到的 cc-connect 命令：`cron add`（带 `--session-mode`）、`cron list`、`cron info <id>`、`cron del <id>`。
+- 定时任务的登记见 §4.5、§7 第 4 个目标和 §8.5。用到的 cc-connect 命令：`cron add`（带 `--session-mode` 和 `--silent`）、`cron list`、`cron info <id>`、`cron del <id>`。
+- 报告由 cc-hub 自己发：`report send` 运行 `cc-connect send -p <项目> -s <会话> --stdin`，项目和会话取自 agent 进程环境里的 `CC_PROJECT`、`CC_SESSION_KEY`，所以 `[projects.agent.options.env]` 的 PATH 里要有 `cc-connect`，和 `cc-hub` 一样。cc-connect 触发定时任务时默认先在聊天里发一行"⏰ <描述>"，所以任务一律带 `--silent` 登记；agent 的回复恰好是 `NO_REPLY` 时，cc-connect 什么都不发。
 - `/dir` 只对下一个会话生效；`work_dir` 保持指向总站。
 
 ## 12. 跨平台与编码规范
@@ -680,8 +775,12 @@ cc-hub/
 │   ├── apps.py               app.toml 解析与校验、本机设置状态、安装升级卸载、sync
 │   ├── crontasks.py          任务定义解析、列出任务、登记命令、cron list 的行
 │   ├── cronoverrides.py      hub.toml 里 [cron."<任务>"] 覆盖的读取和原地编辑
+│   ├── tomltables.py         hub.toml 里一张表的原地编辑（覆盖和报告设置共用）
+│   ├── reports.py            报告段落的发现，hub.toml 里 [report] 设置的读取和原地编辑
+│   ├── reportstate.py        每台机器的报告状态：批准、留言、草稿、运行记录
+│   ├── reportbuild.py        报告的计划、拼装、发送、存档，留言的转交
 │   ├── commands/             root（typer 应用，where、version）init doctor update memory
-│   │                         link tap app cron feedback
+│   │                         link tap app cron report feedback
 │   └── templates/            AGENTS.md BOOTSTRAP.md SOUL.md IDENTITY.md USER.md MEMORY.md
 │                             AGENTS.local.md hub.toml _gitignore _gitattributes cron/
 │                             skills/hub-adapt/ hub-memory/ hub-apps/ hub-feedback/
@@ -707,6 +806,7 @@ cc-hub/
   - 把总站 clone 到另一个临时目录后 `app sync`，应用回来并为 `pending`；
   - 提交信息正确，只提交自己的路径；`doctor` 的 `apps`、`cron` 和 `git` 检查；
   - `cron list` 的定义错误、覆盖、指针提示词和登记命令；`cron set`、`reset` 只改 `hub.toml` 里对应的表并提交，错误输入不写任何东西；`app remove` 清理覆盖。
+  - 报告：供稿的发现（非法周期和 frontmatter）；`plan` 的开关、顺序、留言计数和全空；批准（命令变了失效、没批准的命令不运行、`reports/` 变了应用回到 `pending`）；`send`（脚本段成功、空输出、失败、超时，拼装顺序和标题，存档和提交，`cc-connect send` 的参数——测试里替换掉 cc-connect，不打印报告内容，全空不发，同日重复被拒）；`note` 的存、清、转交和全关时不保存；`report section`、`language` 只改 `hub.toml` 里对应的表；卸载应用时清理；登记命令带 `--silent`（详见 `docs/superpowers/specs/2026-10-16-reports-design.md` §10）。
 - 模板检查：`AGENTS.md` ≤ 150 行并以分界标记结尾；每个 `SKILL.md` ≤ 100 行、frontmatter 合法且 `name` 与目录名一致；全部 LF、无 BOM；README 提到每个命令；登记文字用 `cc-hub cron list --json`。
 - CI 矩阵：ubuntu、macos、windows × Python 3.11、3.12；ruff；pytest；`uv build` 后用 wheel 冒烟：`version`、`init`、`doctor --json`，以及对现建的测试 tap 跑 `tap add` 和 `app install --yes`。
 - 端到端不自动化，写成 `docs/acceptance.md` 手工验收清单。
@@ -730,6 +830,7 @@ cc-hub/
 - 提交失败只警告；同一时间只有一个 `tap` 或 `app` 命令修改总站。
 - `doctor` 中某个文件不可读或格式错误，只让对应检查失败。
 - 命令出错时 typer 不打印局部变量，避免把总站内容带进回溯。
+- 报告：发送失败时报错退出、什么都不改，错误信息里不含报告的文字；发出之后的失败（记录、存档、提交、清留言）只警告，报告不会再发一遍；`hub.toml` 或 `apps.lock` 读不了时，`doctor` 的 `reports` 只指向 `hub-toml` 和 `apps` 检查。
 
 ## 15. 手工验收清单（docs/acceptance.md）
 

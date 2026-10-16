@@ -62,12 +62,18 @@ ask for a time and run that command; such an app needs `min_hub = "0.5.0"`.
 
 With a `command`, the section is a script. cc-hub runs it from the hub root
 once the user has approved it on that machine, and pastes its standard output
-as it is. Empty output means no section. A failure, or a run over 300 seconds,
-shows a one-line failure in the report. The arguments are split the POSIX way,
-so write paths with forward slashes. The script gets `CC_HUB_DIR`,
-`CC_HUB_REPORT_PERIOD`, `CC_HUB_REPORT_SINCE` and `CC_HUB_REPORT_UNTIL` (ISO
-8601 with offset) and `CC_HUB_LANGUAGE` (`en` when unset): write the section
-in that language.
+as it is. Empty output means no section; output beyond 20000 characters is cut
+with a marker. A failure, or a run over 300 seconds, shows a one-line failure
+in the report. An approval is for the exact command text: a version of the app
+that changes it asks the user again.
+
+The command is not run through a shell: its arguments are split the POSIX way
+(write paths with forward slashes), and there are no pipes and no `$VAR`
+expansion. The script gets `CC_HUB_DIR`, `CC_HUB_REPORT_PERIOD`,
+`CC_HUB_REPORT_SINCE` and `CC_HUB_REPORT_UNTIL` (ISO 8601 with offset) and
+`CC_HUB_LANGUAGE` (`en` when unset) in its environment: read them there, and
+write the section in that language. Put the `command` value in double quotes
+if it contains `#`; unquoted, a `#` that follows a space starts a comment.
 
 Without a `command`, the body tells the agent what to write for the period.
 Write it in English, like other agent texts; the agent answers in the user's

@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.7.0 - unreleased
+
+### Added
+
+- Reports: a digest sent to the chat for each day, week, month, quarter or
+  year, that installed apps add sections to. The tasks `report-daily`
+  (08:00), `report-weekly` (Sunday 20:00), `report-monthly` (the 1st, 09:00),
+  `report-quarterly` (1 Jan, Apr, Jul and Oct, 09:10) and `report-yearly`
+  (1 Jan, 09:20) are framework files in `cron/`, all off; `cc-hub cron set
+  report-<period> --on` turns one on, and `cc-hub cron set report-<period>
+  "<expr>"` changes its time, as for any task.
+- `cc-hub report list|plan|put|send|note|section|language|approve`. `list`
+  shows the periods, the sections and their approvals; `plan` shows what the
+  next report of a period holds; `put` stores the text the agent wrote for an
+  instruction section; `send` builds the report, sends it with
+  `cc-connect send` (once a day per period, `--again` to repeat), archives it
+  as `reports/<year>/<date>-<period>.md` and commits it; `note` leaves a note
+  for the next report (exit 3 and nothing kept when no report is on, so the
+  task replies itself); `section <app> <period> --on|--off` and `language
+  <tag>` write the `[report]` settings of `hub.toml`; `approve <app>`
+  approves an app's section commands on this machine.
+- App report sections: `reports/<period>.md` in an app. With a `command` the
+  section is a script that cc-hub runs, not through a shell, in the hub, once
+  the user has approved that exact command on this machine; its output goes
+  into the report as it is and never reaches the agent. Without one, the body
+  tells the agent what to write. An app with a `reports/` directory needs
+  `min_hub = "0.7.0"`. See "Reports" in `docs/apps.md`.
+- `hub.toml` settings: `language` and `order` in `[report]`, and
+  `enabled = false` in `[report."<app>/<period>"]`. The headings cc-hub
+  writes are built in for Chinese and English.
+- `doctor` check `reports`: section files with an unusable period or
+  frontmatter, section commands not approved on this machine, and `[report]`
+  settings of sections that do not exist; warnings only.
+- `docs/apps.md` and `docs/cc-connect.md` have a "Reports" section.
+
+### Changed
+
+- Every scheduled task is registered with `--silent`, so cc-connect no longer
+  posts a line in the chat when a task fires. The `command` of `cc-hub cron
+  list --json` ends with it, and `cron/README.md` has the agent compare it
+  (`cc-connect cron info <id> silent` is `true`).
+- `memory-consolidate` leaves its paragraph as a note for the daily report
+  and replies `NO_REPLY` when a report takes it; with no report on, or when
+  the push failed, it replies as before.
+- The setup fingerprint of an app includes `reports/`, so an app whose report
+  sections changed is `pending` again, and a changed command is approved
+  again.
+- `reports` is a reserved data directory name: an app that declares it is
+  refused.
+- `app install` shows the report sections of the app and their commands;
+  `app update` lists the changes in `reports/` with their diff; `app remove`
+  shows the report settings and `--yes` drops them from `hub.toml`, together
+  with this machine's approvals and drafts of the app.
+- `BOOTSTRAP.md` asks for the language of the reports and which ones to turn
+  on; `AGENTS.md` has `reports/` in its file map and says to read the latest
+  report file when the user refers to one of its items; the `hub-apps` skill
+  lists the report commands for approval during setup.
+- cc-hub runs one kind of command an app provides, the report commands the
+  user approved, and calls `cc-connect` for one thing, `send` in `report
+  send`. The design spec says so where it said otherwise.
+
+### Migration notes
+
+- Run `cc-hub update`, so that `AGENTS.md`, `BOOTSTRAP.md`, `cron/README.md`,
+  `cron/memory-consolidate.md`, the `cron/report-*.md` tasks and the
+  `hub-apps` skill match this version.
+- Tasks registered before this version are not silent. Have the agent run
+  `hub-adapt` and set each installed app up again, in a direct chat: it
+  deletes the tasks that are not silent and registers them again with
+  `--silent`.
+- Nothing changes until a report is turned on: the report tasks are off,
+  sections are only read by a report that is on, and `memory-consolidate`
+  replies as before while no report is.
+- An app whose data directory is named `reports` is refused at its next
+  update, because `reports/` now holds the sent reports; its author has to
+  choose another name.
+
 ## 0.6.0 - 2026-10-16
 
 ### Removed
