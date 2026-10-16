@@ -74,9 +74,10 @@ writes use the language you set (Chinese and English are built in; any other
 gets English). A section that runs a command does so only after you approved
 that command on this machine; the agent asks during the app's setup and runs
 `cc-hub report approve <app>`, and `cc-hub report list` shows every period,
-section and approval. Sent reports are kept in `reports/`. A background task
-with nothing urgent to say leaves a note (`cc-hub report note`) for the next
-report instead of sending its own message.
+section and approval. Sent reports are kept in `reports/`. While a report is
+on, a background task with nothing urgent to say leaves a note
+(`cc-hub report note`) for the next report instead of sending its own
+message; when no report is on, it sends its message as before.
 
 ## Hub layout
 

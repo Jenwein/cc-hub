@@ -76,12 +76,23 @@ commands print reaches the chat without passing through the agent. It runs
 
 and writes the report to its standard input. `<project>` and `<session>` are
 the `CC_PROJECT` and `CC_SESSION_KEY` that cc-connect sets for the agent
-process; cc-hub inherits them when the agent runs it, and leaves out one that
-is unset. The PATH is inherited the same way, so `cc-connect` must be on the
-PATH given to the agent in `[projects.agent.options.env]` (see "PATH under a
-service"), next to `cc-hub`. When `cc-connect` is missing or does not answer
-within 60 seconds, `send` fails with a message, nothing is recorded, and the
-task replies with that error.
+process; cc-hub inherits them when the agent runs it, and leaves out `-p`
+when `CC_PROJECT` is unset. Without `CC_SESSION_KEY`, `send` refuses:
+cc-connect would pick any active session, which may be a group chat. Run it
+from the agent in the chat, or set the variable by hand. The PATH is
+inherited the same way, so `cc-connect` must be on the PATH given to the
+agent in `[projects.agent.options.env]` (see "PATH under a service"), next
+to `cc-hub`. When `cc-connect` is missing or does not answer within 60
+seconds, `send` fails with a message, nothing is recorded, and the task
+replies with that error.
+
+cc-connect sends what it is given as one message, and a chat platform refuses
+one that is too long, so a long report goes out as several messages of at most
+4000 characters each: cut before a section where possible, else at the end of
+a line. When one after the first fails, the rest is not sent; the report
+counts as sent (it is not sent again that day), the archive holds all of it,
+and `send` exits 1 saying the report was cut short and where the archive is;
+the task replies with that.
 
 Every task is registered with `--silent`, so no line appears when a report
 task fires. A reply of exactly `NO_REPLY` makes cc-connect send nothing: a

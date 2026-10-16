@@ -39,7 +39,9 @@ fresh clone of the hub), run `cc-hub app sync` first.
    settings go into the app's data directory, never into `apps/`.
 3. **Reports.** Run `cc-hub report list --json`. For each of the app's
    `sections` (`app` is `<name>`) with `kind` `command` and `approved` false,
-   show the user the command and what it does. When they agree, run
+   show the user the command and what it does. For each period whose command
+   they decline, run `cc-hub report section <name> <period> --off`, so that
+   reports and `cc-hub doctor` stop flagging it. When they agree, run
    `cc-hub report approve <name>`. If a period the app writes for is off
    (`periods`), ask whether to turn it on, as `cron/README.md` "Reports" says.
    For a section with an `error`, tell the user what is wrong.

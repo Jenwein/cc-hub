@@ -64,8 +64,10 @@ With a `command`, the section is a script. cc-hub runs it from the hub root
 once the user has approved it on that machine, and pastes its standard output
 as it is. Empty output means no section; output beyond 20000 characters is cut
 with a marker. A failure, or a run over 300 seconds, shows a one-line failure
-in the report. An approval is for the exact command text: a version of the app
-that changes it asks the user again.
+in the report, with the first line of standard error (at most 300 characters);
+so does a section file that cannot be read, until it is fixed or switched off.
+An approval is for the exact command text: a version of the app that changes it
+asks the user again.
 
 The command is not run through a shell: its arguments are split the POSIX way
 (write paths with forward slashes), and there are no pipes and no `$VAR`

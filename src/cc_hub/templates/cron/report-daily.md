@@ -12,7 +12,7 @@ Daily report. Run `cc-hub report plan daily --json`.
   `cc-hub report put daily <app>`, passing the section on standard input
   (for example a here-document with a quoted delimiter), never inside double
   quotes. If there is nothing to say, store nothing.
-- Do not run any section's command and do not read `reports/`: command
-  sections reach the user without passing through you.
+- Do not run any section's command and do not read the hub's `reports/`
+  archive: command sections reach the user without passing through you.
 - Run `cc-hub report send daily`. If it fails, reply with its error.
   Otherwise reply with exactly NO_REPLY.

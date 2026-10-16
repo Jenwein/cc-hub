@@ -48,7 +48,7 @@
 
 cron 表达式要加引号，否则会被 shell 拆开。总站自带的任务名是 `cron/<名>.md` 的文件名（不含 `.md`），应用的任务名是 `<应用>/<任务>`。你设的时间存在 `hub.toml` 里，`cc-hub update` 和应用升级都不会改掉；`set` 和 `reset` 会打印在 cc-connect 里重新登记这个任务的步骤，由 agent 执行。平时直接跟 agent 说就行。
 
-报告是按日、周、月、季、年发到聊天里的一份摘要，装了供稿的应用就会各加一段（应用里的 `reports/<周期>.md`，写法见 [docs/apps.md](docs/apps.md)）。`report-daily`、`report-weekly`、`report-monthly`、`report-quarterly`、`report-yearly` 五个任务默认关闭，要哪个就像上面那样打开哪个。cc-hub 自己写的标题用你设的语言（内置中文和英文，其他语言用英文）。会运行命令的段落，要你在这台机器上批准过那条命令才会运行：agent 在设置应用时问你，再执行 `cc-hub report approve <应用>`；`cc-hub report list` 列出每个周期、每一段和批准情况。发出的报告存在 `reports/` 下。后台任务没有紧急的话要说时，不单独发消息，而是用 `cc-hub report note` 留一句话给下一份报告。
+报告是按日、周、月、季、年发到聊天里的一份摘要，装了供稿的应用就会各加一段（应用里的 `reports/<周期>.md`，写法见 [docs/apps.md](docs/apps.md)）。`report-daily`、`report-weekly`、`report-monthly`、`report-quarterly`、`report-yearly` 五个任务默认关闭，要哪个就像上面那样打开哪个。cc-hub 自己写的标题用你设的语言（内置中文和英文，其他语言用英文）。会运行命令的段落，要你在这台机器上批准过那条命令才会运行：agent 在设置应用时问你，再执行 `cc-hub report approve <应用>`；`cc-hub report list` 列出每个周期、每一段和批准情况。发出的报告存在 `reports/` 下。有报告开着时，后台任务没有紧急的话要说就不单独发消息，而是用 `cc-hub report note` 留一句话给下一份报告；没有报告开着时照旧自己发。
 
 ## 总站布局
 

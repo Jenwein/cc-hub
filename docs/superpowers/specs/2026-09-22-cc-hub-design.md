@@ -228,7 +228,7 @@ cc-connect cron add --cron "<schedule>" --prompt "<指针>" --session-mode <sess
 
 拼装、超时和重复发送的规则见 §5.10。
 
-**留言。** 后台任务做完没有紧急的话要说时，用 `cc-hub report note <周期> --from <来源> -- "<文字>"` 留一句话给下一份报告：该周期的报告没开就转给下一份开着的、周期更长的；一份都没开时不保存，退出码 3，任务照旧自己回复。出错、要用户马上处理的事不留言，直接回复。
+**留言。** 后台任务做完没有紧急的话要说时，用 `cc-hub report note <周期> --from <来源> -- '<文字>'` 留一句话给下一份报告：该周期的报告没开就转给下一份开着的、周期更长的；一份都没开时不保存，退出码 3，任务照旧自己回复。出错、要用户马上处理的事不留言，直接回复。
 
 **存档。** 发出的报告存成 `reports/<年>/<日期>-<周期>.md`（同一天再发加 `-2`），随总站提交。用户回复报告里的某一条时，agent 读该周期最新的存档来理解指的是什么；写指示段的 agent 不读存档（存档里有脚本段的内容，而报告任务是无人值守的）。
 
@@ -397,7 +397,7 @@ cc-hub report list
 cc-hub report plan daily
 cc-hub report put daily ledger
 cc-hub report send daily
-cc-hub report note daily --from memory-consolidate -- "merged 3 memories, pushed"
+cc-hub report note daily --from memory-consolidate -- 'merged 3 memories, pushed'
 cc-hub report section ledger monthly --off
 cc-hub report language zh-CN
 cc-hub report approve ledger
@@ -407,16 +407,16 @@ cc-hub report approve ledger
 
 `report list [--json]`：五个周期各一行（周期、任务名、实际生效的时间、开或关），然后每个段落一行（`<应用>/<周期>`、种类 `command` 或 `instruction`、开或关、脚本段是否已批准）；文件有错的段只给错误。`--json` 给 `language`（没设置为 null）、`periods`、`sections`。
 
-`report plan <周期> [--json]`：这一期的报告会有什么：开着的有效段落（应用、种类、标题、文件、是否已批准）、留言数、时间窗口 `since` 到 `until`（从上一次这个周期的报告运行时起，第一次是一个周期之前，到现在）、语言；没有段落也没有留言时 `empty` 为真。它不运行任何命令。
+`report plan <周期> [--json]`：这一期的报告会有什么：开着的段落（应用、种类、标题、文件、是否已批准、错误；文件有错的段种类为 null，带上错误）、留言数、时间窗口 `since` 到 `until`（从上一次这个周期的报告运行时起，第一次是一个周期之前，到现在）、语言；没有段落也没有留言时 `empty` 为真。它不运行任何命令。
 
-`report put <周期> <应用> [--text TEXT]`：暂存 agent 为某个指示段写的正文，默认读标准输入。只接受开着的、有效的指示段；脚本段、关掉的段、不存在的段都拒绝。
+`report put <周期> <应用> [--text TEXT]`：暂存 agent 为某个指示段写的正文，默认读标准输入。只接受开着的、有效的指示段；脚本段、关掉的段、不存在的段都拒绝；正文为空时拒绝（不想要这一段就什么都不存）。
 
 `report send <周期> [--again]`：
 
-- 在总站根目录运行已批准的脚本段：命令按 POSIX 规则拆成参数，不经 shell；环境变量有 `CC_HUB_DIR`、`CC_HUB_REPORT_PERIOD`、`CC_HUB_REPORT_SINCE`、`CC_HUB_REPORT_UNTIL`（ISO 8601，带时区偏移）和 `CC_HUB_LANGUAGE`；超时 300 秒；输出超过 20000 个字符就截断并加一行说明。命令出错（找不到、退出码非零、超时）时，这一段换成一行"这一段出错了"加错误输出的第一行；没批准的命令不运行，换成一行说明。
+- 在总站根目录运行已批准的脚本段：命令按 POSIX 规则拆成参数，不经 shell；环境变量有 `CC_HUB_DIR`、`CC_HUB_REPORT_PERIOD`、`CC_HUB_REPORT_SINCE`、`CC_HUB_REPORT_UNTIL`（ISO 8601，带时区偏移）和 `CC_HUB_LANGUAGE`；超时 300 秒；输出超过 20000 个字符就截断并加一行说明。命令出错（找不到、退出码非零、超时）时，这一段换成一行"这一段出错了"加错误输出的第一行（最多 300 个字符）；段落文件有错而没关掉时，同样换成这样一行，带上文件的错误；没批准的命令不运行，换成一行说明。
 - 拼装：标题 `# <报告名> · <日期>`，各段 `## <标题>`（`order` 列出的应用在前，其余按应用名），最后是 `## 留言`（周期没开的更短周期的留言也并进来，按时间排）。没有内容的段不出现；全空时不发、不存档，只记下这次运行，打印 `nothing to send`。
-- 发送：`cc-connect send -p $CC_PROJECT -s $CC_SESSION_KEY --stdin`，报告走标准输入（§11），60 秒超时。失败时报错退出，什么都不改；错误信息里不含报告的文字。
-- 发出之后：记录这次发送，存档到 `reports/<年>/<日期>-<周期>.md` 并提交（`cc-hub: report <周期>`），清掉带走的留言和草稿。这些步骤的失败只是警告，报告不会因此再发一遍。
+- 发送：`cc-connect send -p $CC_PROJECT -s $CC_SESSION_KEY --stdin`，报告走标准输入（§11），60 秒超时；没有 `CC_SESSION_KEY` 时拒绝（不然 cc-connect 会随便挑一个会话，可能是群聊），`CC_PROJECT` 可以没有。报告切成每条最多 4000 个字符的几条消息依次发出：尽量在段落之前切，其次在行尾，一行比这还长时硬切。第一条失败时报错退出，什么都不改；错误信息里不含报告的文字。
+- 第一条发出之后：记录这次发送；后面某条失败时不再发剩下的，其余照常；存档到 `reports/<年>/<日期>-<周期>.md`（总是整份报告）并提交（`cc-hub: report <周期>`），清掉带走的留言和草稿。这些步骤的失败只是警告，报告不会因此再发一遍；提交失败的警告不带 git 的输出（钩子可能把报告打印出来），警告里含有报告文字的细节一律隐去。有一条没发出去时，打印完段数后以退出码 1 结束，说明报告被截断、完整的在哪个存档里，任务就把这句话回复给用户。
 - 只打印发了几段、几条留言（`sent: 3 section(s), 1 note(s)`），不打印报告内容，所以脚本段的输出不进 agent 的上下文。
 - 同一周期同一天已经发过时拒绝（`already sent today`，并清掉为这份不会来的报告写的草稿），除非加 `--again`；同一周期同一时间只有一个 `send`。
 

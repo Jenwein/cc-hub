@@ -15,7 +15,8 @@
   shows the periods, the sections and their approvals; `plan` shows what the
   next report of a period holds; `put` stores the text the agent wrote for an
   instruction section; `send` builds the report, sends it with
-  `cc-connect send` (once a day per period, `--again` to repeat), archives it
+  `cc-connect send` to the chat in `CC_SESSION_KEY`, as messages of at most
+  4000 characters (once a day per period, `--again` to repeat), archives it
   as `reports/<year>/<date>-<period>.md` and commits it; `note` leaves a note
   for the next report (exit 3 and nothing kept when no report is on, so the
   task replies itself); `section <app> <period> --on|--off` and `language

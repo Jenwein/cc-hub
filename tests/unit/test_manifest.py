@@ -245,6 +245,8 @@ def test_report_tasks_have_the_default_schedules() -> None:
         assert f"`cc-hub report put {period} <app>`, passing the section on standard input" in flat
         assert "here-document with a quoted delimiter" in flat, rel
         assert "never inside double quotes" in flat, rel
+        # the archive, not the app's own reports/ folder that holds the section files
+        assert "do not read the hub's `reports/` archive" in flat, rel
         assert "--text" not in body and '"<the section>"' not in body, rel
         assert body.count("NO_REPLY") == 2, rel
         assert body.startswith(f"{period.capitalize()} report. Run "), rel
@@ -399,6 +401,10 @@ def test_hub_apps_setup_approves_report_commands() -> None:
     assert "`cc-hub report list --json`" in setup
     assert "`kind` `command`" in setup and "`approved` false" in setup
     assert "`cc-hub report approve <name>`" in setup
+    # a declined command: its section is switched off, so that nothing keeps flagging it
+    assert "`cc-hub report section <name> <period> --off`" in setup
+    assert "For each period whose command they decline" in setup
+    assert "doctor" in setup
     assert setup.index("**App steps.**") < setup.index("`cc-hub report list --json`")
     assert setup.index("`cc-hub report list --json`") < setup.index("**Scheduled tasks.**")
     update = " ".join(skill.split("## Update", 1)[1].split("\n## ", 1)[0].split())
