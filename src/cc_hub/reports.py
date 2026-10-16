@@ -263,13 +263,19 @@ def _set(text: str, path: tuple[str, ...], key: str, value: str | int | bool) ->
         raise _refused(exc, path) from None
 
 
-def _rewrite(hub: Path, change: Callable[[str], str]) -> None:
-    """Replace hub.toml by `change(its text)`; bytes are read so that CRLF endings survive."""
+def _rewrite(hub: Path, change: Callable[[str], str]) -> bool:
+    """Replace hub.toml by `change(its text)`; whether that changed it.
+
+    Bytes are read so that CRLF endings survive. The new text is worked out in full before
+    anything is written, so an exception from `change` leaves hub.toml as it was.
+    """
     path = Path(hub) / HUB_FILE
     old = path.read_bytes().decode("utf-8")
     new = change(old)
-    if new != old:
-        write_text(path, new)
+    if new == old:
+        return False
+    write_text(path, new)
+    return True
 
 
 def save_language(hub: Path, tag: str) -> None:
@@ -291,3 +297,19 @@ def section_keys_of(hub: Path, app: str) -> list[str]:
     """The section tables of `app` in [report], for removing them with the app."""
     report = _report_table(_read_toml(hub))
     return sorted(k for k, v in report.items() if isinstance(v, dict) and k.startswith(f"{app}/"))
+
+
+def drop_app_sections(hub: Path, app: str) -> bool:
+    """Remove every [report."<app>/<period>"] table of `app` from hub.toml; whether it changed.
+
+    All or nothing: when one table cannot be removed in place, none is, and ReportError says
+    which. ReportError too when hub.toml is not valid TOML.
+    """
+    keys = section_keys_of(hub, app)
+
+    def drop(text: str) -> str:
+        for key in keys:
+            text = _edit(text, ("report", key), None)
+        return text
+
+    return bool(keys) and _rewrite(hub, drop)

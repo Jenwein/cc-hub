@@ -445,6 +445,26 @@ def test_remove_leaves_hub_toml_alone_when_the_app_has_no_report_settings(
     assert (hub / "hub.toml").read_text(encoding="utf-8").endswith("# a note of mine\n")
 
 
+@pytest.mark.parametrize("bad", ["plans/daily", "plans/weekly"])
+def test_remove_leaves_hub_toml_alone_when_a_report_setting_cannot_be_edited(
+    git_hub_with_plans: Path, bad: str
+) -> None:
+    hub = git_hub_with_plans
+    tables = [f'[report."{key}"]\nenabled = false\n' for key in ("plans/daily", "plans/weekly")]
+    tables = [t + f'\n[report."{bad}".more]\nx = 1\n' if f'"{bad}"' in t else t for t in tables]
+    append_hub_toml(hub, "\n" + "\n".join(tables))  # one table is not ours to rewrite
+    commit_all(hub)
+    before = (hub / "hub.toml").read_bytes()
+    warnings = apps.apply_remove(hub, "plans")
+    assert (hub / "hub.toml").read_bytes() == before  # the clean table stays, too
+    assert not (hub / "apps" / "plans").exists() and "plans" not in load_lock(hub).apps
+    assert len(warnings) == 1
+    assert "hub.toml: could not drop the report settings of plans's sections" in warnings[0]
+    assert f'[report."{bad}"] has child tables' in warnings[0]
+    assert '[report."plans/<period>"] tables by hand' in warnings[0]
+    assert changed_in_head(hub) == ["apps.lock"]
+
+
 def test_remove_keeps_crlf_line_endings_while_dropping_report_settings(
     git_hub_with_plans: Path,
 ) -> None:

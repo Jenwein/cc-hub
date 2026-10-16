@@ -12,6 +12,7 @@ from cc_hub.reports import (
     Section,
     SectionDef,
     discover_sections,
+    drop_app_sections,
     enabled_sections,
     load_config,
     note_target,
@@ -348,6 +349,64 @@ def test_section_keys_of(hub):
     assert section_keys_of(hub, "plans") == []
     put(hub, BASE)
     assert section_keys_of(hub, "mail") == []
+
+
+def test_drop_app_sections_removes_every_table_of_the_app_and_nothing_else(hub):
+    text = (BASE + '\n[report]\nlanguage = "en"\n\n[report."mail/daily"]\nenabled = false\n\n'
+            '[report."mail/weekly"]\nenabled = false\n\n[report."mailer/daily"]\n'
+            'enabled = false\n\n[cron."a"]\nenabled = true\n')
+    put(hub, text)
+    assert drop_app_sections(hub, "mail") is True
+    assert get(hub) == (BASE + '\n[report]\nlanguage = "en"\n\n[report."mailer/daily"]\n'
+                        'enabled = false\n\n[cron."a"]\nenabled = true\n')
+    assert load_config(hub) == ReportConfig("en", [], {"mailer/daily"})
+
+
+def test_drop_app_sections_changes_nothing_when_the_app_has_none(hub):
+    text = BASE + '\n[report."mailer/daily"]\nenabled = false\n# mine\n'
+    put(hub, text)
+    assert drop_app_sections(hub, "mail") is False
+    assert get(hub) == text
+    put(hub, BASE)
+    assert drop_app_sections(hub, "mail") is False
+    assert get(hub) == BASE
+
+
+def test_drop_app_sections_keeps_crlf_endings(hub):
+    raw = BASE + '\n[report."mail/daily"]\nenabled = false\n\n[cron."a"]\nenabled = true\n'
+    (hub / "hub.toml").write_bytes(raw.replace("\n", "\r\n").encode())
+    assert drop_app_sections(hub, "mail") is True
+    out = (hub / "hub.toml").read_bytes().decode()
+    assert "mail" not in out and "\r\n" in out and "\n" not in out.replace("\r\n", "")
+
+
+@pytest.mark.parametrize("bad", ["mail/daily", "mail/weekly"])
+def test_drop_app_sections_is_all_or_nothing(hub, bad):
+    tables = [f'[report."{key}"]\nenabled = false\n' for key in ("mail/daily", "mail/weekly")]
+    tables = [t + f'\n[report."{bad}".more]\nx = 1\n' if f'"{bad}"' in t else t for t in tables]
+    text = BASE + "\n" + "\n".join(tables)
+    put(hub, text)
+    with pytest.raises(ReportError, match=rf'^hub\.toml: \[report\."{bad}"\] has child tables'):
+        drop_app_sections(hub, "mail")
+    assert get(hub) == text  # the clean table next to it is still there, too
+
+
+def test_drop_app_sections_refuses_a_table_it_cannot_edit_in_place(hub):
+    text = (BASE + '\n[report]\n"mail/daily".enabled = false\n\n'
+            '[report."mail/weekly"]\nenabled = false\n')
+    put(hub, text)
+    with pytest.raises(
+        ReportError, match=r'^hub\.toml: cannot edit \[report\."mail/daily"\] in place'
+    ):
+        drop_app_sections(hub, "mail")
+    assert get(hub) == text
+
+
+def test_drop_app_sections_does_not_write_over_invalid_toml(hub):
+    put(hub, "[report\n")
+    with pytest.raises(ReportError, match="hub.toml"):
+        drop_app_sections(hub, "mail")
+    assert get(hub) == "[report\n"
 
 
 # --- reports and the cron tasks behind them ---

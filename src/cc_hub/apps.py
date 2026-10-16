@@ -35,7 +35,6 @@ from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import HUB_FILE, hub_name
 from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link, rmtree
 from cc_hub.reports import NOT_A_PERIOD, PERIODS, ReportError, SectionDef, parse_section
-from cc_hub.tomltables import edit_table
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 VERSION = re.compile(r"^\d+(?:\.\d+){0,2}$")
@@ -986,21 +985,9 @@ def _drop_overrides(hub: Path, app: str) -> tuple[bool, str | None]:
 
 
 def _drop_report_settings(hub: Path, app: str) -> tuple[bool, str | None]:
-    """Remove `app`'s [report."<app>/<period>"] tables from hub.toml, as `_drop_overrides` does.
-
-    The new text is worked out in full before anything is written, so hub.toml either loses all
-    of them or none.
-    """
+    """Remove `app`'s report settings from hub.toml: whether it changed, and a warning if not."""
     try:
-        keys = reports.section_keys_of(hub, app)
-        if not keys:
-            return False, None
-        path = Path(hub) / HUB_FILE
-        old = path.read_bytes().decode("utf-8")  # read_text would turn CRLF into LF
-        new = old
-        for key in keys:
-            new = edit_table(new, ("report", key), None)
-        write_text(path, new)
+        changed = reports.drop_app_sections(hub, app)
     except FileNotFoundError:
         return False, None
     except (OSError, ValueError, ReportError) as exc:
@@ -1008,7 +995,7 @@ def _drop_report_settings(hub: Path, app: str) -> tuple[bool, str | None]:
             f"{HUB_FILE}: could not drop the report settings of {app}'s sections ({exc}); "
             f'delete any [report."{app}/<period>"] tables by hand'
         )
-    return True, None
+    return changed, None
 
 
 def _forget_report_state(hub: Path, app: str) -> str | None:
