@@ -63,37 +63,23 @@ def test_changelog_records_known_limitations() -> None:
     assert "windows-latest" in text
 
 
-def test_cc_connect_doc_covers_script_tasks_and_the_guard() -> None:
+def test_cc_connect_doc_registers_pointer_prompts() -> None:
     text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
-    script = text.split("## Script tasks and PATH", 1)[1].split("\n## ", 1)[0]
-    # script tasks run with the daemon's environment, not the agent's
-    assert "daemon" in script and "projects.agent.options.env" in script
-    for phrase in ("systemctl --user edit cc-connect", "EnvironmentVariables",
-                   "cc-connect daemon install"):
-        assert phrase in script, phrase
-    guard = text.split("## Restricted tasks and YOLO", 1)[1].split("\n## ", 1)[0]
-    for phrase in ("cc-hub cron guard", "cc-hub cron guard-setup", "bypassPermissions", "Codex",
-                   "PATH"):
-        assert phrase in guard, phrase
+    section = text.split("## Scheduled tasks", 1)[1].split("\n## ", 1)[0]
+    for phrase in ("cc-hub cron list --json", "hub:<name>", "Scheduled task hub:memory-consolidate",
+                   "cc-hub cron set", "cc-hub cron reset"):
+        assert phrase in section, phrase
     assert '--prompt "<body>"' not in text
 
 
-def test_apps_doc_gives_restricted_tasks_a_command_group_that_changes_nothing_outside() -> None:
-    text = " ".join((ROOT / "docs" / "apps.md").read_text(encoding="utf-8").split())
-    assert "read-only command group" not in text
-    assert (
-        "a separate command group that only reads, or records the app's own local state "
-        "(so a restricted run can acknowledge its work), and never sends, deletes or changes "
-        "anything outside the app"
-    ) in text
-
-
-def test_changelog_has_0_5_0() -> None:
+def test_changelog_has_0_6_0() -> None:
     text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "## 0.5.0" in text
-    section = text.split("## 0.5.0", 1)[1].split("\n## ", 1)[0]
-    for phrase in ("cc-hub cron list", "cc-hub cron guard-setup", "hub-adapt", "secrets/"):
-        assert phrase in section, phrase
+    section = text.split("## 0.6.0", 1)[1].split("\n## ", 1)[0]
+    removed = section.split("### Removed", 1)[1].split("\n### ", 1)[0]
+    for phrase in ("cc-hub cron wake", "cc-hub cron guard-setup", "`exec`", "`on_demand`",
+                   "`allow`", "`silent`", "AGENTS.md"):
+        assert phrase in removed, phrase
+    assert "## 0.5.0" in text  # the earlier entry stays as it was
 
 
 def test_readmes_explain_the_cron_examples() -> None:
@@ -101,19 +87,19 @@ def test_readmes_explain_the_cron_examples() -> None:
         'cc-hub cron set plans/morning "0 7 * * *"',
         "cc-hub cron set ledger/prices --off",
         "cc-hub cron reset plans/morning",
-        "cc-hub cron wake mail/triage",
     )
     for name in ("README.md", "README.zh-CN.md"):
         readme = (ROOT / name).read_text(encoding="utf-8")
+        assert "| `cc-hub cron list\\|set\\|reset` |" in readme, name
         for example in examples:
             assert example in readme, (name, example)
         assert "`<…>`" in readme and "`[…]`" in readme, name
 
 
-def test_apps_doc_covers_the_task_kinds() -> None:
+def test_apps_doc_covers_scheduled_tasks() -> None:
     text = (ROOT / "docs" / "apps.md").read_text(encoding="utf-8")
-    for phrase in ("exec:", "on_demand: true", "silent: true", "allow:", "cc-hub cron wake",
-                   "cc-hub cron set"):
+    for phrase in ("schedule:", "default:", "session:", "hub:<app>/<task>", "cc-hub cron set",
+                   "cc-hub cron reset", "cc-hub cron list"):
         assert phrase in text, phrase
 
 

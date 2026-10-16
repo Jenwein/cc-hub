@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.0 - 2026-10-16
+
+### Removed
+
+- `cc-hub cron wake` and `cc-hub cron guard-setup`.
+- Script tasks (`exec`, `timeout_mins`), on-demand tasks (`on_demand`),
+  restricted tasks (`allow`) and the `silent` task key. A task definition
+  has `schedule`, `default` and `session`; other keys are not read.
+- The restricted-task guard: the PreToolUse hook, its step in `hub-adapt`
+  and the guard warnings of `doctor`'s `cron` check.
+- The credential exception in `AGENTS.md` Safety. The rule reads
+  "Never read, print, or copy credentials: `.env` files, keys, tokens."
+- `docs/cc-connect.md` sections "Script tasks and PATH" and "Restricted
+  tasks and YOLO".
+
+### Changed
+
+- `cc-hub cron list --json` rows carry one registration `command` (null for
+  a row with an error) in place of `commands`, and no `kind`, `silent`,
+  `exec`, `timeout_mins` or `allow`. `cc-hub cron list` prints each task's
+  name, time in force and on/off.
+- The app install overview lists each task as
+  `hub:<app>/<task>: <schedule> (<default|optional>, <session>)`.
+- `cc-hub cron guard` is a hidden PreToolUse hook entry point: it reads the
+  event on stdin, prints nothing and exits 0, without deciding anything.
+
+### Migration notes
+
+- Run `cc-hub update`, so that `AGENTS.md`, `cron/README.md` and the
+  `hub-adapt` and `hub-apps` skills match this version.
+- If `cc-hub cron guard-setup` ran in a hub, its `.claude/settings.json`
+  has a `PreToolUse` entry whose command ends in ` cron guard`. It may be
+  deleted; while it stays, it runs `cc-hub cron guard`, which exits 0
+  without a decision.
+- Remove apps whose tasks use `exec`, `on_demand` or `allow` (`hub-apps`
+  also deletes their jobs from cc-connect). This version does not read
+  `exec`, so it lists such a task as a prompt task, and an `on_demand` task
+  without `schedule` as a definition error. A task with `allow` keeps its
+  registered job, which now runs without any limit on its commands, and a
+  job registered with `--silent` stays silent.
+
 ## 0.5.0 - 2026-10-15
 
 ### Added

@@ -16,7 +16,7 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
-from cc_hub import __version__, cronguard, cronoverrides, crontasks, gitops, manifest
+from cc_hub import __version__, cronoverrides, crontasks, gitops, manifest
 from cc_hub.applock import LockError, from_tilde, load_lock
 from cc_hub.apps import app_statuses
 from cc_hub.commands.init import enclosing_git_repo
@@ -115,32 +115,8 @@ def apps_check(hub: Path, which: Which) -> Check:
     return _ok("apps", f"{len(rows)} app(s) set up")
 
 
-def _guard_problem(hub: Path) -> tuple[str, str] | None:
-    """What keeps the restricted-task guard from running, and the fix; None if nothing does.
-
-    A guard hook runs the program it records; when that path no longer exists, Claude Code
-    cannot start it and carries on without it. A bare `cc-hub` is looked up on the PATH, which
-    cannot be checked from here.
-    """
-    programs = cronguard.installed_programs(hub)
-    if not programs:
-        return (
-            f"the guard hook is not in {cronguard.SETTINGS_REL}",
-            "run the hub-adapt skill from the agent",
-        )
-    for program in programs:
-        if re.search(r"[\\/]", program) and not (
-            os.path.isfile(program) or os.path.isfile(program + ".exe")
-        ):
-            return (
-                f"the guard hook runs {program}, which does not exist",
-                "run the hub-adapt skill from the agent, or `cc-hub cron guard-setup`",
-            )
-    return None
-
-
 def cron_check(hub: Path) -> Check:
-    """Scheduled tasks: definition files, overrides in hub.toml, the restricted-task guard.
+    """Scheduled tasks: definition files and the overrides in hub.toml.
 
     A hub.toml or apps.lock that cannot be read is the business of the hub-toml and apps checks,
     so this one says so and stops.
@@ -165,7 +141,7 @@ def cron_check(hub: Path) -> Check:
         if not row["error"]:
             continue
         problems.append(row["error"])
-        if row["kind"] is not None:  # the definition is fine; the override of it is not
+        if row["file_schedule"] is not None:  # the definition is fine; the override of it is not
             fixes.append(f"run `cc-hub cron reset {shlex.quote(row['name'])}`")
         elif row["source"] == "hub":
             fixes.append(f"fix {row['file']}")
@@ -179,15 +155,6 @@ def cron_check(hub: Path) -> Check:
         problems.append(f'hub.toml: [cron."{key}"] has no task')
         fixes.append(f"run `cc-hub cron reset {shlex.quote(key)}`")
 
-    restricted = [row["name"] for row in task_rows if row["allow"]]
-    claude_set_up = any((hub / rel).exists() for rel in POINTERS["claude"] if rel)
-    guard = _guard_problem(hub) if restricted and claude_set_up else None
-    if guard is not None:
-        problems.append(
-            f"restricted task(s) {', '.join(restricted)}: {guard[0]}, "
-            "so nothing enforces their allow list"
-        )
-        fixes.append(guard[1])
     if problems:
         return Check("cron", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
     return _ok("cron", f"{len(task_rows)} task(s) checked")

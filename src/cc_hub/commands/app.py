@@ -23,16 +23,7 @@ def _software(reqs: list[apps.Requirement]) -> list[str]:
 
 def _task_line(name: str, task: TaskDef) -> str:
     choice = "default" if task.default else "optional"
-    if task.kind == "exec":
-        line = f"  {name}: {task.schedule} runs `{task.exec}` ({choice}, script, silent)"
-    elif task.kind == "on_demand":
-        line = f"  {name}: on demand ({choice}, {task.session})"
-    else:
-        silent = ", silent" if task.silent else ""
-        line = f"  {name}: {task.schedule} ({choice}, {task.session}{silent})"
-    if task.allow:
-        line += f" allow: {', '.join(task.allow)}"
-    return line
+    return f"  {name}: {task.schedule} ({choice}, {task.session})"
 
 
 def overview(plan: apps.AppPlan) -> list[str]:

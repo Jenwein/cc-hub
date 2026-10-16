@@ -21,25 +21,25 @@ def git_log_subject(hub: Path) -> str:
     return run_git(hub, "log", "-1", "--format=%s").stdout.strip()
 
 
-def test_list_json_is_the_rows(hub_with_mail: Path) -> None:
-    save(hub_with_mail, "mail/poll", {"schedule": "0 8 * * *"})
-    r = run(hub_with_mail, "cron", "list", "--json")
+def test_list_json_is_the_rows(hub_with_plans: Path) -> None:
+    save(hub_with_plans, "plans/morning", {"schedule": "0 7 * * *"})
+    r = run(hub_with_plans, "cron", "list", "--json")
     assert r.exit_code == 0, r.output
-    assert json.loads(r.stdout) == rows(hub_with_mail)
+    assert json.loads(r.stdout) == rows(hub_with_plans)
     assert {x["name"] for x in json.loads(r.stdout)} == {
-        "memory-consolidate", "mail/poll", "mail/triage",
+        "memory-consolidate", "plans/morning", "plans/review",
     }
 
 
-def test_list_prints_one_line_per_task(hub_with_mail: Path) -> None:
-    save(hub_with_mail, "mail/poll", {"schedule": "0 8 * * *"})
-    save(hub_with_mail, "memory-consolidate", {"enabled": False})
-    r = run(hub_with_mail, "cron", "list")
+def test_list_prints_one_line_per_task(hub_with_plans: Path) -> None:
+    save(hub_with_plans, "plans/morning", {"schedule": "0 7 * * *"})
+    save(hub_with_plans, "memory-consolidate", {"enabled": False})
+    r = run(hub_with_plans, "cron", "list")
     assert r.exit_code == 0, r.output
     assert r.stdout.splitlines() == [
-        "mail/poll  exec  0 8 * * * (overridden, file: */5 * * * *)  on",
-        "mail/triage  on_demand  on demand  on",
-        "memory-consolidate  prompt  0 3 * * *  off",
+        "memory-consolidate  0 3 * * *  off",
+        "plans/morning  0 7 * * * (overridden, file: 0 8 * * *)  on",
+        "plans/review  0 18 * * 5  off",
     ]
 
 
@@ -67,11 +67,11 @@ def test_cron_group_is_documented_in_help() -> None:
     assert "cron" in r.output and "Scheduled tasks" in r.output
 
 
-def test_list_in_a_hub_with_a_non_ascii_path(git_hub_with_mail: Path) -> None:
-    r = run(git_hub_with_mail, "cron", "list", "--json")
+def test_list_in_a_hub_with_a_non_ascii_path(git_hub_with_plans: Path) -> None:
+    r = run(git_hub_with_plans, "cron", "list", "--json")
     assert r.exit_code == 0, r.output
     assert [x["name"] for x in json.loads(r.stdout)] == [
-        "mail/poll", "mail/triage", "memory-consolidate",
+        "memory-consolidate", "plans/morning", "plans/review",
     ]
 
 
@@ -137,28 +137,15 @@ def test_set_on_a_task_with_a_broken_definition_is_refused(hub: Path) -> None:
     assert (hub / "hub.toml").read_bytes() == before
 
 
-def test_set_time_on_on_demand_task_is_refused(hub_with_mail: Path) -> None:
-    hub = hub_with_mail
-    before = (hub / "hub.toml").read_bytes()
-    r = run(hub, "cron", "set", "mail/triage", "0 1 * * *")
-    assert r.exit_code == 1 and "on-demand" in r.stderr
-    assert (hub / "hub.toml").read_bytes() == before
-
-    off = run(hub, "cron", "set", "mail/triage", "--off")
-    assert off.exit_code == 0, off.output
-    assert load(hub)["mail/triage"] == {"enabled": False}
-    assert "cc-connect cron del" in off.stdout and "cron add" not in off.stdout
-
-    on = run(hub, "cron", "set", "mail/triage", "--on")
-    assert on.exit_code == 0, on.output
-    assert "cron edit <id> enabled false" in on.stdout
-
-
-def test_set_a_script_task_prints_its_exec_registration(hub_with_mail: Path) -> None:
-    r = run(hub_with_mail, "cron", "set", "mail/poll", "0 8 * * *")
+def test_set_on_turns_on_an_optional_app_task(hub_with_plans: Path) -> None:
+    r = run(hub_with_plans, "cron", "set", "plans/review", "--on")
     assert r.exit_code == 0, r.output
-    assert '--cron "0 8 * * *" --exec "uv run apps/mail/scripts/mk.py poll"' in r.stdout
-    assert "cron edit <id> mute true" in r.stdout
+    assert load(hub_with_plans)["plans/review"] == {"enabled": True}
+    assert r.stdout.splitlines()[-1] == (
+        '  cc-connect cron add --cron "0 18 * * 5" --prompt "Scheduled task hub:plans/review: '
+        'follow the body of apps/plans/cron/review.md in the hub." --session-mode reuse '
+        '--desc "hub:plans/review"'
+    )
 
 
 def test_reset_of_leftover_override_for_missing_task(hub: Path) -> None:
@@ -242,46 +229,7 @@ def test_reregister_steps_for_a_row_that_is_off_or_gone() -> None:
     assert "<old id>" in steps[1] and "hub:gone/task" in steps[1]
     assert steps[2].strip() == "cc-connect cron del <old id>"
     assert len(steps) == 3
-    off = {"enabled": False, "commands": ["cc-connect cron add ..."]}
+    off = {"enabled": False, "command": "cc-connect cron add ..."}
     assert reregister_steps(off, "x") == reregister_steps(None, "x")
-    on = {"enabled": True, "commands": ["cc-connect cron add ...", "cc-connect cron edit <id> x"]}
-    assert reregister_steps(on, "x")[3:] == [
-        "  cc-connect cron add ...",
-        "  cc-connect cron edit <id> x",
-    ]
-
-
-def test_wake_prints_the_job_id(hub_with_mail: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    woken: list = []
-
-    def fake_wake(hub: Path, name: str) -> str:
-        woken.append((hub, name))
-        return "a1b2c3"
-
-    monkeypatch.setattr("cc_hub.crontasks.wake", fake_wake)
-    r = run(hub_with_mail, "cron", "wake", "mail/triage")
-    assert r.exit_code == 0, r.output
-    assert r.stdout == "woke hub:mail/triage (a1b2c3)\n"
-    assert woken == [(hub_with_mail, "mail/triage")]
-
-
-def test_wake_failure_goes_to_stderr_with_exit_1(
-    hub_with_mail: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # an empty PATH: cc-connect is not found, and nothing real is run
-    monkeypatch.setenv("PATH", "")
-    r = run(hub_with_mail, "cron", "wake", "mail/triage")
-    assert r.exit_code == 1
-    assert r.stdout == "" and "cc-connect" in r.stderr and "not found" in r.stderr
-
-
-def test_wake_refuses_a_task_that_is_not_on_demand(hub_with_mail: Path) -> None:
-    r = run(hub_with_mail, "cron", "wake", "mail/poll")
-    assert r.exit_code == 1
-    assert r.stdout == "" and "not an on-demand task" in r.stderr
-
-
-def test_wake_with_an_unreadable_hub_toml_fails(hub: Path) -> None:
-    (hub / "hub.toml").write_text("[cron\n", encoding="utf-8")
-    r = run(hub, "cron", "wake", "mail/triage")
-    assert r.exit_code == 1 and "hub.toml" in r.stderr
+    on = {"enabled": True, "command": "cc-connect cron add ..."}
+    assert reregister_steps(on, "x")[3:] == ["  cc-connect cron add ..."]

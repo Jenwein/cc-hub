@@ -1,8 +1,62 @@
 # -*- coding: utf-8 -*-
+import subprocess
+import sys
+
+import pytest
 from typer.testing import CliRunner
 
 from cc_hub import __version__
 from cc_hub.cli import app
+
+HOOK_EVENTS = [
+    b'{"session_id": "s", "transcript_path": "/nowhere/t.jsonl", '
+    b'"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}}',
+    b"not json at all \x00\xff",
+    b"",
+]
+
+# cli.main as the console script runs it; exit 3 if anything heavy was imported on the way
+FAST_PATH = (
+    "import sys\n"
+    "sys.argv = ['cc-hub', 'cron', 'guard']\n"
+    "from cc_hub.cli import main\n"
+    "main()\n"
+    "heavy = ('typer', 'click', 'rich', 'cc_hub.commands.root', 'cc_hub.commands.cron')\n"
+    "sys.exit(3 if any(m in sys.modules for m in heavy) else 0)\n"
+)
+
+
+@pytest.mark.parametrize("event", HOOK_EVENTS)
+def test_cron_guard_fast_path_says_nothing_and_skips_typer(event: bytes) -> None:
+    proc = subprocess.run([sys.executable, "-c", FAST_PATH], input=event, capture_output=True)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
+
+
+@pytest.mark.parametrize("event", HOOK_EVENTS)
+def test_cron_guard_through_the_entry_point_exits_0(event: bytes) -> None:
+    proc = subprocess.run(
+        [sys.executable, "-m", "cc_hub", "cron", "guard"], input=event, capture_output=True
+    )
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, b"", b"")
+
+
+@pytest.mark.parametrize("event", HOOK_EVENTS)
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["cron", "guard"],
+        ["--hub", "no-such-hub", "cron", "guard"],
+        ["cron", "guard", "extra", "--flag"],
+    ],
+)
+def test_cron_guard_command_exits_0_with_no_output(event: bytes, args: list[str]) -> None:
+    result = CliRunner().invoke(app, args, input=event)
+    assert (result.exit_code, result.stdout) == (0, ""), result.output
+
+
+def test_cron_guard_is_hidden() -> None:
+    result = CliRunner().invoke(app, ["cron", "--help"])
+    assert result.exit_code == 0 and "guard" not in result.output
 
 
 def test_version_prints_package_version() -> None:
