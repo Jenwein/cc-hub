@@ -155,9 +155,9 @@ def test_plan_lists_enabled_sections_and_notes(hub: Path):
         "until": "2026-10-16T09:00:00+08:00",
         "sections": [
             {"app": "mail", "kind": "command", "title": "Mail",
-             "file": "apps/mail/reports/daily.md", "approved": False},
+             "file": "apps/mail/reports/daily.md", "approved": False, "error": None},
             {"app": "plans", "kind": "instruction", "title": "Plans",
-             "file": "apps/plans/reports/daily.md", "approved": None},
+             "file": "apps/plans/reports/daily.md", "approved": None, "error": None},
         ],
         "notes": 2,
         "empty": False,
@@ -184,12 +184,26 @@ def test_plan_notes_without_sections_is_not_empty(hub: Path):
     assert got["sections"] == [] and got["notes"] == 1 and got["empty"] is False
 
 
-def test_plan_leaves_out_sections_that_are_off_or_broken(hub: Path):
+def test_plan_leaves_out_sections_that_are_off(hub: Path):
     install(hub, "mail", "daily", section("uv run mail.py"))
     install(hub, "plans", "daily", section(None))
     install(hub, "broken", "daily", "no frontmatter at all")
     reports.save_section(hub, "plans/daily", False)
+    reports.save_section(hub, "broken/daily", False)
     assert [s["app"] for s in plan(hub, "daily", NOW)["sections"]] == ["mail"]
+
+
+BROKEN = "apps/broken/reports/daily.md: needs a frontmatter block between --- lines"
+
+
+def test_plan_lists_a_section_whose_file_is_broken_with_its_error(hub: Path):
+    install(hub, "broken", "daily", "no frontmatter at all")
+    got = plan(hub, "daily", NOW)
+    assert got["sections"] == [
+        {"app": "broken", "kind": None, "title": "broken", "file": "apps/broken/reports/daily.md",
+         "approved": None, "error": BROKEN},
+    ]
+    assert got["empty"] is False  # the report says what is wrong: it is not empty
 
 
 def test_plan_unknown_period(hub: Path):
@@ -372,6 +386,35 @@ def test_failed_line_in_chinese_and_output_alongside_error_is_dropped(hub: Path)
     text = build(hub, "daily", NOW, runner=runner).text
     assert text.endswith("## 甲\n\n甲：这一段出错了：boom")
     assert "half an answer" not in text
+
+
+def test_a_section_whose_file_is_broken_is_a_failed_line(hub: Path):
+    install(hub, "broken", "daily", "no frontmatter at all")
+    reportstate.put_draft(hub, "daily", "broken", "a draft is not used for a broken file")
+    runner = Runner()
+    built = build(hub, "daily", NOW, runner=runner)
+    assert built.text == (
+        f"# Daily report · 2026-10-16\n\n## broken\n\nbroken: this section failed: {BROKEN}"
+    )
+    assert built.sections == 1 and runner.calls == []
+    reports.save_section(hub, "broken/daily", False)  # switched off, it is left out
+    assert build(hub, "daily", NOW).text == ""
+
+
+def test_a_long_error_is_cut_to_300_characters(hub: Path):
+    install(hub, "a", "daily", section("run-a", "Alpha"))
+    reportstate.approve(hub, "a", {"daily": "run-a"})
+    prefix = "Alpha: this section failed: "
+    text = build(hub, "daily", NOW, runner=Runner({"run-a": ("", "e" * 5000)})).text
+    assert text.endswith("\n\n" + prefix + "e" * 299 + "…")
+    text = build(hub, "daily", NOW, runner=Runner({"run-a": ("", "f" * 300)})).text
+    assert text.endswith("\n\n" + prefix + "f" * 300)  # exactly the limit is not cut
+    # a file error is cut the same way (the key of a broken line is in it)
+    install(hub, "b", "daily", "---\n" + "k" * 400 + ': "unclosed\n---\n')
+    line = build(hub, "daily", NOW, runner=Runner()).text.split("\n\n## b\n\n", 1)[1]
+    line = line.split("\n\n", 1)[0]
+    assert line.startswith("b: this section failed: apps/b/reports/daily.md: kkk")
+    assert len(line) == len("b: this section failed: ") + 300 and line.endswith("…")
 
 
 def test_cut_marker_in_chinese(hub: Path):

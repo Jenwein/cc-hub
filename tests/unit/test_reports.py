@@ -202,13 +202,23 @@ def test_ordered_puts_listed_apps_first_then_the_rest_by_name():
 def test_enabled_sections_honour_off_and_order(hub):
     for app in ("mail", "plans", "zz"):
         fake_app(hub, app, {"reports/daily.md": "---\n---\n", "reports/weekly.md": "---\n---\n"})
-    fake_app(hub, "bad", {"reports/daily.md": "---\ncommand:\n---\n"})
     put(hub, BASE + '\n[report]\norder = ["zz"]\n')
     assert keys(hub, "daily") == ["zz/daily", "mail/daily", "plans/daily"]
     assert keys(hub, "weekly") == ["zz/weekly", "mail/weekly", "plans/weekly"]
     put(hub, BASE + '\n[report]\norder = ["zz"]\n\n[report."mail/daily"]\nenabled = false\n')
     assert keys(hub, "daily") == ["zz/daily", "plans/daily"]
     assert keys(hub, "weekly") == ["zz/weekly", "mail/weekly", "plans/weekly"]
+
+
+def test_enabled_sections_keep_a_section_whose_file_is_broken(hub):
+    """It goes into the report as a line that says what is wrong, unless it is switched off."""
+    fake_app(hub, "mail", {"reports/daily.md": "---\n---\n"})
+    fake_app(hub, "bad", {"reports/daily.md": "---\ncommand:\n---\n", "reports/hourly.md": "x"})
+    [bad, mail] = enabled_sections(hub, "daily")
+    assert (bad.key, bad.error) == ("bad/daily", "apps/bad/reports/daily.md: command is empty")
+    assert (mail.key, mail.error) == ("mail/daily", None)
+    put(hub, BASE + '\n[report."bad/daily"]\nenabled = false\n')
+    assert keys(hub, "daily") == ["mail/daily"]
 
 
 def test_unknown_period_is_an_error(hub):
@@ -281,6 +291,21 @@ def test_save_language_on_a_report_table_with_no_keys_or_no_table(hub):
     put(hub, BASE)
     save_language(hub, "en")
     assert get(hub) == BASE + '\n[report]\nlanguage = "en"\n'
+
+
+def test_save_section_off_keeps_a_comment_inside_the_table(hub):
+    text = (BASE + '\n[report."mail/daily"]\n# switched by hand on 1 Oct, keep this note\n'
+            "enabled = true  # was on\n")
+    put(hub, text)
+    save_section(hub, "mail/daily", False)
+    assert get(hub) == text.replace("enabled = true", "enabled = false")
+    assert load_config(hub).off == {"mail/daily"}
+    # a table that is not there yet is added, as before
+    save_section(hub, "mail/weekly", False)
+    assert get(hub) == (
+        text.replace("enabled = true", "enabled = false")
+        + '\n[report."mail/weekly"]\nenabled = false\n'
+    )
 
 
 def test_save_section_keeps_language_and_order(hub):

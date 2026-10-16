@@ -200,13 +200,15 @@ def _check_period(period: str) -> None:
 
 
 def enabled_sections(hub: Path, period: str) -> list[Section]:
-    """The sections that make up the `period` report: usable and not switched off, in order."""
+    """The sections that make up the `period` report: those not switched off, in order.
+
+    A section whose file cannot be used is one of them, with its `error`: the report says what
+    is wrong instead of leaving the section out.
+    """
     _check_period(period)
     config = load_config(hub)
     sections = [
-        s
-        for s in discover_sections(hub)
-        if s.period == period and s.error is None and s.key not in config.off
+        s for s in discover_sections(hub) if s.period == period and s.key not in config.off
     ]
     return ordered(sections, config.order)
 
@@ -286,11 +288,17 @@ def save_language(hub: Path, tag: str) -> None:
 
 
 def save_section(hub: Path, key: str, on: bool) -> None:
-    """Switch the section `key` (`<app>/<period>`) on, which removes its table, or off."""
+    """Switch the section `key` (`<app>/<period>`) on, which removes its table, or off.
+
+    Off sets `enabled = false` in the table and leaves its other lines, comments included.
+    """
     if not isinstance(key, str) or _split_key(key) is None:
         raise ReportError(f"{key!r} is not a section: use {KEY_RULE}")
     path = ("report", key)
-    _rewrite(hub, lambda text: _edit(text, path, None if on else {"enabled": False}))
+    if on:
+        _rewrite(hub, lambda text: _edit(text, path, None))
+    else:
+        _rewrite(hub, lambda text: _set(text, path, "enabled", False))
 
 
 def section_keys_of(hub: Path, app: str) -> list[str]:

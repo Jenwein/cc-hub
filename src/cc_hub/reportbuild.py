@@ -4,9 +4,10 @@
 `plan` says what a period's report will hold; `build` runs the approved section commands, reads
 the drafts agents wrote for instruction sections and the notes waiting, and returns the text. It
 only returns text: output of the commands never reaches the console, and nothing is stored or
-removed by it. `send` is the caller that does that: it sends the text through cc-connect, then
-records the run, archives and commits the text, and removes the notes and drafts that went in.
-`add_routed_note` stores a note for the report that will carry it.
+removed by it. `send` is the caller that does that: it sends the text through cc-connect, in
+parts that fit in one chat message, then records the run, archives and commits the text, and
+removes the notes and drafts that went in. `add_routed_note` stores a note for the report that
+will carry it.
 
 One send of a period at a time: `send` holds `.cc-hub/reports/send-<period>.lock` through the
 build and the sending, and keeps it fresh while it works. The state it changes (notes, runs,
@@ -60,6 +61,7 @@ from cc_hub.reportstate import (
 
 SECTION_TIMEOUT = 300  # seconds a section command may run
 MAX_SECTION_CHARS = 20000  # characters of a section's output that go into the report
+MAX_FAILURE = 300  # characters of an error that go into the line of a section that failed
 REAP_TIMEOUT = 5  # seconds to wait for the output of a command that was killed
 
 STRINGS: dict[str, dict[str, str]] = {
@@ -278,6 +280,7 @@ def plan(hub: Path, period: str, now: datetime) -> dict:
                 "approved": (
                     is_approved(state, s.app, period, s.command) if s.command is not None else None
                 ),
+                "error": s.error,
             }
             for s in sections
         ],
@@ -297,17 +300,29 @@ class Built:
     included: dict[str, int]  # per period, how many of its notes went in (the first ones)
 
 
+def _capped(text: str, limit: int) -> str:
+    """The first line of `text` that is not blank, cut to `limit` characters, the last one "…"."""
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+
+
+def _failed(strings: dict[str, str], section: Section, error: str) -> str:
+    return strings["failed"].format(title=section.title, line=_capped(error, MAX_FAILURE))
+
+
 def _body(
     hub: Path, section: Section, state: dict, strings: dict[str, str], env: dict, runner: Runner
 ) -> str:
     """The text of one section; "" when it has nothing to say."""
+    if section.error is not None:  # a file that cannot be used: say so rather than leave it out
+        return _failed(strings, section, section.error)
     if section.command is None:
         return read_draft(hub, section.period, section.app).strip()
     if not is_approved(state, section.app, section.period, section.command):
         return strings["unapproved"].format(title=section.title, app=section.app)
     output, error = runner(hub, section.command, env)
     if error is not None:
-        return strings["failed"].format(title=section.title, line=error)
+        return _failed(strings, section, error)
     output = output.strip()
     if len(output) > MAX_SECTION_CHARS:
         output = output[:MAX_SECTION_CHARS].rstrip() + "\n" + strings["cut"]
@@ -348,6 +363,7 @@ def build(hub: Path, period: str, now: datetime, *, runner: Runner = run_command
 Sender = Callable[[str], None]
 
 SEND_TIMEOUT = 60  # seconds cc-connect may take to take a report
+MAX_PART_CHARS = 4000  # characters in one message: cc-connect does not split, Feishu refuses ~30 KB
 MAX_DETAIL = 200  # characters of cc-connect's own words that go into an error
 MIN_ECHO = 8  # a line this long, shared with the report, means cc-connect printed the report
 WITHHELD = "(details withheld)"
@@ -372,6 +388,11 @@ def _echoes(line: str, text: str) -> bool:
     return False
 
 
+def _echoes_any(detail: str, text: str) -> bool:
+    """Whether a line of `detail` has something of `text` in it (see `_echoes`)."""
+    return any(_echoes(ln.strip(), text) for ln in detail.splitlines())
+
+
 def _detail(proc: subprocess.CompletedProcess, text: str) -> str:
     """cc-connect's own words about a failure, as ": ..." (empty when it said nothing).
 
@@ -381,11 +402,46 @@ def _detail(proc: subprocess.CompletedProcess, text: str) -> str:
     line = next((ln.strip() for ln in _output(proc.stderr).splitlines() if ln.strip()), "")
     if not line:
         return ""
-    if _echoes(line, text):
-        line = WITHHELD
-    elif len(line) > MAX_DETAIL:
-        line = line[: MAX_DETAIL - 1].rstrip() + "…"
-    return f": {line}"
+    return f": {WITHHELD if _echoes(line, text) else _capped(line, MAX_DETAIL)}"
+
+
+def _cut(text: str, start: int, limit: int) -> int:
+    """Where the part of `text` that starts at `start`, too long for one message, ends.
+
+    Before the last section heading (`## `) that fits, else after the last line that fits,
+    else where the part is full. A cut that would leave the part nothing but headings and
+    blank lines is not made: the title stays with the first section, a heading with its text.
+    """
+    end = start + limit
+
+    def has_content(cut: int) -> bool:
+        return any(
+            ln.strip() and not ln.lstrip().startswith("#") for ln in text[start:cut].splitlines()
+        )
+
+    heading = text.rfind("\n## ", start, end + 3)  # the "\n" of a heading that starts by `end`
+    if heading != -1 and has_content(heading + 1):
+        return heading + 1
+    newline = text.rfind("\n", start, end)
+    if newline != -1 and has_content(newline + 1):
+        return newline + 1
+    return end
+
+
+def split_report(text: str, limit: int = MAX_PART_CHARS) -> list[str]:
+    """`text` as parts of at most `limit` characters, in order; joined they are `text` again.
+
+    A part ends before a section where it can, else at the end of a line; a line longer than
+    a part is cut where the part is full.
+    """
+    parts: list[str] = []
+    start = 0
+    while len(text) - start > limit:
+        cut = _cut(text, start, limit)
+        parts.append(text[start:cut])
+        start = cut
+    parts.append(text[start:])
+    return parts
 
 
 def cc_connect_sender(
@@ -394,18 +450,23 @@ def cc_connect_sender(
     """A sender that gives the text to `cc-connect send`, for the project and session in `env`.
 
     The text goes in on stdin as UTF-8, never on the command line. ReportError says why it failed.
+    Without a session (`CC_SESSION_KEY`) it refuses: cc-connect would pick any active session,
+    which may be a group chat. The project is optional.
     """
 
     def send_text(text: str) -> None:
         cc = which("cc-connect")
         if cc is None:
             raise ReportError("cc-connect not found on PATH")
+        session = env.get("CC_SESSION_KEY")
+        if not session:
+            raise ReportError(
+                "no chat to send to: run it from the agent in the chat, or set CC_SESSION_KEY"
+            )
         argv = [cc, "send"]
         if env.get("CC_PROJECT"):
             argv += ["-p", env["CC_PROJECT"]]
-        if env.get("CC_SESSION_KEY"):
-            argv += ["-s", env["CC_SESSION_KEY"]]
-        argv.append("--stdin")
+        argv += ["-s", session, "--stdin"]
         try:
             proc = run(argv, input=text.encode("utf-8"), capture_output=True, timeout=SEND_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -430,6 +491,7 @@ class SendResult:
     notes: int
     archive: str | None  # the archive file, relative to the hub, with /
     warning: str | None  # problems after the report went out, joined by "; "
+    cut_short: str | None = None  # a part after the first could not be sent: what to say
 
 
 def _require_aware(now: datetime) -> None:
@@ -464,50 +526,87 @@ def _archive(hub: Path, period: str, now: datetime, text: str) -> str:
     return f"{ARCHIVE_DIR}/{year}/{name}"
 
 
-def _after_delivery(
-    hub: Path, period: str, now: datetime, built: Built
-) -> tuple[str | None, str | None]:
-    """What follows a report that went out: (its archive, warnings). Raises nothing.
+# A warning: what went wrong, in cc-hub's own words, and the detail the failure gave, if any.
+Warnings = list[tuple[str, str | None]]
 
-    The send is recorded first: from then on the same report is not sent again, whatever else
-    fails. Each failure (a file in use, a full disk, a busy state) is a warning, and the steps
-    after it still run.
-    """
-    warnings: list[str] = []
 
-    def attempt(what: str, action: Callable[[], None]) -> None:
-        try:
-            action()
-        except OSError as exc:  # TimeoutError of the state lock is one too
-            warnings.append(f"{what}: {exc}")
+def _attempt(warnings: Warnings, what: str, action: Callable[[], None]) -> None:
+    """Run `action`; an OSError becomes a warning. TimeoutError of the state lock is one too."""
+    try:
+        action()
+    except OSError as exc:
+        warnings.append((what, str(exc)))
+
+
+def _record_sent(hub: Path, period: str, now: datetime, warnings: Warnings) -> None:
+    """Record that the report went out: from then on it is not sent again, whatever fails."""
 
     def record() -> None:
         with state_lock(hub):
             record_run(hub, period, now, sent=True)
 
-    attempt("the send was not recorded", record)
+    _attempt(warnings, "the send was not recorded", record)
 
+
+def _after_delivery(
+    hub: Path, period: str, now: datetime, built: Built, warnings: Warnings
+) -> str | None:
+    """Archive and commit a report that went out, and remove what went in; returns the archive.
+
+    Raises nothing: each failure (a file in use, a full disk, a busy state) goes into
+    `warnings`, and the steps after it still run.
+    """
     archive: str | None = None
     try:
         archive = _archive(hub, period, now, built.text)
     except OSError as exc:
-        warnings.append(f"report not archived: {exc}")
+        warnings.append(("report not archived", str(exc)))
     else:
         try:
-            problem = gitops.commit_paths(hub, [archive], f"cc-hub: report {period}")
-        except OSError as exc:
-            problem = f"not committed: {exc}"
-        if problem is not None:
-            warnings.append(problem)
+            committed = gitops.commit_paths(hub, [archive], f"cc-hub: report {period}") is None
+        except OSError:
+            committed = False
+        if not committed:  # git's own words are left out: a hook may print the staged report
+            what = f"the report was archived to {archive} but not committed; commit it by hand"
+            warnings.append((what, None))
 
     def remove_what_went_in() -> None:
         with state_lock(hub):
             for written_for, count in built.included.items():  # the first ones: later ones stay
-                attempt("notes not removed", lambda p=written_for, n=count: drop_notes(hub, p, n))
-            attempt("drafts not removed", lambda: clear_drafts(hub, period))
+                _attempt(
+                    warnings,
+                    "notes not removed",
+                    lambda p=written_for, n=count: drop_notes(hub, p, n),
+                )
+            _attempt(warnings, "drafts not removed", lambda: clear_drafts(hub, period))
 
-    attempt("notes and drafts not removed", remove_what_went_in)
-    return archive, "; ".join(warnings) or None
+    _attempt(warnings, "notes and drafts not removed", remove_what_went_in)
+    return archive
+
+
+def _warning(warnings: Warnings, text: str) -> str | None:
+    """The warnings joined by "; "; a detail with something of the report in it is withheld."""
+    shown = [
+        what if detail is None else f"{what}: {WITHHELD if _echoes_any(detail, text) else detail}"
+        for what, detail in warnings
+    ]
+    return "; ".join(shown) or None
+
+
+def _cut_short(number: int, total: int, error: str, archive: str | None, text: str) -> str:
+    """What to say when part `number` of `total` could not be sent and the rest was not.
+
+    The error's first line is checked against the whole report before it is cut short.
+    """
+    line = next((ln.strip() for ln in error.splitlines() if ln.strip()), "")
+    detail = "details withheld" if _echoes(line, text) else _capped(line, MAX_FAILURE)
+    why = f" ({detail})" if detail else ""
+    where = (
+        f"the full report is in {archive}"
+        if archive is not None
+        else "the full report could not be archived"
+    )
+    return f"the report was cut short: part {number} of {total} could not be sent{why}; {where}"
 
 
 def send(
@@ -521,11 +620,14 @@ def send(
 ) -> SendResult:
     """Build the `period` report and send it; once a day unless `again`.
 
-    ReportError when another send of the period is running, or when the sender fails: nothing
-    has changed then. Once the report is out nothing is raised: what went wrong afterwards is the
-    result's warning, so that the report is not sent a second time. `now` is timezone-aware; a
-    day is a day in its timezone. TimeoutError when the reports state stays busy and nothing
-    was sent.
+    The report goes out in parts of at most MAX_PART_CHARS characters (`split_report`), one
+    message each, in order. ReportError when another send of the period is running, or when the
+    sender fails on the first part: nothing has changed then. Once the first part is out the run
+    is recorded and nothing is raised: what goes wrong afterwards is the result's warning, so
+    that the report is not sent a second time. When a later part fails, the parts after it are
+    not sent, everything else still happens (the archive holds the whole report), and
+    `cut_short` says so. `now` is timezone-aware; a day is a day in its timezone. TimeoutError
+    when the reports state stays busy and nothing was sent.
     """
     _require_aware(now)
     if period not in PERIODS:  # before the period is used in a file name
@@ -546,10 +648,26 @@ def send(
                 record_run(hub, period, now, sent=False)
                 clear_drafts(hub, period)
             return SendResult("empty", 0, 0, None, None)
+        deliver = sender if sender is not None else cc_connect_sender()
+        parts = split_report(built.text)
         keep_fresh()
-        (sender if sender is not None else cc_connect_sender())(built.text)
-        archive, warning = _after_delivery(hub, period, now, built)
-        return SendResult("sent", built.sections, built.notes, archive, warning)
+        deliver(parts[0])  # when this fails, nothing has changed
+        warnings: Warnings = []
+        _record_sent(hub, period, now, warnings)
+        failed: tuple[int, str] | None = None
+        for number, part in enumerate(parts[1:], start=2):
+            keep_fresh()
+            try:
+                deliver(part)
+            except (ReportError, OSError) as exc:  # the rest is not sent; the archive keeps it
+                failed = (number, str(exc))
+                break
+        archive = _after_delivery(hub, period, now, built, warnings)
+        cut_short = (
+            _cut_short(failed[0], len(parts), failed[1], archive, built.text) if failed else None
+        )
+        warning = _warning(warnings, built.text)
+        return SendResult("sent", built.sections, built.notes, archive, warning, cut_short)
 
 
 def add_routed_note(hub: Path, period: str, source: str, text: str, now: datetime) -> str | None:

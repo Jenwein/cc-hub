@@ -160,6 +160,9 @@ def plan_cmd(
     typer.echo(f"{plan['period']}: {len(sections)} section(s), {plan['notes']} note(s)")
     typer.echo(f"since {plan['since']} until {plan['until']}, language {plan['language']}")
     for section in sections:
+        if section["error"] is not None:  # it goes into the report as a line that says so
+            typer.echo(f"  {section['app']}  error: {section['error']}")
+            continue
         line = f"  {section['app']}  {section['kind']}"
         if section["approved"] is not None:
             line += "  approved" if section["approved"] else "  not approved"
@@ -212,6 +215,10 @@ def put_cmd(
         period = _period(period)
         _check_draft_target(hub, app_name, period)
         body = text if text is not None else _stdin_text()
+        if not body.strip():
+            raise ReportError(
+                "nothing to store: the text is empty (to leave the section out, store nothing)"
+            )
         with reportstate.state_lock(hub):
             reportstate.put_draft(hub, period, app_name, body)
     except ERRORS as exc:
@@ -230,7 +237,11 @@ def send_cmd(
         False, "--again", help="Send even though this report was already sent today."
     ),
 ) -> None:
-    """Build the report of a period and send it to the chat; once a day unless --again."""
+    """Build the report of a period and send it to the chat; once a day unless --again.
+
+    A long report goes out as several messages. Exit 1 when one after the first could not be
+    sent: the report counts as sent, and the archive holds all of it.
+    """
     hub = resolve_hub(ctx)
     try:
         period = _period(period)
@@ -243,6 +254,8 @@ def send_cmd(
     if result.status == "sent":
         typer.echo(f"sent: {result.sections} section(s), {result.notes} note(s)")
         warn(result.warning)
+        if result.cut_short is not None:
+            fail(result.cut_short)  # the task replies with it
     elif result.status == "empty":
         typer.echo("nothing to send")
     else:

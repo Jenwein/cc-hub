@@ -11,11 +11,13 @@ import pytest
 
 from cc_hub import apps, cronoverrides, gitops, reportbuild, reports, reportstate
 from cc_hub.reportbuild import (
+    MAX_PART_CHARS,
     SOURCE_RULE,
     SendResult,
     add_routed_note,
     cc_connect_sender,
     send,
+    split_report,
 )
 from cc_hub.reports import ReportError
 from tests.conftest import fake_app, write
@@ -255,9 +257,57 @@ def test_commit_warning_goes_into_the_result(hub: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(gitops, "commit_paths", commit)
     result = send(hub, "daily", NOW, sender=Sink())
     assert result.status == "sent" and result.archive == ARCHIVE
-    assert result.warning == "not committed: index.lock exists"
+    # a fixed warning: git's own words are left out, they may quote the report
+    assert result.warning == NOT_COMMITTED
     assert seen == [(hub.absolute(), [ARCHIVE], "cc-hub: report daily")]
     assert reportstate.last_sent(reportstate.load_state(hub), "daily") == NOW  # still recorded
+
+
+NOT_COMMITTED = f"the report was archived to {ARCHIVE} but not committed; commit it by hand"
+SECRET_LINE = "邮件：明天下午三点和 alice@example.com 在老地方见面"
+
+
+def test_a_commit_refused_by_a_hook_that_prints_the_diff_does_not_leak_the_report(
+    git_hub: Path,
+):
+    hub = git_hub
+    periods_on(hub, "daily")
+    install(hub, "plans", "daily", "---\n---\n")
+    reportstate.put_draft(hub, "daily", "plans", SECRET_LINE + "\n")
+    # a pre-commit hook that prints the staged diff and refuses; sh runs it on Windows too
+    hook = hub / ".git" / "hooks" / "pre-commit"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_bytes(b"#!/bin/sh\ngit diff --cached\ngit diff --cached >&2\nexit 1\n")
+    hook.chmod(0o755)
+    head = git_out(hub, "rev-parse", "HEAD")
+
+    result = send(hub, "daily", NOW, sender=Sink())
+
+    assert git_out(hub, "rev-parse", "HEAD") == head  # the hook did refuse the commit
+    assert (result.status, result.archive) == ("sent", ARCHIVE)
+    assert result.warning == NOT_COMMITTED
+    assert "alice" not in result.warning and "明天" not in result.warning
+
+
+def test_warnings_that_echo_the_report_are_withheld(hub: Path, monkeypatch: pytest.MonkeyPatch):
+    periods_on(hub, "daily")
+    install(hub, "plans", "daily", "---\n---\n")
+    reportstate.put_draft(hub, "daily", "plans", SECRET_LINE + "\n")
+    reportstate.add_note(hub, "daily", "feishu", "a note", NOW)
+
+    def locked(hub_dir, period, count):
+        raise PermissionError(f"cannot remove a line: {SECRET_LINE}")
+
+    def full(hub_dir, period):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(reportbuild, "drop_notes", locked)
+    monkeypatch.setattr(reportbuild, "clear_drafts", full)
+    result = send(hub, "daily", NOW, sender=Sink())
+    assert result.status == "sent"
+    assert result.warning == (
+        "notes not removed: (details withheld); drafts not removed: disk full"
+    )
 
 
 def test_the_archive_is_named_for_the_local_date_of_now(hub: Path):
@@ -405,32 +455,52 @@ def test_cc_connect_sender_builds_the_command():
     assert kwargs["capture_output"] is True
 
 
+SESSION = {"CC_SESSION_KEY": "feishu:x"}
+
+
 @pytest.mark.parametrize(
     ("env", "tail"),
     [
-        ({}, []),
-        ({"CC_PROJECT": "hub"}, ["-p", "hub"]),
-        ({"CC_SESSION_KEY": "feishu:x"}, ["-s", "feishu:x"]),
-        ({"CC_PROJECT": "", "CC_SESSION_KEY": ""}, []),  # an empty variable counts as unset
+        (SESSION, ["-s", "feishu:x"]),
+        ({"CC_PROJECT": "hub", **SESSION}, ["-p", "hub", "-s", "feishu:x"]),
+        ({"CC_PROJECT": "", **SESSION}, ["-s", "feishu:x"]),  # an empty variable counts as unset
     ],
 )
-def test_cc_connect_sender_adds_project_and_session_only_when_set(env, tail):
+def test_cc_connect_sender_adds_the_project_only_when_set(env, tail):
     run = fake_run()
     cc_connect_sender(which=lambda _: CC, run=run, env=env)("report")
     assert run.calls[0][0] == [CC, "send", *tail, "--stdin"]
 
 
+@pytest.mark.parametrize(
+    "env", [{}, {"CC_PROJECT": "hub"}, {"CC_SESSION_KEY": ""}, {"CC_SESSION_KEY": "", "x": "y"}]
+)
+def test_cc_connect_sender_refuses_without_a_session(env):
+    """Without -s cc-connect picks any active session, which may be a group chat."""
+    run = fake_run()
+    sender = cc_connect_sender(which=lambda _: CC, run=run, env=env)
+    with pytest.raises(ReportError) as info:
+        sender("report")
+    assert str(info.value) == (
+        "no chat to send to: run it from the agent in the chat, or set CC_SESSION_KEY"
+    )
+    assert run.calls == []
+
+
 def test_cc_connect_sender_reads_the_environment_by_default(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CC_PROJECT", "hub2")
-    monkeypatch.delenv("CC_SESSION_KEY", raising=False)
+    monkeypatch.setenv("CC_SESSION_KEY", "feishu:y")
     run = fake_run()
     cc_connect_sender(which=lambda _: CC, run=run)("report")
-    assert run.calls[0][0] == [CC, "send", "-p", "hub2", "--stdin"]
+    assert run.calls[0][0] == [CC, "send", "-p", "hub2", "-s", "feishu:y", "--stdin"]
+    monkeypatch.delenv("CC_SESSION_KEY")
+    with pytest.raises(ReportError, match="no chat to send to"):
+        cc_connect_sender(which=lambda _: CC, run=run)("report")
 
 
 def test_cc_connect_sender_not_on_path():
     run = fake_run()
-    sender = cc_connect_sender(which=lambda _: None, run=run, env={})
+    sender = cc_connect_sender(which=lambda _: None, run=run, env=SESSION)
     with pytest.raises(ReportError) as info:
         sender("report")
     assert str(info.value) == "cc-connect not found on PATH"
@@ -439,7 +509,7 @@ def test_cc_connect_sender_not_on_path():
 
 def test_cc_connect_sender_failure_messages():
     def raised(**kw):
-        sender = cc_connect_sender(which=lambda _: CC, run=fake_run(**kw), env={})
+        sender = cc_connect_sender(which=lambda _: CC, run=fake_run(**kw), env=SESSION)
         with pytest.raises(ReportError) as info:
             sender("report text")
         return str(info.value)
@@ -473,7 +543,7 @@ WITHHELD = "cc-connect send failed (exit 1): (details withheld)"
 
 def failure(stderr: str, text: str = REPORT) -> str:
     sender = cc_connect_sender(
-        which=lambda _: CC, run=fake_run(returncode=1, stderr=stderr), env={}
+        which=lambda _: CC, run=fake_run(returncode=1, stderr=stderr), env=SESSION
     )
     with pytest.raises(ReportError) as info:
         sender(text)
@@ -524,7 +594,7 @@ def test_cc_connect_sender_never_quotes_stdout():
     sender = cc_connect_sender(
         which=lambda _: CC,
         run=fake_run(returncode=1, stdout="mail body: 3 new mails", stderr=""),
-        env={},
+        env=SESSION,
     )
     with pytest.raises(ReportError) as info:
         sender("report")
@@ -541,11 +611,11 @@ def test_cc_connect_sender_really_pipes_utf8_through_stdin(tmp_path: Path):
     real_run = subprocess.run
 
     def run(argv, **kwargs):  # the real call, with a Python script standing for cc-connect
-        assert argv[1:] == ["send", "--stdin"]
+        assert argv[1:] == ["send", "-s", "feishu:x", "--stdin"]
         return real_run([sys.executable, "-c", script, str(out)], **kwargs)
 
     text = "# 日报 · 2026-10-16\n\n## 邮件\n\n3 封新邮件 ✓\n\n- feishu: line one\n  line two"
-    cc_connect_sender(which=lambda _: "cc-connect", run=run, env={})(text)
+    cc_connect_sender(which=lambda _: "cc-connect", run=run, env=SESSION)(text)
     assert out.read_bytes() == text.encode("utf-8")
 
 
@@ -832,3 +902,165 @@ def test_several_warnings_are_joined(hub: Path, monkeypatch: pytest.MonkeyPatch)
     assert result.warning is not None
     first, second = result.warning.split("; drafts not removed: ")
     assert first.startswith("report not archived: ") and second == "locked"
+
+
+# --- a long report goes out in parts ---
+
+
+def test_split_report_keeps_a_report_within_the_limit_whole():
+    assert MAX_PART_CHARS == 4000
+    assert split_report("# T\n\n## A\n\nx") == ["# T\n\n## A\n\nx"]
+    assert split_report("x" * MAX_PART_CHARS) == ["x" * MAX_PART_CHARS]
+    assert split_report("x" * 10, 10) == ["x" * 10]
+
+
+def test_split_report_cuts_before_a_section():
+    title = "# T\n\n"
+    a = "## A\n\n" + "a" * 30
+    b = "## B\n\n" + "b" * 30
+    c = "## C\n\n" + "c" * 30
+    text = f"{title}{a}\n\n{b}\n\n{c}"
+    assert split_report(text, 100) == [f"{title}{a}\n\n{b}\n\n", c]
+    # never a part with the title alone: the first section stays with it
+    assert split_report(text, 60) == [f"{title}{a}\n\n", f"{b}\n\n", c]
+
+
+def test_split_report_cuts_a_long_section_between_lines():
+    lines = [f"line {i:02d} " + "x" * 20 for i in range(10)]
+    text = "# T\n\n## A\n\n" + "\n".join(lines)
+    parts = split_report(text, 100)
+    assert len(parts) > 2 and "".join(parts) == text
+    assert all(len(p) <= 100 for p in parts)
+    assert all(p.endswith("\n") for p in parts[:-1])
+    assert all(p.startswith("line ") for p in parts[1:])
+
+
+def test_split_report_hard_splits_a_line_longer_than_a_part():
+    text = "# T\n\n## A\n\n" + "y" * 250 + "\nshort line"
+    # the headings are not sent on their own: the first part fills up with the long line
+    assert split_report(text, 100) == [text[:100], text[100:200], text[200:]]
+    text = "# T\n\n## A\n\nfirst line\n" + "z" * 150
+    assert split_report(text, 100) == [text[:22], "z" * 100, "z" * 50]
+
+
+class Limited:
+    """A sender like cc-connect towards Feishu: a message over 4000 characters is refused.
+
+    `fail_on` makes the message with that number (1 for the first) fail with `error`.
+    """
+
+    def __init__(self, fail_on: int | None = None, error: str = "rate limited"):
+        self.texts: list[str] = []
+        self.fail_on = fail_on
+        self.error = error
+
+    def __call__(self, text: str) -> None:
+        if len(text) > 4000:
+            raise ReportError("cc-connect send failed (exit 1): message too long")
+        if self.fail_on == len(self.texts) + 1:
+            raise ReportError(f"cc-connect send failed (exit 1): {self.error}")
+        self.texts.append(text)
+
+
+MAIL_LINE = "第 7 封：" + "邮件正文" * 60
+
+
+def long_report_hub(hub: Path) -> None:
+    """A daily report of about 70 KB of Chinese text: three long sections and a note."""
+    periods_on(hub, "daily")
+    install(hub, "plans", "daily", '---\ntitle: "计划"\n---\n')
+    install(hub, "mail", "daily", '---\ntitle: "邮件"\n---\n')
+    install(hub, "diary", "daily", '---\ntitle: "日记"\n---\n')
+    plans = "\n".join(f"{i}. " + "计划" * 150 for i in range(12))
+    mail = "\n".join(f"第 {i} 封：" + "邮件正文" * 60 for i in range(40))
+    reportstate.put_draft(hub, "daily", "plans", plans)
+    reportstate.put_draft(hub, "daily", "mail", mail)
+    reportstate.put_draft(hub, "daily", "diary", "长" * 9000)  # one line longer than a part
+    reportstate.add_note(hub, "daily", "feishu", "别忘了周五的会", NOW)
+
+
+def archived(hub: Path) -> str:
+    return (hub / ARCHIVE).read_bytes().decode("utf-8")[:-1]  # without the final newline
+
+
+def test_a_long_report_is_sent_in_parts_in_order(hub: Path):
+    long_report_hub(hub)
+    sender = Limited()
+
+    result = send(hub, "daily", NOW, sender=sender)
+
+    text = archived(hub)
+    assert len(text.encode("utf-8")) > 60000
+    assert (result.status, result.sections, result.notes) == ("sent", 3, 1)
+    assert result.cut_short is None and result.warning is None
+    assert len(sender.texts) > 5
+    assert all(len(part) <= 4000 for part in sender.texts)
+    assert "".join(sender.texts) == text
+    assert sender.texts == split_report(text)
+    # a section starts a new part where it can; the short notes fit in with the last one
+    assert [p.split("\n", 1)[0] for p in sender.texts if p.startswith("## ")] == [
+        "## 邮件", "## 计划",
+    ]
+    assert sender.texts[-1].endswith("## Notes\n\n- feishu: 别忘了周五的会")
+
+
+def test_a_part_after_the_first_that_fails_cuts_the_report_short(hub: Path):
+    long_report_hub(hub)
+    sender = Limited(fail_on=2)
+
+    result = send(hub, "daily", NOW, sender=sender)
+
+    text = archived(hub)
+    parts = split_report(text)
+    assert sender.texts == [parts[0]]  # nothing after the part that failed
+    assert (result.status, result.archive) == ("sent", ARCHIVE)
+    assert result.cut_short == (
+        f"the report was cut short: part 2 of {len(parts)} could not be sent "
+        f"(cc-connect send failed (exit 1): rate limited); the full report is in {ARCHIVE}"
+    )
+    # part 1 is out: the run is recorded and what went in is gone
+    assert reportstate.last_sent(reportstate.load_state(hub), "daily") == NOW
+    assert reportstate.read_notes(hub, "daily") == []
+    assert reportstate.read_draft(hub, "daily", "mail") == ""
+    # and it is not sent again the same day
+    assert send(hub, "daily", NOW + timedelta(hours=1), sender=Limited()).status == "already"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        f"rejected {MAIL_LINE}",
+        # long enough to be cut: the check is made on the whole line, before the cut
+        "y" * 100 + " " + MAIL_LINE,
+    ],
+    ids=["echo", "echo-in-a-long-line"],
+)
+def test_a_cut_short_detail_that_echoes_the_report_is_withheld(hub: Path, error: str):
+    long_report_hub(hub)
+    result = send(hub, "daily", NOW, sender=Limited(fail_on=3, error=error))
+    assert result.cut_short is not None
+    assert "邮件正文" not in result.cut_short
+    assert "could not be sent (details withheld); the full report is in" in result.cut_short
+
+
+def test_a_first_part_that_fails_changes_nothing(hub: Path):
+    long_report_hub(hub)
+    with pytest.raises(ReportError, match="rate limited"):
+        send(hub, "daily", NOW, sender=Limited(fail_on=1))
+    assert not (hub / "reports").exists()
+    assert reportstate.last_run(reportstate.load_state(hub), "daily") is None
+    assert len(reportstate.read_notes(hub, "daily")) == 1
+    assert not send_lock(hub).exists()
+
+
+def test_the_send_lock_is_refreshed_before_each_part(hub: Path):
+    long_report_hub(hub)
+    ages: list[float] = []
+
+    def sender(text: str) -> None:
+        ages.append(time.time() - send_lock(hub).stat().st_mtime)
+        old = time.time() - 1800  # as if this part had taken half an hour
+        os.utime(send_lock(hub), (old, old))
+
+    send(hub, "daily", NOW, sender=sender)
+    assert len(ages) > 5 and all(age < 60 for age in ages), ages

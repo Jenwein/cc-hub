@@ -265,6 +265,20 @@ def test_plan_text_of_an_empty_report(hub: Path) -> None:
     assert r.stdout.splitlines()[-1] == "nothing to send"
 
 
+def test_plan_text_shows_a_section_whose_file_is_broken(hub: Path) -> None:
+    install(hub, "broken", "daily", "no frontmatter")
+    r = run(hub, "report", "plan", "daily")
+    assert r.exit_code == 0, r.output
+    lines = r.stdout.splitlines()
+    assert lines[0] == "daily: 1 section(s), 0 note(s)"
+    assert lines[2] == (
+        "  broken  error: apps/broken/reports/daily.md: needs a frontmatter block between --- lines"
+    )
+    assert "nothing to send" not in r.stdout
+    data = json.loads(run(hub, "report", "plan", "daily", "--json").stdout)
+    assert data["empty"] is False and data["sections"][0]["error"].startswith("apps/broken/")
+
+
 def test_plan_text_marks_a_command_that_is_not_approved(hub: Path) -> None:
     command(hub, "mail")
     assert "  mail  command  not approved" in run(hub, "report", "plan", "daily").stdout
@@ -314,6 +328,21 @@ def test_put_replaces_the_draft(hub: Path) -> None:
     run(hub, "report", "put", "daily", "diary", "--text", "one")
     run(hub, "report", "put", "daily", "diary", "--text", "two")
     assert reportstate.read_draft(hub, "daily", "diary") == "two"
+
+
+@pytest.mark.parametrize(
+    ("args", "stdin"),
+    [(["--text", ""], None), (["--text", " \n\t"], None), ([], ""), ([], "\n\n")],
+)
+def test_put_refuses_empty_text(hub: Path, args: list[str], stdin: str | None) -> None:
+    instruction(hub, "diary")
+    r = run(hub, "report", "put", "daily", "diary", *args, input=stdin)
+    assert r.exit_code == 1
+    assert r.stderr.strip() == (
+        "nothing to store: the text is empty (to leave the section out, store nothing)"
+    )
+    assert "draft saved" not in r.output
+    assert not (hub / ".cc-hub/reports/drafts").exists()
 
 
 def test_put_with_bytes_that_are_not_utf8_fails(hub: Path) -> None:
@@ -480,9 +509,33 @@ def test_send_error_does_not_echo_the_report(hub: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(
         reportbuild, "cc_connect_sender", lambda: real(which=lambda name: name, run=fake_run)
     )
+    monkeypatch.setenv("CC_SESSION_KEY", "feishu:test")
     r = run(hub, "report", "send", "daily")
     assert r.exit_code == 1 and "cc-connect send failed (exit 2)" in r.stderr
     assert SECRET not in r.output
+
+
+def test_send_without_a_session_is_an_error_and_changes_nothing(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instruction(hub, "diary")
+    run(hub, "report", "put", "daily", "diary", "--text", f"body {SECRET}")
+    monkeypatch.delenv("CC_SESSION_KEY", raising=False)
+    calls: list = []
+    real = reportbuild.cc_connect_sender
+    monkeypatch.setattr(
+        reportbuild,
+        "cc_connect_sender",
+        lambda: real(which=lambda name: name, run=lambda *a, **k: calls.append(a)),
+    )
+    r = run(hub, "report", "send", "daily")
+    assert r.exit_code == 1
+    assert r.stderr.strip() == (
+        "no chat to send to: run it from the agent in the chat, or set CC_SESSION_KEY"
+    )
+    assert calls == []  # cc-connect is not run at all
+    assert reportstate.read_draft(hub, "daily", "diary") != ""
+    assert not (hub / "reports").exists()
 
 
 def test_send_commit_warning_goes_to_stderr(
@@ -494,7 +547,39 @@ def test_send_commit_warning_goes_to_stderr(
     r = run(git_hub, "report", "send", "daily")
     assert r.exit_code == 0, r.output
     assert r.stdout.strip() == "sent: 1 section(s), 0 note(s)"
-    assert "warning: not committed: boom" in r.stderr
+    [archive] = [p.relative_to(git_hub).as_posix() for p in (git_hub / "reports").rglob("*.md")]
+    assert r.stderr.strip() == (
+        f"warning: the report was archived to {archive} but not committed; commit it by hand"
+    )
+
+
+def test_send_of_a_report_cut_short_exits_1(hub: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    instruction(hub, "diary")
+    long_text = "\n".join(f"{i}: " + "日记" * 100 for i in range(60))  # about 12000 characters
+    run(hub, "report", "put", "daily", "diary", input=long_text.encode("utf-8"))
+    got: list[str] = []
+
+    def second_fails(text: str) -> None:
+        if len(got) == 1:
+            raise ReportError("cc-connect send failed (exit 1): rate limited")
+        got.append(text)
+
+    monkeypatch.setattr(reportbuild, "cc_connect_sender", lambda: second_fails)
+    r = run(hub, "report", "send", "daily")
+    assert r.exit_code == 1
+    assert r.stdout.strip() == "sent: 1 section(s), 0 note(s)"
+    [archive] = [p.relative_to(hub).as_posix() for p in (hub / "reports").rglob("*.md")]
+    total = len(reportbuild.split_report((hub / archive).read_text(encoding="utf-8")[:-1]))
+    assert total > 2 and len(got) == 1
+    assert r.stderr.strip() == (
+        f"the report was cut short: part 2 of {total} could not be sent "
+        f"(cc-connect send failed (exit 1): rate limited); the full report is in {archive}"
+    )
+    assert "日记" not in r.output
+    # it counts as sent: the same day it is not sent again
+    r = run(hub, "report", "send", "daily")
+    assert r.exit_code == 0 and r.stdout.strip() == "already sent today; --again sends it once more"
+    assert len(got) == 1
 
 
 def test_send_commits_the_archive(git_hub: Path, sent: Collector) -> None:
