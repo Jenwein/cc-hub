@@ -95,5 +95,5 @@ def _command_names() -> set[str]:
 def test_cli_exposes_exactly_the_hub_commands() -> None:
     assert _command_names() == {
         "init", "doctor", "update", "memory", "link", "where", "version", "tap", "app",
-        "feedback", "cron",
+        "feedback", "cron", "report",
     }

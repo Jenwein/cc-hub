@@ -61,6 +61,7 @@ from cc_hub.commands import feedback as _feedback  # noqa: E402
 from cc_hub.commands import init as _init  # noqa: E402
 from cc_hub.commands import link as _link  # noqa: E402
 from cc_hub.commands import memory as _memory  # noqa: E402
+from cc_hub.commands import report as _report  # noqa: E402
 from cc_hub.commands import tap as _tap  # noqa: E402
 from cc_hub.commands import update as _update  # noqa: E402
 
@@ -73,3 +74,4 @@ _tap.register(app)
 _app_cmd.register(app)
 _feedback.register(app)
 _cron.register(app)
+_report.register(app)

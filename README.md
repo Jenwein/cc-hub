@@ -42,6 +42,7 @@ lists the subcommands of a group.
 | `cc-hub tap add\|list\|remove` | Register git repositories of apps (taps). |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | Install, update and remove apps from taps. |
 | `cc-hub cron list\|set\|reset` | Scheduled tasks: list them, change their times, turn them off or on. |
+| `cc-hub report list\|plan\|put\|send\|note\|section\|language\|approve` | Reports: daily to yearly digests that apps add sections to. |
 | `cc-hub feedback [--app NAME] [--json]` | Where to report a problem, with an environment block; sends nothing. |
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |

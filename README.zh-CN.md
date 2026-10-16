@@ -30,6 +30,7 @@
 | `cc-hub tap add\|list\|remove` | 登记放应用的 git 仓库（tap） |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | 从 tap 安装、升级、卸载应用 |
 | `cc-hub cron list\|set\|reset` | 定时任务：列出、改时间、关掉或打开 |
+| `cc-hub report list\|plan\|put\|send\|note\|section\|language\|approve` | 报告：应用按周期往里加内容的日报到年报 |
 | `cc-hub feedback [--app NAME] [--json]` | 反馈问题的去处和环境信息，不发送任何东西 |
 | `cc-hub where` | 打印总站目录和包的安装位置 |
 | `cc-hub version` | 打印版本号 |
