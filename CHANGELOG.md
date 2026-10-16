@@ -34,10 +34,12 @@
   has a `PreToolUse` entry whose command ends in ` cron guard`. It may be
   deleted; while it stays, it runs `cc-hub cron guard`, which exits 0
   without a decision.
-- Remove apps whose tasks use `exec` or `on_demand` (`hub-apps` also deletes
-  their jobs from cc-connect). This version does not read `exec`, so it
-  lists such a task as a prompt task, and an `on_demand` task without
-  `schedule` as a definition error.
+- Remove apps whose tasks use `exec`, `on_demand` or `allow` (`hub-apps`
+  also deletes their jobs from cc-connect). This version does not read
+  `exec`, so it lists such a task as a prompt task, and an `on_demand` task
+  without `schedule` as a definition error. A task with `allow` keeps its
+  registered job, which now runs without any limit on its commands, and a
+  job registered with `--silent` stays silent.
 
 ## 0.5.0 - 2026-10-15
 

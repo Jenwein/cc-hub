@@ -165,7 +165,7 @@ schedule: "0 3 * * *"
 default: true                 # 在每台机器上登记；false 则只在用户打开时登记
 session: new_per_run          # reuse | new_per_run，对应 cc-connect 的 --session-mode
 ---
-Prompt text the agent receives when the task fires.
+What the agent does when the task fires.
 ```
 
 **定义错误**：缺 `schedule` 或表达式不是五段；`session` 不是两个取值之一；`default` 不是 `true`/`false`。frontmatter 里的其他键不读。应用安装和升级时有错就拒绝（§8.3），总站 `cron/` 下的错误由 `doctor` 报出，`cron list` 把它列成带 `error` 的一行。
@@ -342,6 +342,8 @@ cc-hub cron reset plans/morning
 `cron set <任务> "<表达式>" | --off | --on`：三者必须给且只给一个。校验任务存在、定义没有错误（有错时报 `cannot change <任务>: <错误>`）、表达式是五段。写进 `hub.toml`（§4.4），提交（`cc-hub: cron set <任务>`），然后打印 agent 接下来在私聊里要执行的重新登记步骤（`cron/README.md` 的 "Change a time"）：`cc-connect cron list` 找旧任务的 id、`cc-connect cron del <old id>`，任务开着时再加上它的登记命令。表达式要加引号，否则被 shell 拆成几个参数，按用法错误拒绝。出错时不写任何东西。
 
 `cron reset <任务>`：去掉覆盖，回到定义文件；同样提交（`cc-hub: cron reset <任务>`）并打印重新登记步骤。没有覆盖时只说明并退出 0。
+
+`cron guard`：供 `.claude/settings.json` 里的 PreToolUse 钩子调用的入口：读入事件，不输出，退出 0，不做任何判断。它不在帮助里列出；`cli.py` 遇到它时不加载 typer 直接返回，所以每次工具调用只多花很少的时间。
 
 ### 5.10 feedback
 
