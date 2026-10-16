@@ -217,6 +217,56 @@ def test_consolidation_commits_and_pushes() -> None:
     assert "pushed" in manifest.render("cron/memory-consolidate.md")
 
 
+REPORT_SCHEDULES = {
+    "daily": "0 8 * * *",
+    "weekly": "0 20 * * 0",
+    "monthly": "0 9 1 * *",
+    "quarterly": "10 9 1 1,4,7,10 *",
+    "yearly": "20 9 1 1 *",
+}
+
+
+def test_report_tasks_have_the_default_schedules() -> None:
+    for period, schedule in REPORT_SCHEDULES.items():
+        rel = f"cron/report-{period}.md"
+        assert rel in manifest.FRAMEWORK_OWNED
+        text = manifest.render(rel)
+        m = CRON_FRONTMATTER.match(text)
+        assert m, rel
+        fields = dict(line.split(": ", 1) for line in m.group("body").splitlines())
+        assert fields == {
+            "schedule": f'"{schedule}"', "default": "false", "session": "new_per_run",
+        }, rel
+        body = text[m.end():]
+        assert f"cc-hub report plan {period} --json" in body, rel
+        assert f"cc-hub report send {period}" in body, rel
+        assert f"cc-hub report put {period} <app> --text" in body, rel
+        assert body.count("NO_REPLY") == 2, rel
+        assert body.startswith(f"{period.capitalize()} report. Run "), rel
+        assert all(other not in body for other in REPORT_SCHEDULES if other != period), rel
+
+
+def test_consolidation_leaves_a_report_note() -> None:
+    text = " ".join(manifest.render("cron/memory-consolidate.md").split())
+    assert 'cc-hub report note daily --from memory-consolidate -- "<the paragraph>"' in text
+    assert "NO_REPLY" in text
+    assert "If the push failed, reply with that paragraph." in text
+    assert "pushed" in text
+
+
+def test_cron_readme_covers_reports() -> None:
+    readme = manifest.render("cron/README.md")
+    register = _section(readme, "## Register")
+    assert "cc-connect cron info <id> silent" in register and "`true`" in register
+    reports = _section(readme, "## Reports")
+    for phrase in ("cc-hub report language", "cc-hub report section", "silent",
+                   "cc-hub cron set report-<period> --on", "cc-hub report list --json",
+                   "cc-hub report note", "NO_REPLY", "`language`", "urgent"):
+        assert phrase in reports, phrase
+    section = readme.split("## Reports", 1)[1].split("\n## ", 1)[0]
+    assert len(section.strip().splitlines()) + 1 <= 25
+
+
 def test_hub_adapt_leaves_permissions_to_the_runtime() -> None:
     assert "do not change them here" in manifest.render("skills/hub-adapt/SKILL.md")
 

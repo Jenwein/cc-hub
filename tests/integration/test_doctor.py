@@ -345,7 +345,7 @@ def test_cron_check_is_ok_for_a_hub_with_tasks_and_a_valid_override(
 
     save(hub_with_plans, "plans/morning", {"schedule": "0 7 * * *"})
     check = _cron_check(hub_with_plans, tmp_path)
-    assert (check.status, check.message) == ("ok", "3 task(s) checked")
+    assert (check.status, check.message) == ("ok", "8 task(s) checked")
 
 
 def test_cron_check_names_a_broken_task_file(hub: Path, tmp_path: Path) -> None:

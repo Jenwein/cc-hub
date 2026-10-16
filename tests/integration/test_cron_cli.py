@@ -12,6 +12,8 @@ from cc_hub.crontasks import rows
 from cc_hub.gitops import run_git
 from tests.conftest import write
 
+REPORT_TASKS = tuple(f"report-{p}" for p in ("daily", "weekly", "monthly", "quarterly", "yearly"))
+
 
 def run(hub: Path, *args: str):
     return CliRunner().invoke(app, ["--hub", str(hub), *args])
@@ -27,7 +29,7 @@ def test_list_json_is_the_rows(hub_with_plans: Path) -> None:
     assert r.exit_code == 0, r.output
     assert json.loads(r.stdout) == rows(hub_with_plans)
     assert {x["name"] for x in json.loads(r.stdout)} == {
-        "memory-consolidate", "plans/morning", "plans/review",
+        "memory-consolidate", "plans/morning", "plans/review", *REPORT_TASKS,
     }
 
 
@@ -40,6 +42,11 @@ def test_list_prints_one_line_per_task(hub_with_plans: Path) -> None:
         "memory-consolidate  0 3 * * *  off",
         "plans/morning  0 7 * * * (overridden, file: 0 8 * * *)  on",
         "plans/review  0 18 * * 5  off",
+        "report-daily  0 8 * * *  off",
+        "report-monthly  0 9 1 * *  off",
+        "report-quarterly  10 9 1 1,4,7,10 *  off",
+        "report-weekly  0 20 * * 0  off",
+        "report-yearly  20 9 1 1 *  off",
     ]
 
 
@@ -71,7 +78,7 @@ def test_list_in_a_hub_with_a_non_ascii_path(git_hub_with_plans: Path) -> None:
     r = run(git_hub_with_plans, "cron", "list", "--json")
     assert r.exit_code == 0, r.output
     assert [x["name"] for x in json.loads(r.stdout)] == [
-        "memory-consolidate", "plans/morning", "plans/review",
+        "memory-consolidate", "plans/morning", "plans/review", *sorted(REPORT_TASKS),
     ]
 
 
@@ -144,7 +151,7 @@ def test_set_on_turns_on_an_optional_app_task(hub_with_plans: Path) -> None:
     assert r.stdout.splitlines()[-1] == (
         '  cc-connect cron add --cron "0 18 * * 5" --prompt "Scheduled task hub:plans/review: '
         'follow the body of apps/plans/cron/review.md in the hub." --session-mode reuse '
-        '--desc "hub:plans/review"'
+        '--desc "hub:plans/review" --silent'
     )
 
 

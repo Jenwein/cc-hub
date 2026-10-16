@@ -160,6 +160,8 @@ def registration_command(task: Task, schedule: str | None) -> str | None:
     Every value goes into a double-quoted argument. That is safe because none can hold what a
     shell acts on inside double quotes: task and app names are checked against a narrow
     pattern, the file path is built from them, and schedules against the cron field pattern.
+    The command ends with `--silent`: without it cc-connect posts a line in the chat every
+    time the task fires, even when the task replies NO_REPLY.
     """
     d = task.definition
     if d is None:
@@ -167,7 +169,7 @@ def registration_command(task: Task, schedule: str | None) -> str | None:
     return (
         f'cc-connect cron add --cron "{schedule or d.schedule}" '
         f'--prompt "{pointer_prompt(task.name, task.file)}" '
-        f'--session-mode {d.session} --desc "hub:{task.name}"'
+        f'--session-mode {d.session} --desc "hub:{task.name}" --silent'
     )
 
 

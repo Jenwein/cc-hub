@@ -32,8 +32,14 @@ def git_log_subject(hub: Path) -> str:
     return run_git(hub, "log", "-1", "--format=%s").stdout.strip()
 
 
+def drop_report_tasks(hub: Path) -> None:
+    """A hub without the report task files (the tasks ship with the framework templates)."""
+    for p in reports.PERIODS:
+        (hub / f"cron/report-{p}.md").unlink()
+
+
 def periods_on(hub: Path, *periods: str) -> None:
-    """The report tasks exist for every period (a later task ships them); only `periods` are on."""
+    """Every period has its report task, with this test's time; only `periods` are on."""
     for p in reports.PERIODS:
         write(hub / f"cron/report-{p}.md", REPORT_CRON)
     for p in periods:
@@ -118,6 +124,7 @@ def test_list_json_periods_and_language(hub: Path) -> None:
 
 
 def test_list_json_without_report_tasks_has_no_schedule(hub: Path) -> None:
+    drop_report_tasks(hub)
     data = json.loads(run(hub, "report", "list", "--json").stdout)
     assert all(p["schedule"] is None and p["on"] is False for p in data["periods"])
     assert data["periods"][0]["task"] == "report-daily"
@@ -203,6 +210,7 @@ def test_list_text_marks_a_command_that_is_not_approved(hub: Path) -> None:
 
 
 def test_list_text_without_report_tasks(hub: Path) -> None:
+    drop_report_tasks(hub)
     assert run(hub, "report", "list").stdout.splitlines()[0] == "daily  report-daily  -  off"
 
 
