@@ -372,3 +372,50 @@ def test_authoring_covers_scheduled_tasks() -> None:
     for phrase in ("`hub:<app>/<task>`", "`schedule`, `default` and `session`",
                    "cc-hub cron set <app>/<task>", 'min_hub = "0.5.0"'):
         assert phrase in text, phrase
+
+
+def test_agents_md_points_at_reports() -> None:
+    text = " ".join(manifest.render("AGENTS.md").split())
+    assert "- `reports/`: sent reports, one file each (`cc-hub report`)." in text
+    para = text.split("## 4. cc-connect", 1)[1].split("## 5. Safety", 1)[0]
+    assert "Reports are scheduled tasks of the hub" in para
+    assert '`cron/README.md`, "Reports"' in para
+    assert "read the latest file of that period under `reports/`" in para
+    assert len(manifest.render("AGENTS.md").splitlines()) <= 150
+
+
+def test_bootstrap_sets_the_report_language() -> None:
+    text = manifest.render("BOOTSTRAP.md")
+    flat = " ".join(text.split())
+    assert "cc-hub report language <tag>" in flat and "`zh-CN`" in flat
+    assert "which reports they want" in flat
+    assert 'as `cron/README.md` "Reports" says' in flat
+    assert "5. **Finish.**" in text and "6." not in text
+
+
+def test_hub_apps_setup_approves_report_commands() -> None:
+    skill = manifest.render("skills/hub-apps/SKILL.md")
+    setup = " ".join(skill.split("## Set up", 1)[1].split("\n## ", 1)[0].split())
+    assert "`cc-hub report list --json`" in setup
+    assert "`kind` `command`" in setup and "`approved` false" in setup
+    assert "`cc-hub report approve <name>`" in setup
+    assert setup.index("**App steps.**") < setup.index("`cc-hub report list --json`")
+    assert setup.index("`cc-hub report list --json`") < setup.index("**Scheduled tasks.**")
+    update = " ".join(skill.split("## Update", 1)[1].split("\n## ", 1)[0].split())
+    assert "approval again" in update
+    remove = " ".join(skill.split("## Remove", 1)[1].split("\n## ", 1)[0].split())
+    assert "report settings" in remove
+
+
+def test_authoring_covers_reports() -> None:
+    text = manifest.render("skills/hub-apps/authoring.md")
+    flat = " ".join(text.split())
+    reports = " ".join(text.split("## Reports", 1)[1].split("\n## ", 1)[0].split())
+    for phrase in ("`reports/<period>.md`", "`command`", "`title`", "forward slashes",
+                   "`CC_HUB_REPORT_PERIOD`", "`CC_HUB_REPORT_SINCE`", "`CC_HUB_REPORT_UNTIL`",
+                   "`CC_HUB_DIR`", "`CC_HUB_LANGUAGE`", "cc-hub report note",
+                   "once the user has approved it on that machine",
+                   "Empty output means no section"):
+        assert phrase in reports, phrase
+    assert 'min_hub = "0.7.0"' in reports
+    assert "reports/" in flat

@@ -14,6 +14,10 @@ first and come back here. Work through the steps in order.
    `IDENTITY.md` and put the vibe line under "Core vibe" in `SOUL.md`.
 4. **User.** Ask how to address them and which language to reply in. Write
    each as a dated directive in `USER.md`, replacing the placeholder lines.
+   Then run `cc-hub report language <tag>` for that language (for example
+   `zh-CN`). Ask which reports they want (daily, weekly, monthly, quarterly,
+   yearly, or none) and when; turn each on as `cron/README.md` "Reports"
+   says.
 5. **Finish.** Write the first entry with
    `cc-hub memory log "Bootstrap completed: <name>, <language>"`, delete this
    file, commit (see "Git" in `AGENTS.md`), run `cc-hub doctor`, and report
