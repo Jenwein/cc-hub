@@ -2,7 +2,9 @@
 import json
 import os
 import shlex
+import shutil
 import sys
+import time
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -617,3 +619,81 @@ def test_command_with_a_relative_path_is_found_from_the_hub(hub: Path):
         script.chmod(0o755)
         command = "scripts/report.sh"
     assert run_command(hub, command, {}) == ("from the hub", None)
+
+
+# --- a timeout stops the whole process tree ---
+
+CHILD = (
+    "import os, sys, time\n"
+    "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+    "time.sleep(10)\n"
+)
+
+
+def hanging_command(hub: Path) -> str:
+    """A command line that starts a Python child sleeping 10 s: a .cmd shim, or an sh script."""
+    scripts = hub / "scripts"
+    write(scripts / "child.py", CHILD)
+    if sys.platform == "win32":
+        write(
+            scripts / "hang.cmd",
+            f'@echo off\r\n"{sys.executable}" "%~dp0child.py" "%~dp0pid.txt"\r\n',
+        )
+        return "scripts/hang.cmd"
+    script = scripts / "hang.sh"
+    write(
+        script,
+        f'#!/bin/sh\n{shlex.quote(sys.executable)} "$(dirname "$0")/child.py" '
+        '"$(dirname "$0")/pid.txt"\n',
+    )
+    script.chmod(0o755)
+    return "scripts/hang.sh"
+
+
+def alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        import subprocess
+
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
+            capture_output=True, text=True, check=False,
+        ).stdout
+        return f'"{pid}"' in out
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32" and shutil.which("sh") is None, reason="needs sh to wrap the child"
+)
+def test_command_timeout_kills_the_children_too(hub: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(reportbuild, "SECTION_TIMEOUT", 1)
+    command = hanging_command(hub)
+    started = time.monotonic()
+    out = run_command(hub, command, {})
+    elapsed = time.monotonic() - started
+    assert out == ("", "timed out after 1 s")
+    assert elapsed < 6, f"the timeout took {elapsed:.1f} s to take effect"
+    pid_file = hub / "scripts" / "pid.txt"
+    if pid_file.is_file() and pid_file.read_text(encoding="utf-8").strip():
+        pid = int(pid_file.read_text(encoding="utf-8"))
+        deadline = time.monotonic() + 3
+        while alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not alive(pid), "the child of the command was left running"
+
+
+def test_a_stuck_pipe_cannot_hang_a_timeout(hub: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(reportbuild, "SECTION_TIMEOUT", 1)
+    monkeypatch.setattr(reportbuild, "REAP_TIMEOUT", 1)
+    monkeypatch.setattr(reportbuild, "_kill_tree", lambda proc: None)  # nothing frees the pipes
+    started = time.monotonic()
+    out = run_command(hub, py("import time; time.sleep(4)"), {})
+    elapsed = time.monotonic() - started
+    assert out == ("", "timed out after 1 s")
+    assert elapsed < 4

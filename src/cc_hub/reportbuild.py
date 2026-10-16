@@ -13,7 +13,9 @@ import calendar
 import os
 import shlex
 import shutil
+import signal
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -24,6 +26,7 @@ from cc_hub.reportstate import is_approved, last_run, load_state, read_draft, re
 
 SECTION_TIMEOUT = 300  # seconds a section command may run
 MAX_SECTION_CHARS = 20000  # characters of a section's output that go into the report
+REAP_TIMEOUT = 5  # seconds to wait for the output of a command that was killed
 
 STRINGS: dict[str, dict[str, str]] = {
     "en": {
@@ -101,6 +104,31 @@ def _executable(hub: Path, name: str) -> str | None:
     return shutil.which(name)
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a command and everything it started (a .cmd shim, `uv run`, a script's children)."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=REAP_TIMEOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # the command leads its own session
+        except OSError:
+            pass
+    try:
+        proc.kill()  # in case the tree kill did not reach it
+    except OSError:
+        pass
+
+
 def run_command(hub: Path, command: str, env: dict[str, str]) -> tuple[str, str | None]:
     """Run an approved section command in the hub: (its output, None) or ("", why it failed)."""
     hub = Path(hub).absolute()
@@ -113,25 +141,43 @@ def run_command(hub: Path, command: str, env: dict[str, str]) -> tuple[str, str 
     executable = _executable(hub, argv[0])
     if executable is None:
         return "", f"{argv[0]}: command not found"
+    timeout = SECTION_TIMEOUT
+    # its own process group (Windows) or session (POSIX), so that a timeout can end all of it
+    group = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if sys.platform == "win32"
+        else {"start_new_session": True}
+    )
     try:
-        done = subprocess.run(
+        proc = subprocess.Popen(
             [executable, *argv[1:]],
             cwd=hub,
             env=os.environ | env | {"PYTHONUTF8": "1"},
             stdin=subprocess.DEVNULL,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             encoding="utf-8",
             errors="replace",
-            timeout=SECTION_TIMEOUT,
+            **group,
         )
-    except subprocess.TimeoutExpired:  # subprocess.run has killed the child
-        return "", f"timed out after {SECTION_TIMEOUT} s"
     except (OSError, ValueError) as exc:
         return "", str(exc)
-    if done.returncode == 0:
-        return done.stdout.strip(), None
-    line = next((ln.strip() for ln in done.stderr.splitlines() if ln.strip()), None)
-    return "", line or f"exit {done.returncode}"
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            proc.communicate(timeout=REAP_TIMEOUT)  # collect and drop what is left
+        except subprocess.TimeoutExpired:
+            pass  # something still holds the pipes: give up on them rather than wait
+        return "", f"timed out after {timeout} s"
+    except BaseException:  # Ctrl+C and the like: do not leave the command running
+        _kill_tree(proc)
+        raise
+    if proc.returncode == 0:
+        return stdout.strip(), None
+    line = next((ln.strip() for ln in stderr.splitlines() if ln.strip()), None)
+    return "", line or f"exit {proc.returncode}"
 
 
 def _env(hub: Path, period: str, language: str | None, since: datetime, until: datetime) -> dict:
