@@ -5,8 +5,12 @@
 the drafts agents wrote for instruction sections and the notes waiting, and returns the text. It
 only returns text: output of the commands never reaches the console, and nothing is stored or
 removed by it. `send` is the caller that does that: it sends the text through cc-connect, then
-archives and commits it, removes the notes and drafts that went in, and records the run.
+records the run, archives and commits the text, and removes the notes and drafts that went in.
 `add_routed_note` stores a note for the report that will carry it.
+
+One send of a period at a time: `send` holds `.cc-hub/reports/send-<period>.lock` through the
+build and the sending, and keeps it fresh while it works. The state it changes (notes, runs,
+drafts) it changes under the short `reportstate.state_lock`, which `add_routed_note` takes too.
 """
 
 from __future__ import annotations
@@ -19,14 +23,16 @@ import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from cc_hub import apps, gitops
+from cc_hub import gitops
 from cc_hub.encoding import write_text
 from cc_hub.reports import (
+    NOT_A_PERIOD,
     PERIODS,
     ReportError,
     Section,
@@ -35,6 +41,8 @@ from cc_hub.reports import (
     note_target,
 )
 from cc_hub.reportstate import (
+    STATE_DIR,
+    acquire_lock,
     add_note,
     clear_drafts,
     drop_notes,
@@ -45,6 +53,9 @@ from cc_hub.reportstate import (
     read_draft,
     read_notes,
     record_run,
+    refresh_lock,
+    release_lock,
+    state_lock,
 )
 
 SECTION_TIMEOUT = 300  # seconds a section command may run
@@ -337,7 +348,10 @@ def build(hub: Path, period: str, now: datetime, *, runner: Runner = run_command
 Sender = Callable[[str], None]
 
 SEND_TIMEOUT = 60  # seconds cc-connect may take to take a report
-MAX_DETAIL = 500  # characters of cc-connect's own words that go into an error
+MAX_DETAIL = 200  # characters of cc-connect's own words that go into an error
+MIN_ECHO = 8  # a line this long, shared with the report, means cc-connect printed the report
+WITHHELD = "(details withheld)"
+SEND_LOCK_STALE = 3600.0  # a send lock not touched for this long was left behind
 SOURCE_RULE = re.compile(r"^[a-z0-9][a-z0-9/-]{0,99}$")  # what a note's --from may be
 ARCHIVE_DIR = "reports"
 
@@ -348,14 +362,30 @@ def _output(value: str | bytes | None) -> str:
     return (value or "").strip()
 
 
+def _echoes(line: str, text: str) -> bool:
+    """Whether `line` holds a line of `text`, or one holds it (both MIN_ECHO or longer)."""
+    if len(line) < MIN_ECHO:
+        return False
+    for other in (ln.strip() for ln in text.splitlines()):
+        if len(other) >= MIN_ECHO and (other in line or line in other):
+            return True
+    return False
+
+
 def _detail(proc: subprocess.CompletedProcess, text: str) -> str:
-    """cc-connect's own words about a failure, as ": ..." (empty when it said nothing)."""
-    detail = _output(proc.stderr) or _output(proc.stdout)
-    if text.strip():
-        detail = detail.replace(text.strip(), "(the report)")  # an error never carries the report
-    if len(detail) > MAX_DETAIL:
-        detail = detail[:MAX_DETAIL].rstrip() + "…"
-    return f": {detail}" if detail else ""
+    """cc-connect's own words about a failure, as ": ..." (empty when it said nothing).
+
+    The first line of stderr, cut short. A line that has something of the report in it is
+    withheld: the error reaches the console and the agent, and the report is not for them.
+    """
+    line = next((ln.strip() for ln in _output(proc.stderr).splitlines() if ln.strip()), "")
+    if not line:
+        return ""
+    if _echoes(line, text):
+        line = WITHHELD
+    elif len(line) > MAX_DETAIL:
+        line = line[: MAX_DETAIL - 1].rstrip() + "…"
+    return f": {line}"
 
 
 def cc_connect_sender(
@@ -399,12 +429,25 @@ class SendResult:
     sections: int
     notes: int
     archive: str | None  # the archive file, relative to the hub, with /
-    warning: str | None  # a problem after the report went out; the report itself was sent
+    warning: str | None  # problems after the report went out, joined by "; "
 
 
 def _require_aware(now: datetime) -> None:
     if now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
+
+
+@contextmanager
+def _send_lock(hub: Path, period: str) -> Iterator[Callable[[], None]]:
+    """Hold the send lock of `period`; yields what keeps it fresh. ReportError when it is held."""
+    path = hub / STATE_DIR / f"send-{period}.lock"
+    token = acquire_lock(path, stale_after=SEND_LOCK_STALE)
+    if token is None:
+        raise ReportError(f"a {period} report is being sent; try again later")
+    try:
+        yield lambda: refresh_lock(path, token)
+    finally:
+        release_lock(path, token)
 
 
 def _archive(hub: Path, period: str, now: datetime, text: str) -> str:
@@ -421,6 +464,52 @@ def _archive(hub: Path, period: str, now: datetime, text: str) -> str:
     return f"{ARCHIVE_DIR}/{year}/{name}"
 
 
+def _after_delivery(
+    hub: Path, period: str, now: datetime, built: Built
+) -> tuple[str | None, str | None]:
+    """What follows a report that went out: (its archive, warnings). Raises nothing.
+
+    The send is recorded first: from then on the same report is not sent again, whatever else
+    fails. Each failure (a file in use, a full disk, a busy state) is a warning, and the steps
+    after it still run.
+    """
+    warnings: list[str] = []
+
+    def attempt(what: str, action: Callable[[], None]) -> None:
+        try:
+            action()
+        except OSError as exc:  # TimeoutError of the state lock is one too
+            warnings.append(f"{what}: {exc}")
+
+    def record() -> None:
+        with state_lock(hub):
+            record_run(hub, period, now, sent=True)
+
+    attempt("the send was not recorded", record)
+
+    archive: str | None = None
+    try:
+        archive = _archive(hub, period, now, built.text)
+    except OSError as exc:
+        warnings.append(f"report not archived: {exc}")
+    else:
+        try:
+            problem = gitops.commit_paths(hub, [archive], f"cc-hub: report {period}")
+        except OSError as exc:
+            problem = f"not committed: {exc}"
+        if problem is not None:
+            warnings.append(problem)
+
+    def remove_what_went_in() -> None:
+        with state_lock(hub):
+            for written_for, count in built.included.items():  # the first ones: later ones stay
+                attempt("notes not removed", lambda p=written_for, n=count: drop_notes(hub, p, n))
+            attempt("drafts not removed", lambda: clear_drafts(hub, period))
+
+    attempt("notes and drafts not removed", remove_what_went_in)
+    return archive, "; ".join(warnings) or None
+
+
 def send(
     hub: Path,
     period: str,
@@ -432,33 +521,34 @@ def send(
 ) -> SendResult:
     """Build the `period` report and send it; once a day unless `again`.
 
-    Nothing changes when the sender fails (ReportError). After it went out, a problem with the
-    archive comes back as the result's warning: the report must not go out a second time.
-    `now` is timezone-aware; a day is a day in its timezone.
+    ReportError when another send of the period is running, or when the sender fails: nothing
+    has changed then. Once the report is out nothing is raised: what went wrong afterwards is the
+    result's warning, so that the report is not sent a second time. `now` is timezone-aware; a
+    day is a day in its timezone. TimeoutError when the reports state stays busy and nothing
+    was sent.
     """
     _require_aware(now)
+    if period not in PERIODS:  # before the period is used in a file name
+        raise ReportError(f"{period} {NOT_A_PERIOD}")
     hub = Path(hub).absolute()
-    with apps.hub_lock(hub):
+    with _send_lock(hub, period) as keep_fresh:
         before = last_sent(load_state(hub), period)
         if not again and before is not None and before.astimezone(now.tzinfo).date() == now.date():
             return SendResult("already", 0, 0, None, None)
-        built = build(hub, period, now, runner=runner)
+
+        def fresh_runner(hub_dir: Path, command: str, env: dict[str, str]):
+            keep_fresh()  # a slow section does not make the lock look abandoned
+            return runner(hub_dir, command, env)
+
+        built = build(hub, period, now, runner=fresh_runner)
         if not built.text:
-            record_run(hub, period, now, sent=False)
-            clear_drafts(hub, period)
+            with state_lock(hub):
+                record_run(hub, period, now, sent=False)
+                clear_drafts(hub, period)
             return SendResult("empty", 0, 0, None, None)
+        keep_fresh()
         (sender if sender is not None else cc_connect_sender())(built.text)
-        archive: str | None = None
-        try:
-            archive = _archive(hub, period, now, built.text)
-        except OSError as exc:
-            warning: str | None = f"report not archived: {exc}"
-        else:
-            warning = gitops.commit_paths(hub, [archive], f"cc-hub: report {period}")
-        for written_for, count in built.included.items():
-            drop_notes(hub, written_for, count)  # the first ones: later notes stay
-        clear_drafts(hub, period)
-        record_run(hub, period, now, sent=True)
+        archive, warning = _after_delivery(hub, period, now, built)
         return SendResult("sent", built.sections, built.notes, archive, warning)
 
 
@@ -467,11 +557,12 @@ def add_routed_note(hub: Path, period: str, source: str, text: str, now: datetim
 
     That is the first report from `period` up that is on, and None, with nothing stored, when
     none is. The note stays under `period`: `build` of the report it routes to picks it up.
+    TimeoutError when the reports state stays busy.
     """
     _require_aware(now)
     hub = Path(hub).absolute()
-    with apps.hub_lock(hub):
-        target = note_target(hub, period)
-        if target is not None:
+    target = note_target(hub, period)
+    if target is not None:
+        with state_lock(hub):
             add_note(hub, period, source, text, now)
-        return target
+    return target

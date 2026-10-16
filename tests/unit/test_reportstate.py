@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 import json
+import os
+import threading
+import time
 import tomllib
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -340,3 +343,84 @@ def test_nothing_was_written_outside_the_reports_dir(hub: Path, tmp_path: Path):
         with pytest.raises(ValueError):
             rs.add_note(hub, bad, "ledger", "x", T1)
     assert {p for p in tmp_path.rglob("*")} == before
+
+
+# --- locks ---
+
+
+def test_state_lock_is_a_file_under_the_reports_dir_and_is_released(hub: Path):
+    lock = hub / ".cc-hub" / "reports" / "state.lock"
+    with rs.state_lock(hub):
+        assert lock.is_file()
+    assert not lock.exists()
+    with rs.state_lock(hub):  # and can be taken again
+        pass
+    assert not lock.exists()
+
+
+def test_state_lock_is_released_when_the_block_fails(hub: Path):
+    with pytest.raises(RuntimeError), rs.state_lock(hub):
+        raise RuntimeError("boom")
+    assert not (hub / rs.STATE_DIR / "state.lock").exists()
+
+
+def test_state_lock_held_by_a_live_holder_times_out(hub: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(rs, "STATE_LOCK_WAIT", 0.3)
+    with rs.state_lock(hub):
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="the reports state is busy; try again shortly"):
+            with rs.state_lock(hub):
+                pytest.fail("the lock was taken twice")
+        assert 0.25 <= time.monotonic() - started < 5
+        assert (hub / rs.STATE_DIR / "state.lock").is_file()  # the holder's lock is untouched
+
+
+def test_state_lock_waits_for_the_holder_to_let_go(hub: Path):
+    holder = rs.state_lock(hub)
+    holder.__enter__()
+    timer = threading.Timer(0.3, lambda: holder.__exit__(None, None, None))
+    timer.start()
+    try:
+        started = time.monotonic()
+        with rs.state_lock(hub):
+            assert time.monotonic() - started >= 0.2
+    finally:
+        timer.join()
+
+
+def test_state_lock_takes_over_a_stale_lock(hub: Path):
+    lock = hub / rs.STATE_DIR / "state.lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text("123 left-behind", encoding="utf-8")
+    old = time.time() - 61
+    os.utime(lock, (old, old))
+    with rs.state_lock(hub):
+        assert lock.read_text(encoding="utf-8") != "123 left-behind"
+    assert not lock.exists()
+
+
+def test_state_lock_does_not_remove_a_lock_that_is_no_longer_its_own(hub: Path):
+    lock = hub / rs.STATE_DIR / "state.lock"
+    with rs.state_lock(hub):
+        lock.write_text("999 someone-else", encoding="utf-8")  # taken over meanwhile
+    assert lock.read_text(encoding="utf-8") == "999 someone-else"
+
+
+def test_lock_helpers(hub: Path):
+    path = hub / rs.STATE_DIR / "x.lock"
+    token = rs.acquire_lock(path, stale_after=3600)
+    assert token is not None and path.read_text(encoding="utf-8") == token
+    assert rs.acquire_lock(path, stale_after=3600) is None  # held
+    old = time.time() - 1000
+    os.utime(path, (old, old))
+    rs.refresh_lock(path, token)
+    assert time.time() - path.stat().st_mtime < 60  # refreshed
+    os.utime(path, (old, old))
+    rs.refresh_lock(path, "not-the-token")
+    assert time.time() - path.stat().st_mtime > 900  # not ours: left alone
+    rs.release_lock(path, "not-the-token")
+    assert path.exists()
+    rs.release_lock(path, token)
+    assert not path.exists()
+    rs.release_lock(path, token)  # already gone: nothing happens
+    rs.refresh_lock(path, token)

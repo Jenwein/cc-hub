@@ -8,12 +8,22 @@
 
 This module only stores; the callers validate periods and app names. It refuses a name that
 could point out of its directory.
+
+Its read-modify-write functions take no lock: a caller that changes state while others may do so
+holds `state_lock`, a short lock that waits for its turn. Locks are files made with O_EXCL that
+hold their owner's token, so that a lock taken over after it went stale is not removed by the
+process that lost it.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import time
 import tomllib
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +36,10 @@ STATE_DIR = ".cc-hub/reports"
 STATE_FILE = f"{STATE_DIR}/state.toml"
 NOTES_DIR = f"{STATE_DIR}/notes"
 DRAFTS_DIR = f"{STATE_DIR}/drafts"
+STATE_LOCK = f"{STATE_DIR}/state.lock"
+STATE_LOCK_WAIT = 10.0  # seconds state_lock waits for its turn
+STATE_LOCK_STALE = 60.0  # a state lock older than this was left behind
+LOCK_POLL = 0.1  # seconds between two tries for a lock
 
 
 def _name(value: str, what: str) -> str:
@@ -46,6 +60,80 @@ def _table(parent: dict, key: str) -> dict:
     if not isinstance(value, dict):
         value = parent[key] = {}
     return value
+
+
+# --- locks ---
+
+
+def acquire_lock(path: Path, *, stale_after: float) -> str | None:
+    """Create the lock file `path`: the token that proves it is ours, None when it is held.
+
+    A lock file last touched more than `stale_after` seconds ago is taken over.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    token = f"{os.getpid()} {uuid.uuid4().hex}"
+    for attempt in (0, 1):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                stale = time.time() - path.stat().st_mtime > stale_after
+            except OSError:
+                stale = True  # it went away between the two calls
+            if attempt == 0 and stale:
+                path.unlink(missing_ok=True)
+                continue
+            return None
+        try:
+            os.write(fd, token.encode("utf-8"))
+        except OSError:
+            os.close(fd)
+            path.unlink(missing_ok=True)
+            raise
+        os.close(fd)
+        return token
+    return None
+
+
+def _is_ours(path: Path, token: str) -> bool:
+    try:
+        return Path(path).read_bytes() == token.encode("utf-8")
+    except OSError:
+        return False
+
+
+def refresh_lock(path: Path, token: str) -> None:
+    """Show that the holder of the lock is alive: touch it, if it is still ours."""
+    if _is_ours(path, token):
+        try:
+            os.utime(path)
+        except OSError:
+            pass
+
+
+def release_lock(path: Path, token: str) -> None:
+    """Remove the lock, if it is still ours: one taken over by another process stays."""
+    if _is_ours(path, token):
+        Path(path).unlink(missing_ok=True)
+
+
+@contextmanager
+def state_lock(hub: Path) -> Iterator[None]:
+    """Hold the reports state for a short change; waits up to STATE_LOCK_WAIT seconds.
+
+    TimeoutError when another process keeps it that long.
+    """
+    path = Path(hub) / STATE_LOCK
+    deadline = time.monotonic() + STATE_LOCK_WAIT
+    while (token := acquire_lock(path, stale_after=STATE_LOCK_STALE)) is None:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("the reports state is busy; try again shortly")
+        time.sleep(LOCK_POLL)
+    try:
+        yield
+    finally:
+        release_lock(path, token)
 
 
 # --- state.toml: approvals and runs ---

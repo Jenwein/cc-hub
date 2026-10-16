@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+import os
 import subprocess
 import sys
+import time
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -71,6 +74,14 @@ def failing_sender(text: str) -> None:
     raise ReportError("cc-connect send failed (exit 1): not running")
 
 
+def send_lock(hub: Path, period: str = "daily") -> Path:
+    return hub / ".cc-hub" / "reports" / f"send-{period}.lock"
+
+
+def state_lock(hub: Path) -> Path:
+    return hub / ".cc-hub" / "reports" / "state.lock"
+
+
 def git_out(hub: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(hub), *args], capture_output=True, text=True, encoding="utf-8",
@@ -115,7 +126,7 @@ def test_send_archives_commits_and_clears(git_hub: Path):
     state = reportstate.load_state(hub)
     assert reportstate.last_sent(state, "daily") == NOW
     assert reportstate.last_run(state, "daily") == NOW
-    assert not (hub / ".cc-hub" / "op.lock").exists()
+    assert not send_lock(hub).exists()
 
     # a second send on the same day does nothing at all
     again = send(hub, "daily", NOW + timedelta(hours=3), runner=runner, sender=sink)
@@ -186,7 +197,7 @@ def test_send_failure_keeps_everything(git_hub: Path):
     state = reportstate.load_state(hub)
     assert reportstate.last_sent(state, "daily") is None
     assert reportstate.last_run(state, "daily") is None
-    assert not (hub / ".cc-hub" / "op.lock").exists()  # the lock is released on failure too
+    assert not send_lock(hub).exists()  # the lock is released on failure too
     # and trying again works
     sink = Sink()
     assert send(hub, "daily", NOW, sender=sink).status == "sent"
@@ -287,26 +298,7 @@ def test_send_checks_the_period_and_a_naive_now(hub: Path):
     with pytest.raises(ValueError, match="timezone"):
         add_routed_note(hub, "daily", "me", "x", datetime(2026, 10, 16, 9, 0))
     assert sink.texts == []
-    assert not (hub / ".cc-hub" / "op.lock").exists()
-
-
-def test_send_holds_the_hub_lock_while_it_works(hub: Path):
-    periods_on(hub, "daily")
-    reportstate.add_note(hub, "daily", "me", "hello", NOW)
-    seen = []
-
-    def sender(text: str) -> None:
-        with pytest.raises(apps.AppError):
-            with apps.hub_lock(hub):
-                pass
-        with pytest.raises(apps.AppError):
-            add_routed_note(hub, "daily", "me", "mid-send", NOW)
-        seen.append(text)
-
-    send(hub, "daily", NOW, sender=sender)
-    assert len(seen) == 1
-    with apps.hub_lock(hub):  # released afterwards
-        pass
+    assert not send_lock(hub).exists()
 
 
 def test_send_looks_the_default_sender_up_when_it_is_called(hub: Path, monkeypatch):
@@ -355,7 +347,7 @@ def test_note_routing_with_everything_off_stores_nothing(hub: Path):
         assert add_routed_note(hub, period, "feishu", "nobody listens", NOW) is None
         assert reportstate.read_notes(hub, period) == []
     assert not (hub / ".cc-hub" / "reports" / "notes").exists()
-    assert not (hub / ".cc-hub" / "op.lock").exists()
+    assert not (hub / ".cc-hub" / "reports" / "state.lock").exists()
 
 
 def test_a_period_that_is_on_keeps_its_own_note(hub: Path):
@@ -455,13 +447,13 @@ def test_cc_connect_sender_failure_messages():
     assert raised(returncode=1, stderr="not running\n") == (
         "cc-connect send failed (exit 1): not running"
     )
-    assert raised(returncode=2, stdout="no such session\n") == (
-        "cc-connect send failed (exit 2): no such session"
-    )
-    assert raised(returncode=3, stdout="out", stderr="err") == (
-        "cc-connect send failed (exit 3): err"
+    # only stderr is quoted, and only its first line
+    assert raised(returncode=2, stdout="no such session\n") == "cc-connect send failed (exit 2)"
+    assert raised(returncode=3, stdout="out", stderr="\n  err one  \nerr two\n") == (
+        "cc-connect send failed (exit 3): err one"
     )
     assert raised(returncode=4) == "cc-connect send failed (exit 4)"
+    assert raised(returncode=5, stderr="  \n \n") == "cc-connect send failed (exit 5)"
     assert raised(returncode=1, stderr=b"bytes \xe9\n") == (
         "cc-connect send failed (exit 1): bytes �"
     )
@@ -471,20 +463,72 @@ def test_cc_connect_sender_failure_messages():
     )
 
 
-def test_cc_connect_sender_error_does_not_echo_the_report():
-    text = "# Daily report\n\nsecret-looking contents\n"
+REPORT = (
+    "# Daily report · 2026-10-16\n\n## Mail\n\n"
+    "3 new mails: alice@example.com asks about the lunch on Friday\n"
+    "short\n\n## Notes\n\n- feishu: remember the Friday meeting\n"
+)
+WITHHELD = "cc-connect send failed (exit 1): (details withheld)"
+
+
+def failure(stderr: str, text: str = REPORT) -> str:
     sender = cc_connect_sender(
-        which=lambda _: CC, run=fake_run(returncode=1, stderr=f"bad input: {text}"), env={}
+        which=lambda _: CC, run=fake_run(returncode=1, stderr=stderr), env={}
     )
     with pytest.raises(ReportError) as info:
         sender(text)
-    assert "secret-looking" not in str(info.value)
-    long = cc_connect_sender(
-        which=lambda _: CC, run=fake_run(returncode=1, stderr="x" * 5000), env={}
+    return str(info.value)
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        # the whole message echoed
+        f"bad input: {REPORT}",
+        # part of the message echoed: a whole report line in the detail
+        "invalid message: 3 new mails: alice@example.com asks about the lunch on Friday",
+        "- feishu: remember the Friday meeting (rejected)",
+        # the detail is a piece of a report line
+        "alice@example.com asks about the lunch",
+        "remember the Friday meeting",
+        # the first line is what counts, wherever the echo is cut
+        "message too long: 3 new mails: alice@example.com asks about the lunch on Friday\nmore",
+    ],
+)
+def test_cc_connect_sender_withholds_the_detail_when_it_echoes_the_report(stderr):
+    assert failure(stderr) == WITHHELD
+
+
+def test_cc_connect_sender_keeps_a_detail_that_shares_nothing_with_the_report():
+    assert failure("session feishu:x not found") == (
+        "cc-connect send failed (exit 1): session feishu:x not found"
+    )
+    # lines shorter than 8 characters, on either side, are not an echo
+    assert failure("short") == "cc-connect send failed (exit 1): short"
+    assert failure("short: connection refused") == (
+        "cc-connect send failed (exit 1): short: connection refused"
+    )
+    assert failure("refused", "# Daily report\n\nrefused\n") == (
+        "cc-connect send failed (exit 1): refused"
+    )
+
+
+def test_cc_connect_sender_caps_the_detail_at_200_characters():
+    message = failure("x" * 5000)
+    assert message == "cc-connect send failed (exit 1): " + "x" * 199 + "…"
+    exactly = failure("y" * 200)
+    assert exactly == "cc-connect send failed (exit 1): " + "y" * 200
+
+
+def test_cc_connect_sender_never_quotes_stdout():
+    sender = cc_connect_sender(
+        which=lambda _: CC,
+        run=fake_run(returncode=1, stdout="mail body: 3 new mails", stderr=""),
+        env={},
     )
     with pytest.raises(ReportError) as info:
-        long("report")
-    assert len(str(info.value)) < 600
+        sender("report")
+    assert str(info.value) == "cc-connect send failed (exit 1)"
 
 
 def test_cc_connect_sender_really_pipes_utf8_through_stdin(tmp_path: Path):
@@ -503,3 +547,288 @@ def test_cc_connect_sender_really_pipes_utf8_through_stdin(tmp_path: Path):
     text = "# 日报 · 2026-10-16\n\n## 邮件\n\n3 封新邮件 ✓\n\n- feishu: line one\n  line two"
     cc_connect_sender(which=lambda _: "cc-connect", run=run, env={})(text)
     assert out.read_bytes() == text.encode("utf-8")
+
+
+# --- the send lock ---
+
+
+def two_command_sections(hub: Path) -> None:
+    periods_on(hub, "daily")
+    command_section(hub, "mail")
+    command_section(hub, "cal", command="uv run cal.py")
+
+
+def test_send_refuses_while_another_send_of_the_period_is_running(hub: Path):
+    periods_on(hub, "daily", "weekly")
+    reportstate.add_note(hub, "daily", "me", "daily note", NOW)
+    reportstate.add_note(hub, "weekly", "me", "weekly note", NOW)
+    write(send_lock(hub), "4242 another-process")
+    sink = Sink()
+
+    with pytest.raises(ReportError, match=r"^a daily report is being sent; try again later$"):
+        send(hub, "daily", NOW, sender=sink)
+
+    assert sink.texts == []
+    assert send_lock(hub).read_text(encoding="utf-8") == "4242 another-process"  # not ours: kept
+    assert [n["text"] for n in reportstate.read_notes(hub, "daily")] == ["daily note"]
+    assert not (hub / "reports").exists()
+    assert reportstate.last_run(reportstate.load_state(hub), "daily") is None
+    # the lock is per period
+    assert send(hub, "weekly", NOW, sender=sink).status == "sent"
+
+
+@pytest.mark.parametrize(("age", "taken"), [(3500, False), (3601, True)])
+def test_a_send_lock_is_stale_after_an_hour(hub: Path, age: int, taken: bool):
+    periods_on(hub, "daily")
+    reportstate.add_note(hub, "daily", "me", "hello", NOW)
+    write(send_lock(hub), "4242 another-process")
+    old = time.time() - age
+    os.utime(send_lock(hub), (old, old))
+    sink = Sink()
+    if taken:
+        assert send(hub, "daily", NOW, sender=sink).status == "sent"
+        assert not send_lock(hub).exists()
+    else:
+        with pytest.raises(ReportError, match="is being sent"):
+            send(hub, "daily", NOW, sender=sink)
+        assert sink.texts == []
+
+
+def test_the_send_lock_holds_our_pid_and_is_released_afterwards(hub: Path):
+    periods_on(hub, "daily")
+    reportstate.add_note(hub, "daily", "me", "hello", NOW)
+    seen = []
+
+    def sender(text: str) -> None:
+        seen.append(send_lock(hub).read_text(encoding="utf-8"))
+
+    send(hub, "daily", NOW, sender=sender)
+    assert seen[0].startswith(f"{os.getpid()} ") and len(seen[0]) > len(f"{os.getpid()} ") + 8
+    assert not send_lock(hub).exists()
+
+
+def test_send_does_not_remove_a_send_lock_that_is_no_longer_its_own(hub: Path):
+    periods_on(hub, "daily")
+    reportstate.add_note(hub, "daily", "me", "hello", NOW)
+
+    def sender(text: str) -> None:
+        write(send_lock(hub), "999 took-over")  # someone took the lock over meanwhile
+
+    send(hub, "daily", NOW, sender=sender)
+    assert send_lock(hub).read_text(encoding="utf-8") == "999 took-over"
+
+
+def test_the_send_lock_is_refreshed_before_each_section_and_before_the_sender(hub: Path):
+    two_command_sections(hub)
+    ages: list[tuple[str, float]] = []
+
+    def age_of_lock() -> float:
+        return time.time() - send_lock(hub).stat().st_mtime
+
+    def make_it_look_old() -> None:
+        old = time.time() - 1800  # as if the step before had taken half an hour
+        os.utime(send_lock(hub), (old, old))
+
+    def runner(hub_dir: Path, command: str, env: dict[str, str]):
+        ages.append((command, age_of_lock()))
+        make_it_look_old()
+        return "output", None
+
+    def sender(text: str) -> None:
+        ages.append(("sender", age_of_lock()))
+
+    send(hub, "daily", NOW, runner=runner, sender=sender)
+
+    assert [what for what, _ in ages] == ["uv run cal.py", MAIL, "sender"]
+    assert all(age < 60 for _, age in ages), ages
+
+
+def test_send_does_not_need_the_hub_lock_and_does_not_hold_it(hub: Path):
+    periods_on(hub, "daily")
+    reportstate.add_note(hub, "daily", "me", "first", NOW)
+    sink = Sink()
+    with apps.hub_lock(hub):  # an app or tap command is running when the send starts
+        assert send(hub, "daily", NOW, sender=sink).status == "sent"
+
+    reportstate.add_note(hub, "daily", "me", "second", NOW)
+
+    def sender(text: str) -> None:
+        with apps.hub_lock(hub):  # ... or starts in the middle of a send
+            sink(text)
+
+    assert send(hub, "daily", NOW, again=True, sender=sender).status == "sent"
+    assert len(sink.texts) == 2
+
+
+def test_notes_can_be_added_while_a_report_is_being_sent(hub: Path):
+    periods_on(hub, "daily")
+    reportstate.add_note(hub, "daily", "me", "before", NOW)
+    sink = Sink()
+
+    def sender(text: str) -> None:
+        assert send_lock(hub).is_file()
+        assert add_routed_note(hub, "daily", "cron", "during", NOW) == "daily"
+        sink(text)
+
+    send(hub, "daily", NOW, sender=sender)
+
+    assert "- me: before" in sink.texts[0] and "during" not in sink.texts[0]
+    assert [n["text"] for n in reportstate.read_notes(hub, "daily")] == ["during"]
+
+
+def test_send_checks_the_period_before_it_makes_a_lock_file(hub: Path):
+    for bad in ("../x", "daily/../../x", "", "Daily"):
+        with pytest.raises(ReportError):
+            send(hub, bad, NOW, sender=Sink())
+    assert not (hub / ".cc-hub" / "reports").exists()
+
+
+# --- the state lock ---
+
+
+def test_add_routed_note_waits_for_the_state_lock_and_then_times_out(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+):
+    periods_on(hub, "daily")
+    monkeypatch.setattr(reportstate, "STATE_LOCK_WAIT", 0.3)
+    with reportstate.state_lock(hub):  # a live holder
+        started = time.monotonic()
+        with pytest.raises(TimeoutError, match="the reports state is busy; try again shortly"):
+            add_routed_note(hub, "daily", "me", "x", NOW)
+        assert time.monotonic() - started >= 0.25
+        assert state_lock(hub).is_file()  # the holder's lock is untouched
+    assert reportstate.read_notes(hub, "daily") == []
+    assert add_routed_note(hub, "daily", "me", "x", NOW) == "daily"  # free again
+    assert not state_lock(hub).exists()
+
+
+def test_an_empty_report_needs_the_state_lock_and_gives_up_without_it(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+):
+    periods_on(hub, "daily")
+    monkeypatch.setattr(reportstate, "STATE_LOCK_WAIT", 0.2)
+    sink = Sink()
+    with reportstate.state_lock(hub), pytest.raises(TimeoutError, match="busy"):
+        send(hub, "daily", NOW, sender=sink)
+    assert sink.texts == [] and not send_lock(hub).exists()  # nothing went out; lock released
+    assert reportstate.last_run(reportstate.load_state(hub), "daily") is None
+
+
+# --- a problem after the report went out is a warning, not an exception ---
+
+
+def sent_hub(hub: Path) -> None:
+    """A hub whose daily report has a draft section and a note."""
+    periods_on(hub, "daily")
+    install(hub, "plans", "daily", "---\n---\n")
+    reportstate.put_draft(hub, "daily", "plans", "today\n")
+    reportstate.add_note(hub, "daily", "feishu", "a note", NOW)
+
+
+def test_a_draft_that_cannot_be_removed_does_not_make_the_send_fail(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sent_hub(hub)
+
+    def locked(path):  # e.g. a virus scanner holds the file on Windows
+        raise PermissionError(13, "Access is denied", str(path))
+
+    monkeypatch.setattr(reportstate, "rmtree", locked)
+    sink = Sink()
+
+    result = send(hub, "daily", NOW, sender=sink)
+
+    assert (result.status, result.archive) == ("sent", ARCHIVE)
+    assert result.warning is not None and result.warning.startswith("drafts not removed: ")
+    assert "Access is denied" in result.warning
+    state = reportstate.load_state(hub)
+    assert reportstate.last_sent(state, "daily") == NOW
+    assert reportstate.read_notes(hub, "daily") == []  # the notes that went in are gone
+    assert (hub / ARCHIVE).is_file()
+    # a second send the same day does not send the report again
+    assert send(hub, "daily", NOW + timedelta(hours=2), sender=sink).status == "already"
+    assert len(sink.texts) == 1
+    assert not send_lock(hub).exists() and not state_lock(hub).exists()
+
+
+def test_notes_that_cannot_be_removed_do_not_keep_the_drafts_or_the_record(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sent_hub(hub)
+
+    def locked(hub_dir, period, count):
+        raise PermissionError(13, "Access is denied", "notes")
+
+    monkeypatch.setattr(reportbuild, "drop_notes", locked)
+    result = send(hub, "daily", NOW, sender=Sink())
+    assert result.status == "sent"
+    assert result.warning is not None and result.warning.startswith("notes not removed: ")
+    assert reportstate.read_draft(hub, "daily", "plans") == ""  # the drafts went anyway
+    assert reportstate.last_sent(reportstate.load_state(hub), "daily") == NOW
+
+
+def test_a_run_that_cannot_be_recorded_is_a_warning(hub: Path, monkeypatch: pytest.MonkeyPatch):
+    sent_hub(hub)
+
+    def full(hub_dir, state):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(reportstate, "save_state", full)
+    result = send(hub, "daily", NOW, sender=Sink())
+    assert result.status == "sent" and result.archive == ARCHIVE
+    assert result.warning == "the send was not recorded: disk full"
+    assert reportstate.read_notes(hub, "daily") == []  # the rest still happened
+    assert reportstate.read_draft(hub, "daily", "plans") == ""
+
+
+def test_a_busy_state_after_delivery_is_a_warning(hub: Path, monkeypatch: pytest.MonkeyPatch):
+    sent_hub(hub)
+    monkeypatch.setattr(reportstate, "STATE_LOCK_WAIT", 0.2)
+    sink = Sink()
+    with ExitStack() as stack:
+
+        def sender(text: str) -> None:
+            sink(text)
+            stack.enter_context(reportstate.state_lock(hub))  # someone else is in the state
+
+        result = send(hub, "daily", NOW, sender=sender)
+
+    busy = "the reports state is busy; try again shortly"
+    assert result.status == "sent" and result.archive == ARCHIVE
+    assert result.warning == (
+        f"the send was not recorded: {busy}; notes and drafts not removed: {busy}"
+    )
+    assert len(sink.texts) == 1 and (hub / ARCHIVE).is_file()
+    assert len(reportstate.read_notes(hub, "daily")) == 1  # nothing was removed ...
+    assert not send_lock(hub).exists()  # ... and the send lock is released
+
+
+def test_the_run_is_recorded_before_the_archive_is_committed_and_the_notes_are_removed(
+    hub: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sent_hub(hub)
+    seen = {}
+
+    def commit(hub_dir, paths, message):
+        seen["last_sent"] = reportstate.last_sent(reportstate.load_state(hub), "daily")
+        seen["notes"] = len(reportstate.read_notes(hub, "daily"))
+        seen["draft"] = reportstate.read_draft(hub, "daily", "plans")
+        seen["archive"] = (hub / ARCHIVE).is_file()
+
+    monkeypatch.setattr(gitops, "commit_paths", commit)
+    send(hub, "daily", NOW, sender=Sink())
+    assert seen == {"last_sent": NOW, "notes": 1, "draft": "today\n", "archive": True}
+
+
+def test_several_warnings_are_joined(hub: Path, monkeypatch: pytest.MonkeyPatch):
+    sent_hub(hub)
+    write(hub / "reports", "a file where the archive folder should be")
+
+    def locked(path):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(reportstate, "rmtree", locked)
+    result = send(hub, "daily", NOW, sender=Sink())
+    assert result.warning is not None
+    first, second = result.warning.split("; drafts not removed: ")
+    assert first.startswith("report not archived: ") and second == "locked"
