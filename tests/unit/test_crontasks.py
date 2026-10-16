@@ -15,6 +15,10 @@ from cc_hub.crontasks import (
 )
 from tests.conftest import PLANS_CRON, fake_app, write
 
+REPORT_TASKS = (
+    "report-daily", "report-monthly", "report-quarterly", "report-weekly", "report-yearly",
+)
+
 
 def test_task():
     d = parse_task(
@@ -116,7 +120,7 @@ def test_rows_register_a_pointer_prompt(hub):
     )
     assert mc["command"] == (
         'cc-connect cron add --cron "0 3 * * *" --prompt "' + mc["prompt"]
-        + '" --session-mode new_per_run --desc "hub:memory-consolidate"'
+        + '" --session-mode new_per_run --desc "hub:memory-consolidate" --silent'
     )
     review = by["plans/review"]
     assert review["prompt"] == (
@@ -124,7 +128,7 @@ def test_rows_register_a_pointer_prompt(hub):
     )
     assert review["command"] == (
         'cc-connect cron add --cron "0 18 * * 5" --prompt "' + review["prompt"]
-        + '" --session-mode reuse --desc "hub:plans/review"'
+        + '" --session-mode reuse --desc "hub:plans/review" --silent'
     )
 
 
@@ -157,7 +161,9 @@ def test_row_fields(hub):
 def test_rows_are_sorted_by_name(hub):
     fake_app(hub, "plans", PLANS_CRON)
     names = [r["name"] for r in rows(hub)]
-    assert names == sorted(names) == ["memory-consolidate", "plans/morning", "plans/review"]
+    assert names == sorted(names) == [
+        "memory-consolidate", "plans/morning", "plans/review", *REPORT_TASKS,
+    ]
 
 
 def test_readme_is_not_a_task(hub):
@@ -258,7 +264,7 @@ def test_apps_without_cron_files_or_directory_add_no_rows(hub):
         lock.read_text(encoding="utf-8") + '[apps.ghost]\nlink = "~/gone"\n',
         encoding="utf-8", newline="\n",
     )
-    assert [r["name"] for r in rows(hub)] == ["memory-consolidate"]
+    assert [r["name"] for r in rows(hub)] == ["memory-consolidate", *REPORT_TASKS]
 
 
 def test_app_name_that_is_not_a_valid_name_is_an_error_row(hub):

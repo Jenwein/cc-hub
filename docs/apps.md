@@ -5,7 +5,8 @@ management. It is a directory of files: skills that teach the agent to use
 some software, scheduled task definitions, setup steps and a skeleton for its
 data. The software itself (for example beancount) is an ordinary program the
 agent installs on the machine with your approval. cc-hub copies app files and
-never runs anything an app provides.
+runs nothing an app provides, except the commands of its report sections that
+you approved on that machine (see "Reports" below).
 
 Apps live in **taps**: git repositories with one top-level directory per app.
 
@@ -21,12 +22,15 @@ key); a tap URL with a password or token in it is refused.
 
 Usually you ask the agent instead; it runs the same commands, shows you the
 overview, and after you agree installs the app and sets it up: installs the
-software it needs (asking first), asks for your settings, and registers the
-app's scheduled tasks with cc-connect.
+software it needs (asking first), asks for your settings, shows you the
+commands of its report sections to approve, and registers the app's scheduled
+tasks with cc-connect.
 
 `cc-hub app update <name>` shows what changed in the tap; `--yes` applies it.
+A report command that changed needs your approval again.
 `cc-hub app remove <name>` shows what removal involves; `--yes` removes the
-app, keeps its data and drops the times you set for its tasks.
+app, keeps its data and drops the times you set for its tasks, its report
+settings and this machine's approvals of its report commands.
 `cc-hub app list` shows each app's setup state on this machine and any
 missing software.
 
@@ -53,6 +57,7 @@ the agent sets them up there.
         ├── REMOVE.md              optional: what to undo before removal
         ├── skills/ledger/SKILL.md
         ├── cron/monthly.md        same format as the hub's cron/ files
+        ├── reports/<period>.md    optional: a section of the hub's report (see Reports)
         ├── scripts/
         └── seed/ledger/main.beancount
 
@@ -113,6 +118,51 @@ effect at the next run. The body may call the app's scripts. Users pick
 their own times with `cc-hub cron set` (see above); `SETUP.md` may ask for a
 time and run `cc-hub cron set <app>/<task> "<expr>"`, which needs
 `min_hub = "0.5.0"`.
+
+## Reports
+
+A report is a digest the hub sends to the user's chat each day, week, month,
+quarter or year. `reports/<period>.md` adds a section to the report of one
+period: `daily`, `weekly`, `monthly`, `quarterly` or `yearly`. cc-hub adds the
+section heading; `title` is optional and defaults to the app name.
+
+    ---
+    command: uv run apps/ledger/scripts/lk.py summary
+    title: Money
+    ---
+
+With a `command`, the section is a script. cc-hub runs it from the hub root
+once the user has approved it on that machine, and pastes its standard output
+into the report as it is, without the agent seeing it. Empty output means no
+section; output beyond 20000 characters is cut with a marker. A failure, or a
+run over 300 seconds, shows a one-line failure in the report, with the first
+line of standard error (at most 300 characters). A section file that cannot
+be read shows its error the same way until it is fixed or switched off. An
+approval is for the exact command text: a version of the app that changes it
+asks the user again.
+
+The command is not run through a shell: its arguments are split the POSIX way
+(write paths with forward slashes), and there are no pipes and no `$VAR`
+expansion. The script gets `CC_HUB_DIR`, `CC_HUB_REPORT_PERIOD`,
+`CC_HUB_REPORT_SINCE` and `CC_HUB_REPORT_UNTIL` (ISO 8601 with offset) and
+`CC_HUB_LANGUAGE` (`en` when unset) in its environment: read them there, and
+write the section in that language. Put the `command` value in double quotes
+if it contains `#`; unquoted, a `#` that follows a space starts a comment.
+
+Without a `command`, the body tells the agent what to write for the period.
+Write it in English, like other agent texts; the agent answers in the user's
+language.
+
+A scheduled task of the app that finishes work quietly can leave its result
+for a report: `cc-hub report note <period> --from <app>/<task> -- '<text>'`.
+When no report is on, the note is not kept and the task replies with the
+text itself. An app with a `reports/` directory needs `min_hub = "0.7.0"`.
+
+During setup the agent shows the user each report command and approves it
+(`cc-hub report approve <app>`) once they agree; until then the report holds
+a line saying the command is not approved in place of that section. The user
+can leave an app out of one period (`cc-hub report section <app> <period>
+--off`), and `cc-hub report list` shows every period, section and approval.
 
 ## Publish
 

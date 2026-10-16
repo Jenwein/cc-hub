@@ -12,20 +12,14 @@ import re
 import tomllib
 from pathlib import Path
 
-import tomli_w
-
 from cc_hub.crontasks import CronError, check_schedule
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import HUB_FILE
+from cc_hub.tomltables import TableEditError, edit_table
 
 # the keys an override may hold, in the order they are written
 KEYS = ("schedule", "enabled")
 
-HEADER = re.compile(
-    r'^\s*\[\s*cron\s*\.\s*(?:"(?P<q>[^"]+)"|(?P<b>[A-Za-z0-9_-]+))\s*\](?:\s*#.*)?$'
-)
-# a line with its own ending, so that rejoining the lines gives the text back unchanged
-LINE = re.compile(r"[^\n]*\n|[^\n]+")
 UNUSABLE_NAME = re.compile(r'[\x00-\x1f\x7f"\\]')
 
 
@@ -50,25 +44,6 @@ def _clean(name: str, values: dict) -> dict:
     return clean
 
 
-def _spacing(line: str) -> bool:
-    """A blank line or a comment line: what trails a table without belonging to its keys."""
-    stripped = line.strip()
-    return not stripped or stripped.startswith("#")
-
-
-def _find(lines: list[str], name: str) -> tuple[int, int] | None:
-    """Line range [start, end) of the table headed `[cron."<name>"]`, or None."""
-    for start, line in enumerate(lines):
-        m = HEADER.match(line.rstrip("\r\n"))
-        if m is not None and (m.group("q") or m.group("b")) == name:
-            end = next(
-                (i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")),
-                len(lines),
-            )
-            return start, end
-    return None
-
-
 def apply(text: str, name: str, values: dict | None) -> str:
     """`text` with the override of task `name` set to `values`, or removed when None.
 
@@ -86,50 +61,11 @@ def apply(text: str, name: str, values: dict | None) -> str:
     if not isinstance(old_cron, dict):
         raise _refused(name)
 
-    lines = LINE.findall(text)
-    eol = "\r\n" if "\r\n" in text else "\n"
-    body = [
-        tomli_w.dumps({key: clean[key]}).rstrip("\n") + eol
-        for key in KEYS
-        if clean is not None and key in clean
-    ]
-    span = _find(lines, name)
-    if span is None:
-        if clean is not None:
-            if lines and not lines[-1].endswith("\n"):
-                lines[-1] += eol
-            if lines and lines[-1].strip():
-                lines.append(eol)
-            lines += [f'[cron."{name}"]{eol}', *body]
-    else:
-        start, end = span
-        last = end  # one past the table's last line that is not blank or a comment
-        while last > start + 1 and _spacing(lines[last - 1]):
-            last -= 1
-        if clean is None:
-            # blank lines that end the file go with the table; a comment there stays
-            stop = len(lines) if all(not line.strip() for line in lines[last:]) else last
-            first = start - 1 if start > 0 and not lines[start - 1].strip() else start
-            del lines[first:stop]
-        else:
-            if not lines[start].endswith("\n"):
-                lines[start] += eol
-            lines[start + 1 : last] = body
-
-    new_text = "".join(lines)
-    cron = dict(old_cron)
-    if clean is None:
-        cron.pop(name, None)
-    else:
-        cron[name] = clean
     try:
-        after = tomllib.loads(new_text)
-    except tomllib.TOMLDecodeError:
+        # an override holds no tables, so one that has child tables is not ours to rewrite
+        return edit_table(text, ("cron", name), clean, allow_children=False)
+    except TableEditError:
         raise _refused(name) from None
-    others = {k: v for k, v in before.items() if k != "cron"}
-    if {k: v for k, v in after.items() if k != "cron"} != others or after.get("cron", {}) != cron:
-        raise _refused(name)
-    return new_text
 
 
 def load(hub: Path) -> dict[str, dict]:

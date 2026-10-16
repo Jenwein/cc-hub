@@ -131,3 +131,138 @@ def test_apps_doc_covers_writing_and_publishing() -> None:
     assert "repository-local git identity" in restore
     for readme in ("README.md", "README.zh-CN.md"):
         assert "apps.lock" in (ROOT / readme).read_text(encoding="utf-8"), readme
+
+
+def test_readmes_explain_the_report_examples() -> None:
+    examples = (
+        "cc-hub cron set report-daily --on",
+        'cc-hub cron set report-weekly "0 20 * * 5"',
+        "cc-hub report language zh-CN",
+        "cc-hub report section ledger monthly --off",
+    )
+    for name in ("README.md", "README.zh-CN.md"):
+        readme = (ROOT / name).read_text(encoding="utf-8")
+        subcommands = "list|plan|put|send|note|section|language|approve".replace("|", "\\|")
+        assert f"| `cc-hub report {subcommands}` |" in readme, name
+        lines = [line.strip() for line in readme.splitlines()]
+        for example in examples:
+            found = [line for line in lines if line.startswith(example)]
+            assert found, (name, example)
+            assert " # " in found[0], (name, example)  # each example says what it does
+        assert "reports/" in readme, name
+
+
+def _section(text: str, heading: str) -> str:
+    return " ".join(text.split(heading, 1)[1].split("\n## ", 1)[0].split())
+
+
+def test_apps_doc_covers_reports() -> None:
+    from cc_hub import manifest
+
+    section = _section((ROOT / "docs" / "apps.md").read_text(encoding="utf-8"), "\n## Reports")
+    for phrase in ("`reports/<period>.md`", "`command`", "`title`", "forward slashes",
+                   "`CC_HUB_DIR`", "`CC_HUB_REPORT_PERIOD`", "`CC_HUB_REPORT_SINCE`",
+                   "`CC_HUB_REPORT_UNTIL`", "`CC_HUB_LANGUAGE`", "cc-hub report note",
+                   "once the user has approved it on that machine",
+                   "Empty output means no section", 'min_hub = "0.7.0"'):
+        assert phrase in section, phrase
+    # the command rules are the same in the guide the agent reads
+    authoring = _section(manifest.render("skills/hub-apps/authoring.md"), "\n## Reports")
+    for text in (section, authoring):
+        for phrase in ("not run through a shell", "no pipes", "`$VAR`", "in double quotes if it",
+                       "starts a comment", "20000 characters", "300 seconds"):
+            assert phrase in text, phrase
+    apps_doc = (ROOT / "docs" / "apps.md").read_text(encoding="utf-8")
+    assert "reports/<period>.md" in apps_doc.split("## Write an app", 1)[1].split("\n## ", 1)[0]
+    assert "never runs anything an app provides" not in apps_doc  # report commands: an exception
+
+
+def test_cc_connect_doc_covers_reports() -> None:
+    text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
+    section = _section(text, "\n## Reports")
+    for phrase in ("cc-connect send -p <project> -s <session> --stdin", "CC_PROJECT",
+                   "CC_SESSION_KEY", "PATH", "--silent", "NO_REPLY", "approved"):
+        assert phrase in section, phrase
+    registrations = [ln for ln in text.splitlines() if ln.strip().startswith("cc-connect cron add")]
+    assert registrations and all(ln.endswith(" --silent") for ln in registrations)
+
+
+def test_changelog_has_0_7_0() -> None:
+    from cc_hub import __version__
+
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert text.split("\n## ", 1)[1].startswith(__version__)  # the newest entry is this version
+    section = text.split("## 0.7.0", 1)[1].split("\n## ", 1)[0]
+    parts = {name: " ".join(body.split())
+             for name, body in (p.split("\n", 1) for p in section.split("\n### ")[1:])}
+    assert list(parts) == ["Added", "Changed", "Migration notes"]
+    for phrase in ("cc-hub report", "report-daily", "reports/<period>.md", "min_hub",
+                   "`doctor` check `reports`"):
+        assert phrase in parts["Added"], phrase
+    for phrase in ("--silent", "memory-consolidate", "fingerprint", "reserved", "`app install`",
+                   "`app update`", "`app remove`", "`--yes` drops", "approvals"):
+        assert phrase in parts["Changed"], phrase
+    for phrase in ("cc-hub update", "hub-adapt", "Nothing changes until"):
+        assert phrase in parts["Migration notes"], phrase
+    assert "## 0.6.0" in text  # the earlier entry stays as it was
+
+
+def test_design_spec_states_the_report_exceptions() -> None:
+    spec = (ROOT / "docs" / "superpowers" / "specs" / "2026-09-22-cc-hub-design.md").read_text(
+        encoding="utf-8"
+    )
+    assert (ROOT / "docs" / "superpowers" / "specs" / "2026-10-16-reports-design.md").is_file()
+    assert "2026-10-16-reports-design.md" in spec
+    lines = spec.splitlines()
+    for principle, exception in (("只搬文件，不执行", "批准"),
+                                 ("从不执行应用提供的字符串", "报告"),
+                                 ("自己不调用 cc-connect", "cc-connect send")):
+        found = [ln for ln in lines if principle in ln]
+        assert found and all(exception in ln for ln in found), principle
+    assert "--silent" in spec
+    assert "├── reports/" in spec  # in the hub layout
+    assert "| reports |" in spec  # in the doctor table
+    assert "`reports`" in spec.split("**数据目录**", 1)[1].split("\n", 1)[0]  # a reserved name
+    assert "report list|plan|put|send|note|section|language|approve" in spec
+
+
+def test_readmes_say_a_task_leaves_a_note_only_while_a_report_is_on() -> None:
+    en = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+    assert (
+        "While a report is on, a background task with nothing urgent to say leaves a note"
+    ) in en
+    assert "when no report is on, it sends its message as before" in en
+    zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    assert "有报告开着时，后台任务没有紧急的话要说" in zh
+    assert "没有报告开着时照旧自己发" in zh
+
+
+def test_cc_connect_doc_says_send_needs_the_session_and_splits_long_reports() -> None:
+    text = (ROOT / "docs" / "cc-connect.md").read_text(encoding="utf-8")
+    section = _section(text, "\n## Reports")
+    assert "leaves out one that is unset" not in section
+    assert "Without `CC_SESSION_KEY`, `send` refuses" in section
+    assert "4000 characters" in section and "cut short" in section
+
+
+def test_acceptance_has_a_reports_check() -> None:
+    text = (ROOT / "docs" / "acceptance.md").read_text(encoding="utf-8")
+    section = _section(text, "\n## Reports")
+    for phrase in ("cc-hub cron set report-daily --on", "cc-connect cron info <id> silent",
+                   "`true`", "cc-hub report approve", "cc-connect cron exec <id>", "⏰",
+                   "NO_REPLY", "`reports/<year>/<date>-daily.md`", "memory-consolidate",
+                   "private chat"):
+        assert phrase in section, phrase
+
+
+def test_design_spec_quotes_note_text_with_single_quotes() -> None:
+    spec = (ROOT / "docs" / "superpowers" / "specs" / "2026-09-22-cc-hub-design.md").read_text(
+        encoding="utf-8"
+    )
+    notes = [ln for ln in spec.splitlines() if "report note" in ln and " -- " in ln]
+    assert len(notes) >= 2
+    assert all('-- "' not in ln for ln in notes), notes
+    assert "cc-hub report note daily --from memory-consolidate -- 'merged 3 memories, pushed'" in (
+        spec
+    )
+    assert "`cc-hub report note <周期> --from <来源> -- '<文字>'`" in spec

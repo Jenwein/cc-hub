@@ -217,6 +217,79 @@ def test_consolidation_commits_and_pushes() -> None:
     assert "pushed" in manifest.render("cron/memory-consolidate.md")
 
 
+REPORT_SCHEDULES = {
+    "daily": "0 8 * * *",
+    "weekly": "0 20 * * 0",
+    "monthly": "0 9 1 * *",
+    "quarterly": "10 9 1 1,4,7,10 *",
+    "yearly": "20 9 1 1 *",
+}
+
+
+def test_report_tasks_have_the_default_schedules() -> None:
+    for period, schedule in REPORT_SCHEDULES.items():
+        rel = f"cron/report-{period}.md"
+        assert rel in manifest.FRAMEWORK_OWNED
+        text = manifest.render(rel)
+        m = CRON_FRONTMATTER.match(text)
+        assert m, rel
+        fields = dict(line.split(": ", 1) for line in m.group("body").splitlines())
+        assert fields == {
+            "schedule": f'"{schedule}"', "default": "false", "session": "new_per_run",
+        }, rel
+        body = text[m.end():]
+        flat = " ".join(body.split())
+        assert f"cc-hub report plan {period} --json" in body, rel
+        assert f"cc-hub report send {period}" in body, rel
+        # free text never goes inside double quotes: it reaches `put` on standard input
+        assert f"`cc-hub report put {period} <app>`, passing the section on standard input" in flat
+        assert "here-document with a quoted delimiter" in flat, rel
+        assert "never inside double quotes" in flat, rel
+        # the archive, not the app's own reports/ folder that holds the section files
+        assert "do not read the hub's `reports/` archive" in flat, rel
+        assert "--text" not in body and '"<the section>"' not in body, rel
+        assert body.count("NO_REPLY") == 2, rel
+        assert body.startswith(f"{period.capitalize()} report. Run "), rel
+        assert all(other not in body for other in REPORT_SCHEDULES if other != period), rel
+
+
+def test_consolidation_leaves_a_report_note() -> None:
+    text = " ".join(manifest.render("cron/memory-consolidate.md").split())
+    # single quotes, so a "$" or a backtick in the paragraph reaches the note as it is
+    assert "`cc-hub report note daily --from memory-consolidate -- '<the paragraph>'`" in text
+    assert '"<the paragraph>"' not in text
+    assert "a single quote inside the paragraph must be escaped for the shell in use" in text
+    assert "If the push failed, reply with that paragraph." in text
+    assert "if it prints `kept for ...` (exit 0), reply with exactly NO_REPLY" in text
+    assert "in any other case (it says no report is on, or it fails), reply with the paragraph" in (
+        text
+    )
+    assert "pushed" in text
+
+
+def test_cron_readme_covers_reports() -> None:
+    readme = manifest.render("cron/README.md")
+    register = _section(readme, "## Register")
+    assert "cc-connect cron info <id> silent" in register and "`true`" in register
+    reports = _section(readme, "## Reports")
+    for phrase in ("cc-hub report language", "cc-hub report section", "silent",
+                   "cc-hub cron set report-<period> --on", "cc-hub report list --json",
+                   "cc-hub report note", "NO_REPLY", "`language`", "urgent"):
+        assert phrase in reports, phrase
+    assert "cc-hub report note <period> --from <task> -- '<text>'" in reports
+    assert '"<text>"' not in reports and "a single quote inside it must be escaped" in reports
+    assert "`kept for ...`, the task replies `NO_REPLY`" in reports
+    assert "not kept (exit 3, or an error), it replies with the same words" in reports
+    # which task files `cc-hub update` overwrites
+    change = _section(readme, "## Change a time")
+    assert (
+        "`cc-hub update` overwrites `README.md`, `memory-consolidate.md` and the "
+        "`report-<period>.md` files; files you add here are yours."
+    ) in change
+    section = readme.split("## Reports", 1)[1].split("\n## ", 1)[0]
+    assert len(section.strip().splitlines()) + 1 <= 25
+
+
 def test_hub_adapt_leaves_permissions_to_the_runtime() -> None:
     assert "do not change them here" in manifest.render("skills/hub-adapt/SKILL.md")
 
@@ -301,3 +374,54 @@ def test_authoring_covers_scheduled_tasks() -> None:
     for phrase in ("`hub:<app>/<task>`", "`schedule`, `default` and `session`",
                    "cc-hub cron set <app>/<task>", 'min_hub = "0.5.0"'):
         assert phrase in text, phrase
+
+
+def test_agents_md_points_at_reports() -> None:
+    text = " ".join(manifest.render("AGENTS.md").split())
+    assert "- `reports/`: sent reports, one file each (`cc-hub report`)." in text
+    para = text.split("## 4. cc-connect", 1)[1].split("## 5. Safety", 1)[0]
+    assert "Reports are scheduled tasks of the hub" in para
+    assert '`cron/README.md`, "Reports"' in para
+    assert "read the latest file of that period under `reports/`" in para
+    assert len(manifest.render("AGENTS.md").splitlines()) <= 150
+
+
+def test_bootstrap_sets_the_report_language() -> None:
+    text = manifest.render("BOOTSTRAP.md")
+    flat = " ".join(text.split())
+    assert "cc-hub report language <tag>" in flat and "`zh-CN`" in flat
+    assert "which reports they want" in flat
+    assert 'as `cron/README.md` "Reports" says' in flat
+    assert "5. **Finish.**" in text and "6." not in text
+
+
+def test_hub_apps_setup_approves_report_commands() -> None:
+    skill = manifest.render("skills/hub-apps/SKILL.md")
+    setup = " ".join(skill.split("## Set up", 1)[1].split("\n## ", 1)[0].split())
+    assert "`cc-hub report list --json`" in setup
+    assert "`kind` `command`" in setup and "`approved` false" in setup
+    assert "`cc-hub report approve <name>`" in setup
+    # a declined command: its section is switched off, so that nothing keeps flagging it
+    assert "`cc-hub report section <name> <period> --off`" in setup
+    assert "For each period whose command they decline" in setup
+    assert "doctor" in setup
+    assert setup.index("**App steps.**") < setup.index("`cc-hub report list --json`")
+    assert setup.index("`cc-hub report list --json`") < setup.index("**Scheduled tasks.**")
+    update = " ".join(skill.split("## Update", 1)[1].split("\n## ", 1)[0].split())
+    assert "approval again" in update
+    remove = " ".join(skill.split("## Remove", 1)[1].split("\n## ", 1)[0].split())
+    assert "report settings" in remove
+
+
+def test_authoring_covers_reports() -> None:
+    text = manifest.render("skills/hub-apps/authoring.md")
+    flat = " ".join(text.split())
+    reports = " ".join(text.split("## Reports", 1)[1].split("\n## ", 1)[0].split())
+    for phrase in ("`reports/<period>.md`", "`command`", "`title`", "forward slashes",
+                   "`CC_HUB_REPORT_PERIOD`", "`CC_HUB_REPORT_SINCE`", "`CC_HUB_REPORT_UNTIL`",
+                   "`CC_HUB_DIR`", "`CC_HUB_LANGUAGE`", "cc-hub report note",
+                   "once the user has approved it on that machine",
+                   "Empty output means no section"):
+        assert phrase in reports, phrase
+    assert 'min_hub = "0.7.0"' in reports
+    assert "reports/" in flat

@@ -30,6 +30,7 @@
 | `cc-hub tap add\|list\|remove` | 登记放应用的 git 仓库（tap） |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | 从 tap 安装、升级、卸载应用 |
 | `cc-hub cron list\|set\|reset` | 定时任务：列出、改时间、关掉或打开 |
+| `cc-hub report list\|plan\|put\|send\|note\|section\|language\|approve` | 报告：应用按周期往里加内容的日报到年报 |
 | `cc-hub feedback [--app NAME] [--json]` | 反馈问题的去处和环境信息，不发送任何东西 |
 | `cc-hub where` | 打印总站目录和包的安装位置 |
 | `cc-hub version` | 打印版本号 |
@@ -40,8 +41,14 @@
     cc-hub cron set plans/morning "0 7 * * *"       # 让 plans 应用的 morning 任务每天 07:00 运行
     cc-hub cron set ledger/prices --off             # 关掉一个任务（--on 重新打开）
     cc-hub cron reset plans/morning                 # 回到应用定义文件里的时间
+    cc-hub cron set report-daily --on               # 打开日报（默认每天 08:00）
+    cc-hub cron set report-weekly "0 20 * * 5"      # 周报改到每周五 20:00
+    cc-hub report language zh-CN                    # 报告里的标题用中文
+    cc-hub report section ledger monthly --off      # 月报里不放记账应用（ledger）那一段
 
 cron 表达式要加引号，否则会被 shell 拆开。总站自带的任务名是 `cron/<名>.md` 的文件名（不含 `.md`），应用的任务名是 `<应用>/<任务>`。你设的时间存在 `hub.toml` 里，`cc-hub update` 和应用升级都不会改掉；`set` 和 `reset` 会打印在 cc-connect 里重新登记这个任务的步骤，由 agent 执行。平时直接跟 agent 说就行。
+
+报告是按日、周、月、季、年发到聊天里的一份摘要，装了供稿的应用就会各加一段（应用里的 `reports/<周期>.md`，写法见 [docs/apps.md](docs/apps.md)）。`report-daily`、`report-weekly`、`report-monthly`、`report-quarterly`、`report-yearly` 五个任务默认关闭，要哪个就像上面那样打开哪个。cc-hub 自己写的标题用你设的语言（内置中文和英文，其他语言用英文）。会运行命令的段落，要你在这台机器上批准过那条命令才会运行：agent 在设置应用时问你，再执行 `cc-hub report approve <应用>`；`cc-hub report list` 列出每个周期、每一段和批准情况。发出的报告存在 `reports/` 下。有报告开着时，后台任务没有紧急的话要说就不单独发消息，而是用 `cc-hub report note` 留一句话给下一份报告；没有报告开着时照旧自己发。
 
 ## 总站布局
 
@@ -51,9 +58,10 @@ cron 表达式要加引号，否则会被 shell 拆开。总站自带的任务�
     ├── MEMORY.md  memory/YYYY-MM-DD.md               记忆
     ├── skills/  cron/  scripts/                      skills、定时任务、你的脚本
     ├── apps/  apps.lock                              已安装的应用及其记录
-    └── hub.toml                                      配置，以及你设的定时任务时间
+    ├── reports/                                      已发出的报告，每份一个文件
+    └── hub.toml                                      配置，以及你设的定时任务时间和报告设置
 
-`cc-hub update` 只替换框架拥有的文件：`AGENTS.md` 结尾标记以上的部分、`BOOTSTRAP.md`、`skills/hub-*`、`cron/README.md`、`cron/memory-consolidate.md`、`.gitignore` 和 `.gitattributes`。`apps/` 和 `apps.lock` 由 `cc-hub app` 管理；应用声明的数据目录归你。其余都归你，包括你或 cc-connect 写在 `AGENTS.md` 结尾标记以下的内容。
+`cc-hub update` 只替换框架拥有的文件：`AGENTS.md` 结尾标记以上的部分、`BOOTSTRAP.md`、`skills/hub-*`、`cron/README.md`、`cron/memory-consolidate.md`、`cron/report-*.md`、`.gitignore` 和 `.gitattributes`。`apps/` 和 `apps.lock` 由 `cc-hub app` 管理；应用声明的数据目录归你。其余都归你，包括你或 cc-connect 写在 `AGENTS.md` 结尾标记以下的内容。
 
 总站是一个 git 仓库：cc-hub 提交它的命令改动的文件，agent 每做完一件事提交一次。备份到私有远程见 [docs/backup.md](docs/backup.md)。
 

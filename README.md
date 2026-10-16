@@ -42,6 +42,7 @@ lists the subcommands of a group.
 | `cc-hub tap add\|list\|remove` | Register git repositories of apps (taps). |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | Install, update and remove apps from taps. |
 | `cc-hub cron list\|set\|reset` | Scheduled tasks: list them, change their times, turn them off or on. |
+| `cc-hub report list\|plan\|put\|send\|note\|section\|language\|approve` | Reports: daily to yearly digests that apps add sections to. |
 | `cc-hub feedback [--app NAME] [--json]` | Where to report a problem, with an environment block; sends nothing. |
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |
@@ -52,6 +53,10 @@ Examples:
     cc-hub cron set plans/morning "0 7 * * *"       # run the plans app's morning task at 07:00
     cc-hub cron set ledger/prices --off             # turn a task off (--on turns it back on)
     cc-hub cron reset plans/morning                 # back to the time the app's file gives
+    cc-hub cron set report-daily --on               # turn the daily report on (08:00 by default)
+    cc-hub cron set report-weekly "0 20 * * 5"      # weekly report on Fridays at 20:00
+    cc-hub report language zh-CN                    # write report headings in Chinese
+    cc-hub report section ledger monthly --off      # leave the ledger app out of the monthly report
 
 Quote the cron expression, or the shell splits it. A task's name is its file
 name without `.md` for the hub's own tasks (`cron/<name>.md`), and
@@ -59,6 +64,20 @@ name without `.md` for the hub's own tasks (`cron/<name>.md`), and
 `cc-hub update` and app updates keep them; `set` and `reset` print the steps
 that re-register the task with cc-connect, which the agent runs. Usually you
 just ask the agent.
+
+A report is a digest sent to your chat each day, week, month, quarter or year,
+with a section from every installed app that adds one (an app's
+`reports/<period>.md`, see [docs/apps.md](docs/apps.md)). The five tasks
+`report-daily`, `report-weekly`, `report-monthly`, `report-quarterly` and
+`report-yearly` are off until you turn one on, as above. The headings cc-hub
+writes use the language you set (Chinese and English are built in; any other
+gets English). A section that runs a command does so only after you approved
+that command on this machine; the agent asks during the app's setup and runs
+`cc-hub report approve <app>`, and `cc-hub report list` shows every period,
+section and approval. Sent reports are kept in `reports/`. While a report is
+on, a background task with nothing urgent to say leaves a note
+(`cc-hub report note`) for the next report instead of sending its own
+message; when no report is on, it sends its message as before.
 
 ## Hub layout
 
@@ -68,13 +87,14 @@ just ask the agent.
     ├── MEMORY.md  memory/YYYY-MM-DD.md               memory
     ├── skills/  cron/  scripts/                      skills, scheduled tasks, your scripts
     ├── apps/  apps.lock                              installed apps and their record
-    └── hub.toml                                      configuration and task times you set
+    ├── reports/                                      the reports that were sent, one file each
+    └── hub.toml                                      configuration, task times and report settings
 
 `cc-hub update` replaces only framework-owned files: `AGENTS.md` above its
 closing marker, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`,
-`cron/memory-consolidate.md`, `.gitignore` and `.gitattributes`. `cc-hub app`
-manages `apps/` and `apps.lock`; an app's data, in the directories it
-declares, is yours.
+`cron/memory-consolidate.md`, `cron/report-*.md`, `.gitignore` and
+`.gitattributes`. `cc-hub app` manages `apps/` and `apps.lock`; an app's data,
+in the directories it declares, is yours.
 Everything else is yours too, including whatever you or cc-connect add below
 the closing marker of `AGENTS.md`.
 

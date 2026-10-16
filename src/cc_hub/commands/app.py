@@ -10,6 +10,7 @@ import typer
 from cc_hub import apps
 from cc_hub.console import echo_json, fail, resolve_hub, warn
 from cc_hub.crontasks import TaskDef
+from cc_hub.reports import PERIODS, SectionDef
 
 app_app = typer.Typer(no_args_is_help=True, help="Install and manage apps from taps.")
 
@@ -26,6 +27,11 @@ def _task_line(name: str, task: TaskDef) -> str:
     return f"  {name}: {task.schedule} ({choice}, {task.session})"
 
 
+def _section_line(period: str, section: SectionDef) -> str:
+    what = "instructions" if section.command is None else f"command {section.command}"
+    return f"  {period}: {what}"
+
+
 def overview(plan: apps.AppPlan) -> list[str]:
     m = plan.manifest
     lines = [f"{m.name} {m.version} from {plan.source.describe()}", m.description]
@@ -39,6 +45,12 @@ def overview(plan: apps.AppPlan) -> list[str]:
             lines.append(_task_line(f"hub:{m.name}/{task}", cron))
     else:
         lines.append("scheduled tasks: none")
+    sections = [(p, plan.reports[p]) for p in PERIODS if p in plan.reports]
+    if sections:
+        lines.append("report sections:")
+        lines += [_section_line(period, section) for period, section in sections]
+    else:
+        lines.append("report sections: none")
     lines.append("setup steps: " + ("SETUP.md" if plan.has_setup else "none"))
     lines.append("removal steps: " + ("REMOVE.md" if plan.has_remove else "none"))
     return lines
@@ -151,7 +163,7 @@ def _print_preview(p: apps.UpdatePreview) -> None:
     if p.local_changes:
         typer.echo("local changes (kept in the backup): " + ", ".join(p.local_changes))
     if p.diff:
-        typer.echo("--- app.toml, SETUP.md, REMOVE.md, skills/, scripts/, cron/ ---")
+        typer.echo(f"--- {', '.join((*apps.STEERING, *apps.STEERING_DIRS))} ---")
         typer.echo(p.diff.rstrip())
     typer.echo("nothing changed yet; to update run:")
     typer.echo(f"  cc-hub app update {p.name} --ref {p.new} --yes")
@@ -218,6 +230,8 @@ def remove_cmd(
             typer.echo("scheduled tasks to unregister: " + (", ".join(plan.cron_tasks) or "none"))
             overrides = ", ".join(plan.overrides) + " (removed from hub.toml)"
             typer.echo("overrides: " + (overrides if plan.overrides else "none"))
+            settings = ", ".join(plan.report_settings) + " (removed from hub.toml)"
+            typer.echo("report settings: " + (settings if plan.report_settings else "none"))
             typer.echo("software it used: " + (", ".join(r.name for r in plan.software) or "none"))
             if plan.remove_md:
                 typer.echo("REMOVE.md:")

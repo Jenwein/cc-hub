@@ -46,8 +46,8 @@ To register a row, run its `command`. To delete a job:
    - `enabled: true`, not registered: register it.
    - `enabled: true`, registered: read the job with `cc-connect cron info <id>`
      and compare it with what the row's `command` sets: the `--cron` time,
-     the `--prompt` and the `--session-mode`. If anything differs, delete it
-     and register it again.
+     the `--prompt` and the `--session-mode`; `cc-connect cron info <id> silent`
+     must print `true`. If anything differs, delete it and register it again.
 3. A registered `hub:` job in your scope that has no row (its file is gone)
    is deleted: `hub:<name>` without a `/` for the hub, `hub:<app>/...` for an
    app. A `hub:<name>` registered more than once whose row has no `error`:
@@ -71,5 +71,31 @@ Then run the steps the command prints, in a direct chat: find the task's
 `<old id>` with `cc-connect cron list` and delete it, then, if the task is
 on, run its registration command.
 
-`cc-hub update` overwrites `README.md` and `memory-consolidate.md`; files you
-add here are yours.
+`cc-hub update` overwrites `README.md`, `memory-consolidate.md` and the
+`report-<period>.md` files; files you add here are yours.
+
+## Reports
+
+`cc-hub report` sends the user a report each day, week, month, quarter or
+year. The tasks `report-daily`, `report-weekly`, `report-monthly`,
+`report-quarterly` and `report-yearly` are off until the user wants one:
+
+    cc-hub cron set report-<period> --on
+    cc-hub cron set report-<period> "<expr>"     # another time, if wanted
+
+Then run the steps it prints, in a direct chat. Before the first one goes on,
+run `cc-hub report list --json`: if `language` is null, ask the user which
+language the reports are in and run `cc-hub report language <tag>` (such as
+`en` or `zh-CN`). An app's section of a period's report is switched with
+`cc-hub report section <app> <period> --off` (or `--on`).
+
+Every task is registered `--silent`: the chat shows only what the agent
+replies, and `NO_REPLY` shows nothing. A task that finishes work quietly
+leaves its result for a report instead of replying:
+
+    cc-hub report note <period> --from <task> -- '<text>'
+
+Single-quote the text; a single quote inside it must be escaped for the shell
+in use. When that prints `kept for ...`, the task replies `NO_REPLY`; if the
+note is not kept (exit 3, or an error), it replies with the same words. An
+urgent problem is never left as a note; reply with it directly.
