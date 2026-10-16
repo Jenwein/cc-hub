@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 
 import tomli_w
 
-from cc_hub import __version__, cronoverrides, gitops, manifest, taps
+from cc_hub import __version__, cronoverrides, gitops, manifest, reports, reportstate, taps
 from cc_hub.applock import (
     LOCK_FILE,
     Lock,
@@ -34,6 +34,8 @@ from cc_hub.crontasks import CronError, TaskDef, parse_task
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import HUB_FILE, hub_name
 from cc_hub.platform import LinkError, is_link, is_windows, link_dir, remove_link, rmtree
+from cc_hub.reports import NOT_A_PERIOD, PERIODS, ReportError, SectionDef, parse_section
+from cc_hub.tomltables import edit_table
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 VERSION = re.compile(r"^\d+(?:\.\d+){0,2}$")
@@ -92,7 +94,7 @@ class AppManifest:
 
 def reserved_names() -> set[str]:
     firsts = {rel.split("/")[0] for rel in manifest.all_templates()}
-    extra = {*manifest.USER_DIRS, "apps", LOCK_FILE, "secrets", "CLAUDE.md"}
+    extra = {*manifest.USER_DIRS, "apps", LOCK_FILE, "secrets", "CLAUDE.md", "reports"}
     return {name.casefold() for name in firsts | extra}
 
 
@@ -263,6 +265,13 @@ def parse_cron(text: str, *, where: str) -> TaskDef:
         raise AppError(str(exc)) from exc
 
 
+def parse_report(text: str, *, where: str) -> SectionDef:
+    try:
+        return parse_section(text, where=where)
+    except ReportError as exc:
+        raise AppError(str(exc)) from exc
+
+
 HUB_ERRORS: tuple[type[Exception], ...] = (
     AppError, taps.TapError, LockError, gitops.GitError, LinkError, OSError,
 )
@@ -348,6 +357,7 @@ class AppPlan:
     seed: list[str]  # hub-relative paths
     has_setup: bool
     has_remove: bool
+    reports: dict[str, SectionDef] = field(default_factory=dict)  # period -> the app's section
 
 
 def read_installed(hub: Path, name: str) -> AppManifest | None:
@@ -410,9 +420,21 @@ def build_plan(hub: Path, lock: Lock, source, *, replacing: str | None = None) -
             except UnicodeDecodeError as exc:
                 raise AppError(f"{m.name}/{p} is not UTF-8") from exc
             crons[task] = parse_cron(cron_text, where=f"{m.name}/{p}")
+    sections = {}
+    for p in paths:
+        if re.fullmatch(r"reports/[^/]+\.md", p) and p != "reports/README.md":
+            period = p[len("reports/") : -len(".md")]
+            if period not in PERIODS:
+                raise AppError(f"{m.name}/{p}: {period} {NOT_A_PERIOD}")
+            try:
+                section_text = source.read(p).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise AppError(f"{m.name}/{p} is not UTF-8") from exc
+            sections[period] = parse_report(section_text, where=f"{m.name}/{p}")
     scripts = [p for p in paths if p.startswith("scripts/")]
     return AppPlan(
-        m, source, skills, crons, scripts, seed, "SETUP.md" in paths, "REMOVE.md" in paths
+        m, source, skills, crons, scripts, seed, "SETUP.md" in paths, "REMOVE.md" in paths,
+        sections,
     )
 
 
@@ -603,7 +625,8 @@ def save_state(hub: Path, state: dict) -> None:
 
 
 def fingerprint(app_dir: Path) -> str:
-    """Hash of what setup depends on: SETUP.md, the requires of app.toml, the cron tasks."""
+    """Hash of what setup depends on: SETUP.md, the requires of app.toml, the cron tasks and the
+    report sections."""
     h = hashlib.sha256()
     setup = app_dir / "SETUP.md"
     h.update(b"setup\0" + (setup.read_bytes() if setup.is_file() else b""))
@@ -612,6 +635,9 @@ def fingerprint(app_dir: Path) -> str:
     cron = app_dir / "cron"
     for p in sorted(cron.glob("*.md")) if cron.is_dir() else []:
         h.update(b"cron\0" + p.name.encode("utf-8") + b"\0" + p.read_bytes())
+    section_dir = app_dir / "reports"
+    for p in sorted(section_dir.glob("*.md")) if section_dir.is_dir() else []:
+        h.update(b"reports\0" + p.name.encode("utf-8") + b"\0" + p.read_bytes())
     return h.hexdigest()
 
 
@@ -774,7 +800,7 @@ def search_apps(hub: Path, words: str = "") -> list[dict]:
 
 
 STEERING = ("app.toml", "SETUP.md", "REMOVE.md")
-STEERING_DIRS = ("skills/", "scripts/", "cron/")
+STEERING_DIRS = ("skills/", "scripts/", "cron/", "reports/")
 
 
 @dataclass
@@ -898,6 +924,7 @@ class RemovePlan:
     software: list[Requirement]
     remove_md: str
     overrides: list[str] = field(default_factory=list)  # keys of hub.toml's [cron."<app>/<task>"]
+    report_settings: list[str] = field(default_factory=list)  # [report."<app>/<period>"] keys
 
 
 def _override_keys(hub: Path, app: str) -> list[str]:
@@ -922,9 +949,13 @@ def plan_remove(hub: Path, name: str) -> RemovePlan:
         overrides = _override_keys(hub, name)
     except (OSError, ValueError, CronError):
         overrides = []  # an unreadable hub.toml is for doctor to report, not a reason to refuse
+    try:
+        report_settings = reports.section_keys_of(hub, name)
+    except (OSError, ValueError, ReportError):
+        report_settings = []
     return RemovePlan(
         name, "link" in entry, m.data_dirs if m else [], [f"hub:{name}/{t}" for t in tasks],
-        m.requires if m else [], remove_md, overrides,
+        m.requires if m else [], remove_md, overrides, report_settings,
     )
 
 
@@ -954,6 +985,45 @@ def _drop_overrides(hub: Path, app: str) -> tuple[bool, str | None]:
     return True, None
 
 
+def _drop_report_settings(hub: Path, app: str) -> tuple[bool, str | None]:
+    """Remove `app`'s [report."<app>/<period>"] tables from hub.toml, as `_drop_overrides` does.
+
+    The new text is worked out in full before anything is written, so hub.toml either loses all
+    of them or none.
+    """
+    try:
+        keys = reports.section_keys_of(hub, app)
+        if not keys:
+            return False, None
+        path = Path(hub) / HUB_FILE
+        old = path.read_bytes().decode("utf-8")  # read_text would turn CRLF into LF
+        new = old
+        for key in keys:
+            new = edit_table(new, ("report", key), None)
+        write_text(path, new)
+    except FileNotFoundError:
+        return False, None
+    except (OSError, ValueError, ReportError) as exc:
+        return False, (
+            f"{HUB_FILE}: could not drop the report settings of {app}'s sections ({exc}); "
+            f'delete any [report."{app}/<period>"] tables by hand'
+        )
+    return True, None
+
+
+def _forget_report_state(hub: Path, app: str) -> str | None:
+    """Drop the approvals and drafts of `app`'s report sections; a warning when that fails."""
+    try:
+        with reportstate.state_lock(hub):
+            reportstate.forget_app(hub, app)
+    except (OSError, ValueError) as exc:  # a busy state is a TimeoutError, which is an OSError
+        return (
+            f"{app}: could not forget the approvals and drafts of its report sections ({exc}); "
+            f"they stay in {reportstate.STATE_DIR}"
+        )
+    return None
+
+
 def apply_remove(hub: Path, name: str) -> list[str]:
     hub = Path(hub)
     with hub_lock(hub):
@@ -971,11 +1041,13 @@ def apply_remove(hub: Path, name: str) -> list[str]:
             save_state(hub, states)
         warnings = relink(hub)
         paths = [LOCK_FILE]
-        changed, dropped = _drop_overrides(hub, name)
-        if changed:
+        overrides_changed, dropped = _drop_overrides(hub, name)
+        settings_changed, dropped_settings = _drop_report_settings(hub, name)
+        if overrides_changed or settings_changed:
             paths.append(HUB_FILE)  # only then: the user's other edits to hub.toml stay theirs
         warning = gitops.commit_paths(hub, paths, f"cc-hub: app remove {name}")
-    return warnings + [w for w in (dropped, warning) if w]
+        forgotten = _forget_report_state(hub, name)
+    return warnings + [w for w in (dropped, dropped_settings, warning, forgotten) if w]
 
 
 @dataclass

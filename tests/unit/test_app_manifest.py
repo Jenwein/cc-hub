@@ -17,6 +17,7 @@ from cc_hub.apps import (
 )
 from cc_hub.commands.app import overview
 from cc_hub.crontasks import TaskDef
+from cc_hub.reports import SectionDef
 
 GOOD = """
 [app]
@@ -27,7 +28,7 @@ min_hub = "0.4"
 issues = "https://github.com/you/my-apps/issues"
 
 [data]
-dirs = ["ledger", "reports/ledger"]
+dirs = ["ledger", "books/ledger"]
 
 [[requires]]
 name = "beancount"
@@ -52,7 +53,7 @@ def test_parse_manifest_reads_every_field() -> None:
         "ledger", "0.1.0", "Bookkeeping", "0.4",
     )
     assert m.issues == "https://github.com/you/my-apps/issues"
-    assert m.data_dirs == ["ledger", "reports/ledger"]
+    assert m.data_dirs == ["ledger", "books/ledger"]
     assert m.requires[0] == Requirement("beancount", "bean-check", "uv tool install beancount")
     assert m.requires[0].install_line("windows") == "uv tool install beancount"
     assert m.requires[1].install_line("linux") == "sudo apt install hledger"
@@ -105,6 +106,8 @@ def test_versions() -> None:
 @pytest.mark.parametrize(
     "raw",
     ["memory", "Skills/x", ".secret", "apps", "apps.lock", "USER.md", "/abs", "a/../b",
+     # the report archive lives in reports/
+     "reports", "Reports", "reports/ledger",
      "a\\b", "C:/x", "secrets/k", "", "memory.", "memory ", "ledger/con", "ledger/nul.txt",
      "led\x01ger",
      # 8.3 short names reach .git, .cc-hub and .claude on NTFS
@@ -117,7 +120,7 @@ def test_data_dir_rejects(raw: str) -> None:
         normalize_data_dir(raw)
 
 
-@pytest.mark.parametrize("raw", ["ledger/2026", "reports/ledger", "a.b/c-d_e", "Ledger"])
+@pytest.mark.parametrize("raw", ["ledger/2026", "books/ledger", "a.b/c-d_e", "Ledger"])
 def test_data_dir_accepts(raw: str) -> None:
     assert normalize_data_dir(raw) == raw
 
@@ -172,3 +175,27 @@ def test_overview_lists_the_tasks() -> None:
         "  hub:plans/morning: 0 8 * * * (default, new_per_run)",
         "  hub:plans/review: 0 18 * * 5 (optional, reuse)",
     ]
+
+
+def test_overview_lists_the_report_sections_in_period_order() -> None:
+    reports = {
+        "weekly": SectionDef(None, "Plans"),
+        "daily": SectionDef("cc-hub-ledger report daily", None),
+    }
+    plan = AppPlan(
+        AppManifest("ledger", "0.1.0", "Ledger"), _Source(), [], {}, [], [], False, False, reports
+    )
+    lines = overview(plan)
+    start = lines.index("report sections:")
+    assert lines[start : start + 3] == [
+        "report sections:",
+        "  daily: command cc-hub-ledger report daily",
+        "  weekly: instructions",
+    ]
+    assert lines[start - 1] == "scheduled tasks: none"
+    assert lines[start + 3] == "setup steps: none"
+
+
+def test_overview_says_when_there_are_no_report_sections() -> None:
+    plan = AppPlan(AppManifest("plans", "0.1.0", "Plans"), _Source(), [], {}, [], [], False, False)
+    assert "report sections: none" in overview(plan)

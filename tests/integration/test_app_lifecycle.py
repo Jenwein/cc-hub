@@ -368,7 +368,9 @@ def test_remove_still_removes_the_app_when_hub_toml_cannot_be_edited(
     warnings = apps.apply_remove(hub, "plans")
     assert not (hub / "apps" / "plans").exists()
     assert "plans" not in load_lock(hub).apps
-    assert len(warnings) == 1 and "hub.toml" in warnings[0] and "overrides" in warnings[0]
+    assert len(warnings) == 2 and all("hub.toml" in w for w in warnings)
+    assert "overrides" in warnings[0] and '[cron."plans/<task>"]' in warnings[0]
+    assert "report settings" in warnings[1] and '[report."plans/<period>"]' in warnings[1]
     assert (hub / "hub.toml").read_text(encoding="utf-8") == "[hub\n"
     assert changed_in_head(hub) == ["apps.lock"]
 
@@ -377,3 +379,176 @@ def test_remove_without_a_hub_toml_is_quiet(hub_with_plans: Path) -> None:
     (hub_with_plans / "hub.toml").unlink()
     assert apps.apply_remove(hub_with_plans, "plans") == []
     assert not (hub_with_plans / "apps" / "plans").exists()
+
+
+REPORT_SETTINGS = (
+    '[report."plans/daily"]\nenabled = false\n\n'
+    '[report."plans/weekly"]\nenabled = false\n\n'
+    '[report."ledger/monthly"]\nenabled = false\n'
+)
+
+
+def test_remove_plan_lists_the_report_settings_of_the_app(hub_with_plans: Path) -> None:
+    append_hub_toml(hub_with_plans, "\n" + REPORT_SETTINGS)
+    plan = apps.plan_remove(hub_with_plans, "plans")
+    assert plan.report_settings == ["plans/daily", "plans/weekly"]
+
+
+def test_remove_plan_has_no_report_settings_when_hub_toml_has_none(hub_with_plans: Path) -> None:
+    assert apps.plan_remove(hub_with_plans, "plans").report_settings == []
+
+
+@pytest.mark.parametrize("text", ["[hub\n", "[report]\nlanguage = 1\n", "report = 1\n"])
+def test_remove_plan_survives_a_hub_toml_whose_report_settings_cannot_be_read(
+    hub_with_plans: Path, text: str
+) -> None:
+    (hub_with_plans / "hub.toml").write_text(text, encoding="utf-8")
+    assert apps.plan_remove(hub_with_plans, "plans").report_settings == []
+
+
+def test_remove_drops_the_report_settings_and_commits_hub_toml(git_hub_with_plans: Path) -> None:
+    hub = git_hub_with_plans
+    old = append_hub_toml(hub, "\n" + REPORT_SETTINGS)
+    commit_all(hub)
+    assert apps.apply_remove(hub, "plans") == []
+    assert (hub / "hub.toml").read_text(encoding="utf-8") == (
+        old + '\n[report."ledger/monthly"]\nenabled = false\n'
+    )
+    assert changed_in_head(hub) == ["apps.lock", "hub.toml"]
+    assert git(hub, "log", "-1", "--format=%s").strip() == "cc-hub: app remove plans"
+    assert git(hub, "status", "--porcelain").strip() == ""
+
+
+def test_remove_drops_overrides_and_report_settings_in_one_commit(
+    git_hub_with_plans: Path,
+) -> None:
+    hub = git_hub_with_plans
+    old = append_hub_toml(hub, "\n" + OVERRIDES + "\n" + REPORT_SETTINGS)
+    commit_all(hub)
+    assert apps.apply_remove(hub, "plans") == []
+    assert (hub / "hub.toml").read_text(encoding="utf-8") == (
+        old + '\n[cron."ledger/prices"]\nenabled = false\n'
+        '\n[report."ledger/monthly"]\nenabled = false\n'
+    )
+    assert changed_in_head(hub) == ["apps.lock", "hub.toml"]
+
+
+def test_remove_leaves_hub_toml_alone_when_the_app_has_no_report_settings(
+    git_hub_with_plans: Path,
+) -> None:
+    hub = git_hub_with_plans
+    append_hub_toml(hub, '\n[report."ledger/monthly"]\nenabled = false\n')
+    commit_all(hub)
+    append_hub_toml(hub, "# a note of mine\n")
+    assert apps.apply_remove(hub, "plans") == []
+    assert changed_in_head(hub) == ["apps.lock"]
+    assert (hub / "hub.toml").read_text(encoding="utf-8").endswith("# a note of mine\n")
+
+
+def test_remove_keeps_crlf_line_endings_while_dropping_report_settings(
+    git_hub_with_plans: Path,
+) -> None:
+    hub = git_hub_with_plans
+    raw = (hub / "hub.toml").read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    raw += b'\r\n[report."plans/daily"]\r\nenabled = false\r\n'
+    (hub / "hub.toml").write_bytes(raw)
+    commit_all(hub)
+    assert apps.apply_remove(hub, "plans") == []
+    after = (hub / "hub.toml").read_bytes()
+    assert b"plans/daily" not in after
+    assert b"\r\n" in after and b"\n" not in after.replace(b"\r\n", b"")
+
+
+def test_remove_forgets_the_approvals_and_drafts_of_the_app(hub_with_plans: Path) -> None:
+    from cc_hub import reportstate
+
+    hub = hub_with_plans
+    reportstate.approve(hub, "plans", {"daily": "plans-report daily"})
+    reportstate.approve(hub, "ledger", {"monthly": "ledger-report monthly"})
+    reportstate.put_draft(hub, "daily", "plans", "a draft")
+    reportstate.put_draft(hub, "daily", "ledger", "another")
+    assert apps.apply_remove(hub, "plans") == []
+    state = reportstate.load_state(hub)
+    assert "plans" not in state["approved"]
+    assert state["approved"]["ledger"] == {"monthly": "ledger-report monthly"}
+    assert "plans" not in (hub / ".cc-hub" / "reports" / "state.toml").read_text(encoding="utf-8")
+    assert reportstate.read_draft(hub, "daily", "plans") == ""
+    assert reportstate.read_draft(hub, "daily", "ledger") == "another"
+
+
+def test_remove_of_an_app_with_no_report_state_creates_none(hub_with_plans: Path) -> None:
+    assert apps.apply_remove(hub_with_plans, "plans") == []
+    assert not (hub_with_plans / ".cc-hub" / "reports" / "state.toml").exists()
+
+
+def test_remove_only_warns_when_the_report_state_is_busy(
+    hub_with_plans: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from contextlib import contextmanager
+
+    from cc_hub import reportstate
+
+    reportstate.approve(hub_with_plans, "plans", {"daily": "plans-report daily"})
+
+    @contextmanager
+    def busy(_hub):
+        raise TimeoutError("the reports state is busy; try again shortly")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(reportstate, "state_lock", busy)
+    warnings = apps.apply_remove(hub_with_plans, "plans")
+    assert not (hub_with_plans / "apps" / "plans").exists()
+    assert "plans" not in load_lock(hub_with_plans).apps
+    assert len(warnings) == 1
+    assert "reports state is busy" in warnings[0] and "plans" in warnings[0]
+    assert reportstate.load_state(hub_with_plans)["approved"]["plans"]
+
+
+def test_remove_only_warns_when_the_report_state_cannot_be_written(
+    hub_with_plans: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cc_hub import reportstate
+
+    reportstate.approve(hub_with_plans, "plans", {"daily": "plans-report daily"})
+
+    def boom(_hub, _app):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(reportstate, "forget_app", boom)
+    warnings = apps.apply_remove(hub_with_plans, "plans")
+    assert "plans" not in load_lock(hub_with_plans).apps
+    assert len(warnings) == 1 and "disk full" in warnings[0]
+
+
+SECTIONS_V1 = {
+    "ledger/reports/daily.md": '---\ncommand: "ledger-report daily"\n---\n',
+    "ledger/reports/monthly.md": "---\n---\nSummarise the month.\n",
+}
+DAILY_V2 = '---\ncommand: "ledger-report daily -v"\n---\n'
+
+
+def test_an_update_that_changes_a_report_section_shows_it_and_sets_setup_pending(
+    hub: Path, ledger_tap: Path, tap_commit
+) -> None:
+    tap_commit(ledger_tap, SECTIONS_V1)
+    installed(hub, ledger_tap)
+    apps.set_setup_state(hub, "ledger", "done")
+    tap_commit(ledger_tap, {"ledger/reports/daily.md": DAILY_V2})
+    preview = apps.preview_update(hub, "ledger")
+    assert preview.changed == [("M", "reports/daily.md")]
+    assert "ledger-report daily -v" in preview.diff
+    assert sorted(preview.plan.reports) == ["daily", "monthly"]
+    assert apps.setup_status(hub, "ledger") == ("done", "")
+    apps.apply_update(hub, preview)
+    assert apps.setup_status(hub, "ledger") == ("pending", "")
+
+
+def test_a_new_report_section_in_an_update_is_in_the_diff(
+    hub: Path, ledger_tap: Path, tap_commit
+) -> None:
+    installed(hub, ledger_tap)
+    tap_commit(ledger_tap, SECTIONS_V1)
+    preview = apps.preview_update(hub, "ledger")
+    assert sorted(preview.changed) == [("A", "reports/daily.md"), ("A", "reports/monthly.md")]
+    assert "ledger/reports/daily.md" in preview.diff
+    assert "ledger-report daily" in preview.diff

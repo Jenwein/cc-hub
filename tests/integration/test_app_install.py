@@ -290,3 +290,129 @@ def test_two_files_differing_only_in_case_are_refused(
     register_tap(hub, "clash", root)
     with pytest.raises(apps.AppError, match="'Notes.md' and 'notes.md'.*differ only in case"):
         apps.plan_install(hub, "clash/notes")
+
+
+DAILY_SECTION = '---\ncommand: "cc-hub-ledger report daily"\ntitle: Ledger\n---\n'
+WEEKLY_SECTION = "---\n---\nSummarise the week's entries.\n"
+
+
+def tap_with_sections(hub: Path, make_tap, register_tap, ledger_files: dict, **sections: str):
+    """Register a tap whose ledger app has `reports/<period>.md` for each keyword argument."""
+    files = {**ledger_files, **{f"ledger/reports/{p}.md": t for p, t in sections.items()}}
+    register_tap(hub, "sections", make_tap("sections", files))
+    return hub
+
+
+def test_the_plan_reads_the_report_sections(
+    hub: Path, make_tap, register_tap, ledger_files: dict
+) -> None:
+    from cc_hub.reports import SectionDef
+
+    tap_with_sections(
+        hub, make_tap, register_tap, ledger_files, daily=DAILY_SECTION, weekly=WEEKLY_SECTION
+    )
+    plan = apps.plan_install(hub, "sections/ledger")
+    assert plan.reports == {
+        "daily": SectionDef("cc-hub-ledger report daily", "Ledger"),
+        "weekly": SectionDef(None, None),
+    }
+
+
+def test_the_plan_of_an_app_without_sections_has_none(tapped: Path) -> None:
+    assert apps.plan_install(tapped, "my-apps/ledger").reports == {}
+
+
+def test_a_readme_among_the_report_sections_is_not_a_section(
+    hub: Path, make_tap, register_tap, ledger_files: dict
+) -> None:
+    files = {**ledger_files, "ledger/reports/README.md": "How the sections work.\n"}
+    register_tap(hub, "sections", make_tap("sections", files))
+    assert apps.plan_install(hub, "sections/ledger").reports == {}
+
+
+def test_a_report_file_that_is_not_a_period_is_an_app_error(
+    hub: Path, make_tap, register_tap, ledger_files: dict
+) -> None:
+    tap_with_sections(hub, make_tap, register_tap, ledger_files, hourly=WEEKLY_SECTION)
+    with pytest.raises(
+        apps.AppError,
+        match=r"^ledger/reports/hourly\.md: hourly is not a report period \(daily, weekly",
+    ):
+        apps.plan_install(hub, "sections/ledger")
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("no frontmatter\n", "needs a frontmatter block"),
+        ("---\ncommand:\n---\n", "command is empty"),
+        ('---\ncommand: ""\n---\n', "command is empty"),
+        ('---\ncommand: "unclosed\n---\n', "no closing quote"),
+    ],
+)
+def test_a_bad_report_section_is_an_app_error(
+    hub: Path, make_tap, register_tap, ledger_files: dict, text: str, message: str
+) -> None:
+    tap_with_sections(hub, make_tap, register_tap, ledger_files, daily=text)
+    with pytest.raises(apps.AppError, match=rf"^ledger/reports/daily\.md: .*{message}"):
+        apps.plan_install(hub, "sections/ledger")
+
+
+def test_a_report_file_that_is_not_utf8_is_an_app_error(
+    hub: Path, make_tap, register_tap, tap_commit, ledger_files: dict
+) -> None:
+    root = make_tap("badreport", ledger_files)
+    (root / "ledger" / "reports").mkdir()
+    (root / "ledger" / "reports" / "daily.md").write_bytes(b"---\ncommand: \xff\xfe\n---\n")
+    tap_commit(root, {})
+    register_tap(hub, "badreport", root)
+    with pytest.raises(apps.AppError, match="ledger/reports/daily.md is not UTF-8"):
+        apps.plan_install(hub, "badreport/ledger")
+
+
+@pytest.mark.parametrize("name", ["reports", "Reports"])
+def test_an_app_cannot_declare_the_report_archive_as_a_data_dir(
+    hub: Path, make_tap, register_tap, ledger_files: dict, name: str
+) -> None:
+    files = {
+        **ledger_files,
+        "ledger/app.toml": ledger_files["ledger/app.toml"].replace(
+            'dirs = ["ledger"]', f'dirs = ["{name}"]'
+        ),
+    }
+    register_tap(hub, "bad", make_tap("bad", files))
+    with pytest.raises(apps.AppError, match=rf"data dir '{name}': '{name}' belongs to the hub"):
+        apps.plan_install(hub, "bad/ledger")
+    assert not (hub / "apps").exists() and not (hub / name).exists()
+
+
+def test_setup_goes_back_to_pending_when_a_report_section_changes(tapped: Path) -> None:
+    apps.install(tapped, apps.plan_install(tapped, "my-apps/ledger"))
+    section = tapped / "apps" / "ledger" / "reports" / "daily.md"
+    apps.set_setup_state(tapped, "ledger", "done")
+    section.parent.mkdir()
+    section.write_text(DAILY_SECTION, encoding="utf-8", newline="\n")
+    assert apps.setup_status(tapped, "ledger") == ("pending", "")
+    apps.set_setup_state(tapped, "ledger", "done")
+    assert apps.setup_status(tapped, "ledger") == ("done", "")
+    section.write_text(DAILY_SECTION.replace("daily", "daily --all"), encoding="utf-8")
+    assert apps.setup_status(tapped, "ledger") == ("pending", "")
+    apps.set_setup_state(tapped, "ledger", "done")
+    section.unlink()
+    assert apps.setup_status(tapped, "ledger") == ("pending", "")
+
+
+def test_the_fingerprint_tells_a_report_file_from_a_cron_file_of_the_same_name(
+    tmp_path: Path,
+) -> None:
+    def app_dir(kind: str) -> Path:
+        root = tmp_path / kind
+        root.mkdir()
+        (root / "app.toml").write_text(
+            '[app]\nname = "x"\nversion = "1"\ndescription = "d"\n', encoding="utf-8"
+        )
+        (root / kind).mkdir()
+        (root / kind / "daily.md").write_text("same bytes\n", encoding="utf-8")
+        return root
+
+    assert apps.fingerprint(app_dir("cron")) != apps.fingerprint(app_dir("reports"))
