@@ -60,12 +60,10 @@ def apply(text: str, name: str, values: dict | None) -> str:
     old_cron = before.get("cron", {})
     if not isinstance(old_cron, dict):
         raise _refused(name)
-    current = old_cron.get(name)
-    if isinstance(current, dict) and any(isinstance(v, dict) for v in current.values()):
-        raise _refused(name)  # an override holds no tables, so there is nothing to keep of them
 
     try:
-        return edit_table(text, ("cron", name), clean)
+        # an override holds no tables, so one that has child tables is not ours to rewrite
+        return edit_table(text, ("cron", name), clean, allow_children=False)
     except TableEditError:
         raise _refused(name) from None
 

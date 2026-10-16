@@ -15,7 +15,9 @@ import tomllib
 import tomli_w
 
 _PART = r'(?:"[^"]+"|[A-Za-z0-9_-]+)'
-HEADER = re.compile(rf"^\s*\[\s*({_PART}(?:\s*\.\s*{_PART})*)\s*\](?:\s*#.*)?$")
+_PARTS = rf"({_PART}(?:\s*\.\s*{_PART})*)"
+HEADER = re.compile(rf"^\s*\[\s*{_PARTS}\s*\](?:\s*#.*)?$")
+ARRAY_HEADER = re.compile(rf"^\s*\[\[\s*{_PARTS}\s*\]\](?:\s*#.*)?$")
 PART = re.compile(r'"([^"]+)"|([A-Za-z0-9_-]+)')
 # a line with its own ending, so that rejoining the lines gives the text back unchanged
 LINE = re.compile(r"[^\n]*\n|[^\n]+")
@@ -29,15 +31,19 @@ class TableEditError(ValueError):
     """The edit is not possible, or would not leave the file as intended."""
 
 
+def _path(pattern: re.Pattern, line: str) -> tuple[str, ...] | None:
+    m = pattern.match(line.rstrip("\r\n"))
+    if m is None:
+        return None
+    return tuple(p.group(1) or p.group(2) for p in PART.finditer(m.group(1)))
+
+
 def header_path(line: str) -> tuple[str, ...] | None:
     """The table path a header line names: `[a."x/y"]  # c` gives ("a", "x/y"); None otherwise.
 
     Only bare and double-quoted parts are read, and `[[array]]` headers are not tables.
     """
-    m = HEADER.match(line.rstrip("\r\n"))
-    if m is None:
-        return None
-    return tuple(p.group(1) or p.group(2) for p in PART.finditer(m.group(1)))
+    return _path(HEADER, line)
 
 
 def _header(path: tuple[str, ...]) -> str:
@@ -64,15 +70,21 @@ def _find(lines: list[str], path: tuple[str, ...]) -> tuple[int, int] | None:
     return None
 
 
-def _is_table(value) -> bool:
-    return isinstance(value, dict) or (
-        isinstance(value, list) and bool(value) and all(isinstance(v, dict) for v in value)
-    )
+def _children(lines: list[str], path: tuple[str, ...], table) -> dict:
+    """The child tables of the table at `path`: those a header line puts directly under it.
 
-
-def _children(table) -> dict:
-    """The entries of a table that are themselves tables."""
-    return {k: v for k, v in table.items() if _is_table(v)} if isinstance(table, dict) else {}
+    A child is found by its header, `[a.b]` or `[[a.b]]` under `[a]`, not by the data: an inline
+    table or a dotted key is one of the table's own keys, and goes with them.
+    """
+    if not isinstance(table, dict):
+        return {}
+    depth = len(path)
+    names = set()
+    for line in lines:
+        found = header_path(line) or _path(ARRAY_HEADER, line)
+        if found is not None and len(found) > depth and found[:depth] == path:
+            names.add(found[depth])
+    return {name: table[name] for name in names if name in table}
 
 
 def _lookup(data: dict, path: tuple[str, ...]):
@@ -85,8 +97,8 @@ def _lookup(data: dict, path: tuple[str, ...]):
     return node
 
 
-def _expected(before: dict, path: tuple[str, ...], values: dict | None) -> dict:
-    """`before` with the table at `path` holding `values` as its own keys, or removed."""
+def _expected(before: dict, path: tuple[str, ...], values: dict | None, children: dict) -> dict:
+    """`before` with the table at `path` holding `values` and its `children`, or removed."""
     out = copy.deepcopy(before)
     node = out
     for part in path[:-1]:
@@ -105,7 +117,7 @@ def _expected(before: dict, path: tuple[str, ...], values: dict | None) -> dict:
         old = node.get(key)
         if old is not None and not isinstance(old, dict):
             raise TableEditError(CANNOT_EDIT)
-        node[key] = {**values, **_children(old)}
+        node[key] = {**values, **children}
     return out
 
 
@@ -125,15 +137,17 @@ def _without_empty_ancestors(data: dict, path: tuple[str, ...]) -> dict:
     return out
 
 
-def edit_table(text: str, path: tuple[str, ...], values: dict | None) -> str:
+def edit_table(
+    text: str, path: tuple[str, ...], values: dict | None, *, allow_children: bool = True
+) -> str:
     """`text` with the table `path` holding exactly `values` as its own keys.
 
     The table is the one whose header parses to `path`; it is added at the end of the file when
-    there is none. Keys whose values are tables (child tables such as `[a."b"]` under `[a]`)
-    are kept. `None` removes the header and its keys, which needs the table to have no child
-    tables. Only that table changes. TableEditError when `text` is not TOML, when `path` or
-    `values` cannot be written, or when the result would not parse to the old data apart from
-    this one table.
+    there is none. Its child tables, the ones headed `[a."b"]` or `[[a.b]]` under `[a]`, are
+    kept; `allow_children=False` refuses a table that has any. `None` removes the header and
+    its keys, which needs the table to have no child tables. Only that table changes.
+    TableEditError when `text` is not TOML, when `path` or `values` cannot be written, or when
+    the result would not parse to the old data apart from this one table.
     """
     if not path or any(not part or UNUSABLE.search(part) for part in path):
         raise TableEditError(f"{path!r} is not a usable table path")
@@ -141,10 +155,11 @@ def edit_table(text: str, path: tuple[str, ...], values: dict | None) -> str:
         before = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise TableEditError(f"not valid TOML: {exc}") from None
-    if values is None and _children(_lookup(before, path)):
-        raise TableEditError(f"cannot remove [{'.'.join(path)}]: it has child tables")
 
     lines = LINE.findall(text)
+    children = _children(lines, path, _lookup(before, path))
+    if children and (values is None or not allow_children):
+        raise TableEditError(f"{_header(path)} has child tables")
     eol = "\r\n" if "\r\n" in text else "\n"
     body = [line + eol for line in (tomli_w.dumps(values) if values else "").splitlines()]
     span = _find(lines, path)
@@ -175,7 +190,7 @@ def edit_table(text: str, path: tuple[str, ...], values: dict | None) -> str:
         after = tomllib.loads(new_text)
     except tomllib.TOMLDecodeError:
         raise TableEditError(CANNOT_EDIT) from None
-    expected = _expected(before, path, values)
+    expected = _expected(before, path, values, children)
     if after != expected and (
         values is not None or after != _without_empty_ancestors(expected, path)
     ):

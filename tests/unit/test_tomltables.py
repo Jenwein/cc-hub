@@ -72,8 +72,50 @@ def test_unusable_paths_are_refused(path):
 
 
 @pytest.mark.parametrize(
-    "text", ["report = 1\n", '[report]\nx = {a = 1}\n', "[report]\nsub.k = 1\n"]
+    "text",
+    ["report = 1\n", "[report]\nlanguage = \"en\"\n\n[report.'x']\na = 1\n"],
 )
 def test_tables_that_cannot_be_rewritten_by_text_are_refused(text):
+    # a literal-string child header is not one the editor reads, so the child would be lost
     with pytest.raises(TableEditError, match="cannot edit in place"):
         edit_table(text, ("report",), {"language": "en"})
+
+
+PARENT_THEN_CHILD = BASE + '\n[report]\nlanguage = "en"\n\n[report."a/daily"]\nenabled = false\n'
+CHILD_THEN_PARENT = BASE + '\n[report."a/daily"]\nenabled = false\n\n[report]\nlanguage = "en"\n'
+
+
+@pytest.mark.parametrize("text", [PARENT_THEN_CHILD, CHILD_THEN_PARENT])
+def test_replacing_a_parent_in_place_keeps_a_child_table_wherever_it_is(text):
+    out = edit_table(text, ("report",), {"language": "zh-CN"})
+    assert out == text.replace('"en"', '"zh-CN"')
+    assert tomllib.loads(out)["report"]["a/daily"] == {"enabled": False}
+
+
+def test_an_array_of_tables_under_the_parent_is_a_child_too():
+    text = (
+        BASE + '\n[report]\nlanguage = "en"\n\n[[report.items]]\nn = 1\n\n[[report.items]]\nn = 2\n'
+    )
+    out = edit_table(text, ("report",), {"language": "zh-CN"})
+    assert out == text.replace('"en"', '"zh-CN"')
+    with pytest.raises(TableEditError, match="child tables"):
+        edit_table(text, ("report",), None)
+
+
+def test_an_inline_table_or_dotted_key_is_an_own_key_not_a_child():
+    text = BASE + '\n[report]\nlanguage = "en"\nlook = {size = 1}\nfont.name = "x"\n'
+    assert edit_table(text, ("report",), {"language": "zh-CN"}) == (
+        BASE + '\n[report]\nlanguage = "zh-CN"\n'
+    )
+    assert edit_table(text, ("report",), None) == BASE
+
+
+@pytest.mark.parametrize("text", [PARENT_THEN_CHILD, CHILD_THEN_PARENT])
+def test_children_can_be_refused_instead_of_kept(text):
+    with pytest.raises(TableEditError, match="child tables"):
+        edit_table(text, ("report",), {"language": "zh-CN"}, allow_children=False)
+    with pytest.raises(TableEditError, match="child tables"):
+        edit_table(text, ("report",), None, allow_children=False)
+    # the child itself has none
+    out = edit_table(text, ("report", "a/daily"), {"enabled": True}, allow_children=False)
+    assert "enabled = true" in out
