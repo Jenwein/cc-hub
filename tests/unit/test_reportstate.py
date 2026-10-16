@@ -130,6 +130,25 @@ def test_a_corrupt_line_is_skipped(hub: Path):
     assert [n["text"] for n in rs.read_notes(hub, "daily")] == ["first", "second"]
 
 
+def test_a_note_without_a_text_and_a_sender_is_skipped(hub: Path):
+    rs.add_note(hub, "daily", "a", "first", T1)
+    path = hub / ".cc-hub" / "reports" / "notes" / "daily.jsonl"
+    damaged = [
+        "{}",
+        '{"from": "a"}',
+        '{"text": "x"}',
+        '{"from": 1, "text": "x"}',
+        '{"from": "a", "text": null}',
+        '{"from": "a", "text": ["x"]}',
+    ]
+    with path.open("a", encoding="utf-8", newline="\n") as fh:
+        fh.write("\n".join(damaged) + "\n")
+    rs.add_note(hub, "daily", "b", "second", T2)
+    assert [n["text"] for n in rs.read_notes(hub, "daily")] == ["first", "second"]
+    rs.drop_notes(hub, "daily", 1)  # counts the notes read_notes returns, not the damaged lines
+    assert [n["text"] for n in rs.read_notes(hub, "daily")] == ["second"]
+
+
 def test_drop_counts_notes_not_corrupt_lines(hub: Path):
     rs.add_note(hub, "daily", "a", "first", T1)
     path = hub / ".cc-hub" / "reports" / "notes" / "daily.jsonl"

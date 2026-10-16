@@ -152,11 +152,16 @@ def _note_lines(path: Path) -> list[str]:
 
 
 def _parse_note(line: str) -> dict | None:
+    """The note on a line, or None when the line is not one (also: no text or sender as strings)."""
     try:
         note = json.loads(line)
     except ValueError:
         return None
-    return note if isinstance(note, dict) else None
+    if not isinstance(note, dict):
+        return None
+    if not isinstance(note.get("text"), str) or not isinstance(note.get("from"), str):
+        return None
+    return note
 
 
 def add_note(hub: Path, period: str, source: str, text: str, at: datetime) -> None:
