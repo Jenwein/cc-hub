@@ -71,6 +71,9 @@ Then run the steps the command prints, in a direct chat: find the task's
 `<old id>` with `cc-connect cron list` and delete it, then, if the task is
 on, run its registration command.
 
+`cc-hub update` overwrites `README.md`, `memory-consolidate.md` and the
+`report-<period>.md` files; files you add here are yours.
+
 ## Reports
 
 `cc-hub report` sends the user a report each day, week, month, quarter or
@@ -90,7 +93,9 @@ Every task is registered `--silent`: the chat shows only what the agent
 replies, and `NO_REPLY` shows nothing. A task that finishes work quietly
 leaves its result for a report instead of replying:
 
-    cc-hub report note <period> --from <task> -- "<text>"
+    cc-hub report note <period> --from <task> -- '<text>'
 
-When that prints `kept for ...`, the task replies `NO_REPLY`. An urgent
-problem is never left as a note; reply with it directly.
+Single-quote the text; a single quote inside it must be escaped for the shell
+in use. When that prints `kept for ...`, the task replies `NO_REPLY`; if the
+note is not kept (exit 3, or an error), it replies with the same words. An
+urgent problem is never left as a note; reply with it directly.
