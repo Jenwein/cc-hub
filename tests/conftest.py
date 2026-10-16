@@ -147,25 +147,22 @@ def fake_app(hub: Path, name: str, files: dict[str, str]) -> None:
         write(hub / "apps" / name / rel, text)
 
 
-MAIL_CRON = {
-    "cron/poll.md": (
-        '---\nschedule: "*/5 * * * *"\ndefault: true\n'
-        'exec: "uv run apps/mail/scripts/mk.py poll"\n---\nCheck the mailboxes.\n'
+PLANS_CRON = {
+    "cron/morning.md": (
+        '---\nschedule: "0 8 * * *"\ndefault: true\nsession: new_per_run\n---\n'
+        "Send the user today's plan.\n"
     ),
-    "cron/triage.md": (
-        "---\non_demand: true\ndefault: true\nsession: new_per_run\n"
-        'allow:\n  - "uv run apps/mail/scripts/mk.py bg"\n---\nSort the new mail.\n'
-    ),
+    "cron/review.md": '---\nschedule: "0 18 * * 5"\n---\nAsk how the week went.\n',
 }
 
 
 @pytest.fixture
-def hub_with_mail(hub: Path) -> Path:
-    fake_app(hub, "mail", MAIL_CRON)
+def hub_with_plans(hub: Path) -> Path:
+    fake_app(hub, "plans", PLANS_CRON)
     return hub
 
 
 @pytest.fixture
-def git_hub_with_mail(git_hub: Path) -> Path:
-    fake_app(git_hub, "mail", MAIL_CRON)
+def git_hub_with_plans(git_hub: Path) -> Path:
+    fake_app(git_hub, "plans", PLANS_CRON)
     return git_hub

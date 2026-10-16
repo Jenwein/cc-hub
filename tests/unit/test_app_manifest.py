@@ -145,19 +145,13 @@ def test_parse_cron() -> None:
         '---\nschedule: "0 9 1 * *"  # monthly\ndefault: true\nsession: new_per_run\n---\n'
         "Summarise.\n"
     )
-    assert parse_cron(text, where="x") == TaskDef(
-        "prompt", "0 9 1 * *", True, "new_per_run", False, None, None, ()
-    )
+    assert parse_cron(text, where="x") == TaskDef("0 9 1 * *", True, "new_per_run")
     with pytest.raises(AppError):
         parse_cron("no frontmatter", where="x")
     with pytest.raises(AppError, match="^apps/a/cron/t.md: .*schedule is required"):
         parse_cron("---\ndefault: true\n---\nbody\n", where="apps/a/cron/t.md")
-
-
-def test_parse_cron_rejects_an_exec_a_shell_would_expand() -> None:
-    text = '---\nschedule: "0 9 * * *"\nexec: "echo $(whoami)"\n---\nbody\n'
-    with pytest.raises(AppError, match="^apps/a/cron/t.md: exec must not contain"):
-        parse_cron(text, where="apps/a/cron/t.md")
+    with pytest.raises(AppError, match="^apps/a/cron/t.md: .*five fields"):
+        parse_cron('---\nschedule: "0 9 * *"\n---\nbody\n', where="apps/a/cron/t.md")
 
 
 class _Source:
@@ -165,22 +159,16 @@ class _Source:
         return "my-apps@abc1234"
 
 
-def test_overview_lists_each_kind_of_task() -> None:
+def test_overview_lists_the_tasks() -> None:
     crons = {
-        "nightly": TaskDef("prompt", "0 3 * * *", True, "reuse", False, None, None, ()),
-        "quiet": TaskDef("prompt", "0 4 * * *", False, "new_per_run", True, None, None, ()),
-        "poll": TaskDef("exec", "*/5 * * * *", True, None, False, "uv run x poll", 10, ()),
-        "triage": TaskDef(
-            "on_demand", None, True, "new_per_run", True, None, None, ("uv run x bg", "cc-hub log"),
-        ),
+        "morning": TaskDef("0 8 * * *", True, "new_per_run"),
+        "review": TaskDef("0 18 * * 5", False, "reuse"),
     }
     plan = AppPlan(
-        AppManifest("mail", "0.1.0", "Mail"), _Source(), [], crons, [], [], False, False
+        AppManifest("plans", "0.1.0", "Plans"), _Source(), [], crons, [], [], False, False
     )
     lines = overview(plan)
-    assert lines[lines.index("scheduled tasks:") + 1 :][:4] == [
-        "  hub:mail/nightly: 0 3 * * * (default, reuse)",
-        "  hub:mail/poll: */5 * * * * runs `uv run x poll` (default, script, silent)",
-        "  hub:mail/quiet: 0 4 * * * (optional, new_per_run, silent)",
-        "  hub:mail/triage: on demand (default, new_per_run) allow: uv run x bg, cc-hub log",
+    assert lines[lines.index("scheduled tasks:") + 1 :][:2] == [
+        "  hub:plans/morning: 0 8 * * * (default, new_per_run)",
+        "  hub:plans/review: 0 18 * * 5 (optional, reuse)",
     ]

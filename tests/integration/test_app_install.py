@@ -22,9 +22,7 @@ def test_the_plan_describes_the_app_and_changes_nothing(tapped: Path) -> None:
     plan = apps.plan_install(tapped, "my-apps/ledger")
     assert plan.manifest.name == "ledger"
     assert plan.skills == ["ledger"]
-    assert plan.crons == {
-        "monthly": TaskDef("prompt", "0 9 1 * *", True, "new_per_run", False, None, None, ())
-    }
+    assert plan.crons == {"monthly": TaskDef("0 9 1 * *", True, "new_per_run")}
     assert plan.scripts == ["scripts/check.sh"]
     assert plan.seed == ["ledger/main.beancount"]
     assert plan.has_setup and not plan.has_remove

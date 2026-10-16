@@ -12,7 +12,6 @@ from cc_hub.cli import app
 from cc_hub.commands.doctor import run_checks
 from cc_hub.commands.init import init_hub
 from cc_hub.commands.link import sync_skill_links
-from cc_hub.cronguard import hook_command
 from tests.conftest import write
 
 NO_AGENTS = dict(which=lambda name: None)
@@ -339,24 +338,13 @@ def _append(path: Path, text: str) -> None:
         fh.write(text)
 
 
-def _hook(matcher: str, command: str) -> dict:
-    return {"matcher": matcher, "hooks": [{"type": "command", "command": command}]}
-
-
-def _program(tmp_path: Path) -> str:
-    """An existing cc-hub executable for the guard hook to point at."""
-    exe = tmp_path / "bin" / "cc-hub"
-    write(exe, "")
-    return str(exe)
-
-
 def test_cron_check_is_ok_for_a_hub_with_tasks_and_a_valid_override(
-    hub_with_mail: Path, tmp_path: Path
+    hub_with_plans: Path, tmp_path: Path
 ) -> None:
     from cc_hub.cronoverrides import save
 
-    save(hub_with_mail, "mail/poll", {"schedule": "0 8 * * *"})
-    check = _cron_check(hub_with_mail, tmp_path)
+    save(hub_with_plans, "plans/morning", {"schedule": "0 7 * * *"})
+    check = _cron_check(hub_with_plans, tmp_path)
     assert (check.status, check.message) == ("ok", "3 task(s) checked")
 
 
@@ -369,13 +357,13 @@ def test_cron_check_names_a_broken_task_file(hub: Path, tmp_path: Path) -> None:
 
 
 def test_cron_check_names_a_broken_task_file_of_an_app(
-    hub_with_mail: Path, tmp_path: Path
+    hub_with_plans: Path, tmp_path: Path
 ) -> None:
-    write(hub_with_mail / "apps" / "mail" / "cron" / "poll.md", "no frontmatter\n")
-    check = _cron_check(hub_with_mail, tmp_path)
+    write(hub_with_plans / "apps" / "plans" / "cron" / "morning.md", "no frontmatter\n")
+    check = _cron_check(hub_with_plans, tmp_path)
     assert check.status == "warn"
-    assert "apps/mail/cron/poll.md" in check.message
-    assert "cc-hub app update mail" in check.fix
+    assert "apps/plans/cron/morning.md" in check.message
+    assert "cc-hub app update plans" in check.fix
 
 
 def test_cron_check_reports_an_override_whose_task_is_gone(hub: Path, tmp_path: Path) -> None:
@@ -387,13 +375,14 @@ def test_cron_check_reports_an_override_whose_task_is_gone(hub: Path, tmp_path: 
 
 
 def test_cron_check_reports_an_invalid_expression_in_an_override(
-    hub_with_mail: Path, tmp_path: Path
+    hub_with_plans: Path, tmp_path: Path
 ) -> None:
-    _append(hub_with_mail / "hub.toml", '\n[cron."mail/poll"]\nschedule = "every day"\n')
-    check = _cron_check(hub_with_mail, tmp_path)
+    _append(hub_with_plans / "hub.toml", '\n[cron."plans/morning"]\nschedule = "every day"\n')
+    check = _cron_check(hub_with_plans, tmp_path)
     assert check.status == "warn"
-    assert 'hub.toml: [cron."mail/poll"]' in check.message and "five fields" in check.message
-    assert "cc-hub cron reset mail/poll" in check.fix
+    assert 'hub.toml: [cron."plans/morning"]' in check.message
+    assert "five fields" in check.message
+    assert "cc-hub cron reset plans/morning" in check.fix
 
 
 def test_cron_check_reports_an_override_of_the_wrong_type(hub: Path, tmp_path: Path) -> None:
@@ -427,100 +416,13 @@ def test_cron_check_leaves_a_broken_apps_lock_to_the_apps_check(
 
 
 def test_cron_check_leaves_the_overrides_of_an_app_that_is_not_synced_yet(
-    hub_with_mail: Path, tmp_path: Path
+    hub_with_plans: Path, tmp_path: Path
 ) -> None:
     from cc_hub.cronoverrides import save
     from cc_hub.platform import rmtree
 
-    save(hub_with_mail, "mail/poll", {"schedule": "0 8 * * *"})
-    rmtree(hub_with_mail / "apps" / "mail")  # as in a clone before `cc-hub app sync`
-    assert _cron_check(hub_with_mail, tmp_path).status == "ok"
-    s = statuses(run_checks(hub_with_mail, home=tmp_path / "home", **NO_AGENTS))
+    save(hub_with_plans, "plans/morning", {"schedule": "0 7 * * *"})
+    rmtree(hub_with_plans / "apps" / "plans")  # as in a clone before `cc-hub app sync`
+    assert _cron_check(hub_with_plans, tmp_path).status == "ok"
+    s = statuses(run_checks(hub_with_plans, home=tmp_path / "home", **NO_AGENTS))
     assert s["apps"] == "warn"
-
-
-def test_cron_check_warns_of_a_restricted_task_without_the_guard(
-    hub_with_mail: Path, tmp_path: Path
-) -> None:
-    from cc_hub import cronguard
-
-    write(hub_with_mail / "CLAUDE.md", "@AGENTS.md\n")
-    check = _cron_check(hub_with_mail, tmp_path)
-    assert check.status == "warn"
-    assert "mail/triage" in check.message and ".claude/settings.json" in check.message
-    assert "hub-adapt" in check.fix
-    assert cronguard.setup(hub_with_mail, _program(tmp_path)) is True
-    assert _cron_check(hub_with_mail, tmp_path).status == "ok"
-
-
-def test_cron_check_counts_a_claude_skills_directory_as_claude_code_set_up(
-    hub_with_mail: Path, tmp_path: Path
-) -> None:
-    (hub_with_mail / ".claude" / "skills").mkdir(parents=True)
-    assert _cron_check(hub_with_mail, tmp_path).status == "warn"
-
-
-def test_cron_check_is_quiet_where_claude_code_was_never_set_up(
-    hub_with_mail: Path, tmp_path: Path
-) -> None:
-    assert _cron_check(hub_with_mail, tmp_path).status == "ok"
-
-
-def test_cron_check_is_quiet_without_a_restricted_task(hub: Path, tmp_path: Path) -> None:
-    write(hub / "CLAUDE.md", "@AGENTS.md\n")
-    assert _cron_check(hub, tmp_path).status == "ok"
-
-
-@pytest.mark.parametrize(
-    "settings",
-    [
-        "not json",
-        "[]",
-        '{"hooks": []}',
-        '{"hooks": {"PreToolUse": {}}}',
-        '{"hooks": {"PreToolUse": [1, {"hooks": 2}, {"hooks": [3, {"command": "other"}]}]}}',
-    ],
-)
-def test_cron_check_does_not_count_a_settings_file_without_the_guard(
-    hub_with_mail: Path, tmp_path: Path, settings: str
-) -> None:
-    write(hub_with_mail / "CLAUDE.md", "@AGENTS.md\n")
-    write(hub_with_mail / ".claude" / "settings.json", settings)
-    assert _cron_check(hub_with_mail, tmp_path).status == "warn"
-
-
-def test_cron_check_finds_the_guard_next_to_the_users_own_hooks(
-    hub_with_mail: Path, tmp_path: Path
-) -> None:
-    write(hub_with_mail / "CLAUDE.md", "@AGENTS.md\n")
-    for command in (hook_command(_program(tmp_path)), "cc-hub cron guard"):
-        guard = _hook("*", command)
-        write(
-            hub_with_mail / ".claude" / "settings.json",
-            json.dumps({"hooks": {"PreToolUse": [_hook("Bash", "mine"), guard]}}),
-        )
-        assert _cron_check(hub_with_mail, tmp_path).status == "ok", command
-
-
-def test_cron_check_warns_when_the_guard_program_is_gone(
-    hub_with_mail: Path, tmp_path: Path
-) -> None:
-    gone = (tmp_path / "old" / "cc-hub.exe").as_posix()
-    write(hub_with_mail / "CLAUDE.md", "@AGENTS.md\n")
-    write(
-        hub_with_mail / ".claude" / "settings.json",
-        json.dumps({"hooks": {"PreToolUse": [_hook("*", hook_command(gone))]}}),
-    )
-    check = _cron_check(hub_with_mail, tmp_path)
-    assert check.status == "warn"
-    assert "mail/triage" in check.message
-    assert f"the guard hook runs {gone}, which does not exist" in check.message
-    assert "hub-adapt" in check.fix and "cc-hub cron guard-setup" in check.fix
-    # a program recorded without the .exe that Windows adds is still found
-    write(tmp_path / "old" / "cc-hub.exe", "")
-    no_ext = (tmp_path / "old" / "cc-hub").as_posix()
-    write(
-        hub_with_mail / ".claude" / "settings.json",
-        json.dumps({"hooks": {"PreToolUse": [_hook("*", hook_command(no_ext))]}}),
-    )
-    assert _cron_check(hub_with_mail, tmp_path).status == "ok"

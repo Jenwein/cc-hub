@@ -299,8 +299,8 @@ def test_sync_clones_a_tap_without_git_again(git_hub: Path, ledger_tap: Path) ->
 
 
 OVERRIDES = (
-    '[cron."mail/poll"]\nschedule = "0 8 * * *"\n\n'
-    '[cron."mail/triage"]\nenabled = false\n\n'
+    '[cron."plans/morning"]\nschedule = "0 7 * * *"\n\n'
+    '[cron."plans/review"]\nenabled = false\n\n'
     '[cron."ledger/prices"]\nenabled = false\n'
 )
 
@@ -321,59 +321,59 @@ def append_hub_toml(hub: Path, text: str) -> str:
     return old
 
 
-def test_remove_plan_lists_the_overrides_of_the_apps_tasks(hub_with_mail: Path) -> None:
-    append_hub_toml(hub_with_mail, "\n" + OVERRIDES)
-    assert apps.plan_remove(hub_with_mail, "mail").overrides == ["mail/poll", "mail/triage"]
+def test_remove_plan_lists_the_overrides_of_the_apps_tasks(hub_with_plans: Path) -> None:
+    append_hub_toml(hub_with_plans, "\n" + OVERRIDES)
+    assert apps.plan_remove(hub_with_plans, "plans").overrides == ["plans/morning", "plans/review"]
 
 
-def test_remove_plan_has_no_overrides_when_hub_toml_has_none(hub_with_mail: Path) -> None:
-    assert apps.plan_remove(hub_with_mail, "mail").overrides == []
+def test_remove_plan_has_no_overrides_when_hub_toml_has_none(hub_with_plans: Path) -> None:
+    assert apps.plan_remove(hub_with_plans, "plans").overrides == []
 
 
-def test_remove_plan_survives_an_unreadable_hub_toml(hub_with_mail: Path) -> None:
-    (hub_with_mail / "hub.toml").write_text("[hub\n", encoding="utf-8")
-    assert apps.plan_remove(hub_with_mail, "mail").overrides == []
+def test_remove_plan_survives_an_unreadable_hub_toml(hub_with_plans: Path) -> None:
+    (hub_with_plans / "hub.toml").write_text("[hub\n", encoding="utf-8")
+    assert apps.plan_remove(hub_with_plans, "plans").overrides == []
 
 
-def test_remove_drops_the_apps_overrides_and_commits_hub_toml(git_hub_with_mail: Path) -> None:
-    hub = git_hub_with_mail
+def test_remove_drops_the_apps_overrides_and_commits_hub_toml(git_hub_with_plans: Path) -> None:
+    hub = git_hub_with_plans
     old = append_hub_toml(hub, "\n" + OVERRIDES)
     commit_all(hub)
-    assert apps.apply_remove(hub, "mail") == []
+    assert apps.apply_remove(hub, "plans") == []
     assert (hub / "hub.toml").read_text(encoding="utf-8") == (
         old + '\n[cron."ledger/prices"]\nenabled = false\n'
     )
     assert changed_in_head(hub) == ["apps.lock", "hub.toml"]
-    assert git(hub, "log", "-1", "--format=%s").strip() == "cc-hub: app remove mail"
+    assert git(hub, "log", "-1", "--format=%s").strip() == "cc-hub: app remove plans"
     assert git(hub, "status", "--porcelain").strip() == ""
 
 
 def test_remove_leaves_hub_toml_alone_when_the_app_has_no_overrides(
-    git_hub_with_mail: Path,
+    git_hub_with_plans: Path,
 ) -> None:
-    hub = git_hub_with_mail
+    hub = git_hub_with_plans
     commit_all(hub)
     append_hub_toml(hub, "# a note of mine\n")
-    assert apps.apply_remove(hub, "mail") == []
+    assert apps.apply_remove(hub, "plans") == []
     assert changed_in_head(hub) == ["apps.lock"]
     assert (hub / "hub.toml").read_text(encoding="utf-8").endswith("# a note of mine\n")
 
 
 def test_remove_still_removes_the_app_when_hub_toml_cannot_be_edited(
-    git_hub_with_mail: Path,
+    git_hub_with_plans: Path,
 ) -> None:
-    hub = git_hub_with_mail
+    hub = git_hub_with_plans
     (hub / "hub.toml").write_text("[hub\n", encoding="utf-8")
     commit_all(hub)
-    warnings = apps.apply_remove(hub, "mail")
-    assert not (hub / "apps" / "mail").exists()
-    assert "mail" not in load_lock(hub).apps
+    warnings = apps.apply_remove(hub, "plans")
+    assert not (hub / "apps" / "plans").exists()
+    assert "plans" not in load_lock(hub).apps
     assert len(warnings) == 1 and "hub.toml" in warnings[0] and "overrides" in warnings[0]
     assert (hub / "hub.toml").read_text(encoding="utf-8") == "[hub\n"
     assert changed_in_head(hub) == ["apps.lock"]
 
 
-def test_remove_without_a_hub_toml_is_quiet(hub_with_mail: Path) -> None:
-    (hub_with_mail / "hub.toml").unlink()
-    assert apps.apply_remove(hub_with_mail, "mail") == []
-    assert not (hub_with_mail / "apps" / "mail").exists()
+def test_remove_without_a_hub_toml_is_quiet(hub_with_plans: Path) -> None:
+    (hub_with_plans / "hub.toml").unlink()
+    assert apps.apply_remove(hub_with_plans, "plans") == []
+    assert not (hub_with_plans / "apps" / "plans").exists()
