@@ -80,6 +80,9 @@ def _read(text: str, *, where: str) -> dict[str, str]:
     return fields
 
 
+read_frontmatter = _read  # for the files that share this format, such as reports/*.md
+
+
 def parse_task(text: str, *, where: str) -> TaskDef:
     """Read one task definition; CronError (starting with `where`) if it is not valid."""
     fields = _read(text, where=where)
