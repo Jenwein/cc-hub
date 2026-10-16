@@ -248,14 +248,38 @@ def test_save_section_on_when_nothing_is_set_changes_nothing(hub):
 
 
 def test_save_language_keeps_order_other_keys_and_sections(hub):
-    put(hub, BASE + '\n[report]\norder = ["plans", "mail"]\nlanguage = "en"\n\n'
-             '# mute mail\n[report."mail/daily"]\nenabled = false\n\n[cron."a"]\nenabled = true\n')
+    text = (BASE + '\n[report]\norder = ["plans", "mail"]\nlanguage = "en"\n\n'
+            '# mute mail\n[report."mail/daily"]\nenabled = false\n\n[cron."a"]\nenabled = true\n')
+    put(hub, text)
     save_language(hub, "zh-CN")
     cfg = load_config(hub)
     assert (cfg.language, cfg.order, cfg.off) == ("zh-CN", ["plans", "mail"], {"mail/daily"})
     out = get(hub)
-    assert out.startswith(BASE) and "# mute mail\n" in out
+    assert out == text.replace('language = "en"', 'language = "zh-CN"')
     assert tomllib.loads(out)["cron"] == {"a": {"enabled": True}}
+
+
+def test_save_language_leaves_comments_and_the_order_line_alone(hub):
+    text = (BASE + '\n[report]\n# my order, do not touch\norder = ["plans","mail"]  # favourite\n\n'
+            '# mute mail\n[report."mail/daily"]\nenabled = false\n')
+    put(hub, text)
+    save_language(hub, "zh-CN")
+    inserted = text.replace("favourite\n", 'favourite\nlanguage = "zh-CN"\n')
+    assert get(hub) == inserted
+    save_language(hub, "en")  # a changed value keeps the line, a later comment on it included
+    assert get(hub) == inserted.replace("zh-CN", "en")
+    put(hub, text.replace("favourite\n", 'favourite\nlanguage = "ja"  # my words\n'))
+    save_language(hub, "zh-CN")
+    assert get(hub) == text.replace("favourite\n", 'favourite\nlanguage = "zh-CN"  # my words\n')
+
+
+def test_save_language_on_a_report_table_with_no_keys_or_no_table(hub):
+    put(hub, BASE + "\n[report]\n# only a comment\n")
+    save_language(hub, "en")
+    assert get(hub) == BASE + '\n[report]\nlanguage = "en"\n# only a comment\n'
+    put(hub, BASE)
+    save_language(hub, "en")
+    assert get(hub) == BASE + '\n[report]\nlanguage = "en"\n'
 
 
 def test_save_section_keeps_language_and_order(hub):
@@ -288,14 +312,15 @@ def test_report_tables_edit_in_place_with_crlf(hub):
     assert "\n" not in out.replace("\r\n", "") and load_config(hub).off == {"plans/daily"}
 
 
-def test_a_dotted_own_key_is_refused_not_dropped(hub):
+def test_a_dotted_own_key_survives_save_language_and_blocks_save_section(hub):
     text = BASE + '\n[report]\n"mail/daily".enabled = false\n'
     put(hub, text)
-    with pytest.raises(ReportError, match="hub.toml"):
-        save_language(hub, "en")
+    save_language(hub, "en")
+    assert get(hub) == text + 'language = "en"\n'
+    assert load_config(hub).off == {"mail/daily"}
     with pytest.raises(ReportError, match="hub.toml"):
         save_section(hub, "mail/daily", True)
-    assert get(hub) == text
+    assert get(hub) == text + 'language = "en"\n'
 
 
 def test_invalid_toml_is_not_written_over(hub):

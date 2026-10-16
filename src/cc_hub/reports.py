@@ -19,7 +19,7 @@ from cc_hub.applock import LOCK_FILE, load_lock
 from cc_hub.crontasks import NAME_RULE, TASK_NAME, CronError
 from cc_hub.encoding import read_text, write_text
 from cc_hub.hub import HUB_FILE
-from cc_hub.tomltables import CANNOT_EDIT, LINE, TableEditError, edit_table, header_path
+from cc_hub.tomltables import CANNOT_EDIT, TableEditError, edit_table, set_key
 
 # short to long: a note for a period that is not on goes to the next one that is
 PERIODS = ("daily", "weekly", "monthly", "quarterly", "yearly")
@@ -241,15 +241,26 @@ def _where(path: tuple[str, ...]) -> str:
     return "[report]" if len(path) == 1 else f'[report."{path[1]}"]'
 
 
+def _refused(exc: TableEditError, path: tuple[str, ...]) -> ReportError:
+    if str(exc) == CANNOT_EDIT:
+        return ReportError(f"{HUB_FILE}: cannot edit {_where(path)} in place; edit it by hand")
+    return ReportError(f"{HUB_FILE}: {exc}")
+
+
 def _edit(text: str, path: tuple[str, ...], values: dict | None) -> str:
+    """`text` with the table `path` holding `values` as its own keys, or removed when None."""
     try:
         return edit_table(text, path, values)
     except TableEditError as exc:
-        if str(exc) == CANNOT_EDIT:
-            raise ReportError(
-                f"{HUB_FILE}: cannot edit {_where(path)} in place; edit it by hand"
-            ) from None
-        raise ReportError(f"{HUB_FILE}: {exc}") from None
+        raise _refused(exc, path) from None
+
+
+def _set(text: str, path: tuple[str, ...], key: str, value: str | int | bool) -> str:
+    """`text` with one own key of the table `path` set, every other line left as it is."""
+    try:
+        return set_key(text, path, key, value)
+    except TableEditError as exc:
+        raise _refused(exc, path) from None
 
 
 def _rewrite(hub: Path, change: Callable[[str], str]) -> None:
@@ -261,30 +272,11 @@ def _rewrite(hub: Path, change: Callable[[str], str]) -> None:
         write_text(path, new)
 
 
-def _own_keys(text: str, report: dict) -> dict:
-    """What [report] holds itself: all of it but the tables that `[report."x"]` headers declare."""
-    declared = set()
-    for line in LINE.findall(text):
-        found = header_path(line)
-        if found is not None and len(found) > 1 and found[0] == "report":
-            declared.add(found[1])
-    return {k: v for k, v in report.items() if not (isinstance(v, dict) and k in declared)}
-
-
 def save_language(hub: Path, tag: str) -> None:
-    """Set `language` in [report], keeping its other keys and the section tables."""
+    """Set `language` in [report]; the rest of [report], comments included, is not touched."""
     if not isinstance(tag, str) or not LANGUAGE_RULE.match(tag):
         raise ReportError(f'language must be a language tag such as "en" or "zh-CN", not {tag!r}')
-
-    def change(text: str) -> str:
-        try:
-            data = tomllib.loads(text)
-        except tomllib.TOMLDecodeError as exc:
-            raise ReportError(f"{HUB_FILE} is not valid TOML: {exc}") from None
-        own = _own_keys(text, _report_table(data))
-        return _edit(text, ("report",), {**own, "language": tag})
-
-    _rewrite(hub, change)
+    _rewrite(hub, lambda text: _set(text, ("report",), "language", tag))
 
 
 def save_section(hub: Path, key: str, on: bool) -> None:
