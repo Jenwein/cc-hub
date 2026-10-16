@@ -1,28 +1,51 @@
 # -*- coding: utf-8 -*-
-"""Planning and assembling a report.
+"""Planning, assembling and sending a report.
 
 `plan` says what a period's report will hold; `build` runs the approved section commands, reads
 the drafts agents wrote for instruction sections and the notes waiting, and returns the text. It
 only returns text: output of the commands never reaches the console, and nothing is stored or
-removed here (that is for the caller that sends the report).
+removed by it. `send` is the caller that does that: it sends the text through cc-connect, then
+archives and commits it, removes the notes and drafts that went in, and records the run.
+`add_routed_note` stores a note for the report that will carry it.
 """
 
 from __future__ import annotations
 
 import calendar
 import os
+import re
 import shlex
 import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from cc_hub.reports import PERIODS, Section, enabled_sections, load_config, note_target
-from cc_hub.reportstate import is_approved, last_run, load_state, read_draft, read_notes
+from cc_hub import apps, gitops
+from cc_hub.encoding import write_text
+from cc_hub.reports import (
+    PERIODS,
+    ReportError,
+    Section,
+    enabled_sections,
+    load_config,
+    note_target,
+)
+from cc_hub.reportstate import (
+    add_note,
+    clear_drafts,
+    drop_notes,
+    is_approved,
+    last_run,
+    last_sent,
+    load_state,
+    read_draft,
+    read_notes,
+    record_run,
+)
 
 SECTION_TIMEOUT = 300  # seconds a section command may run
 MAX_SECTION_CHARS = 20000  # characters of a section's output that go into the report
@@ -308,3 +331,147 @@ def build(hub: Path, period: str, now: datetime, *, runner: Runner = run_command
     title = f"# {strings[period]} · {now.date().isoformat()}"
     return Built("\n\n".join([title, *blocks]), count, len(notes), included)
 
+
+# --- sending ---
+
+Sender = Callable[[str], None]
+
+SEND_TIMEOUT = 60  # seconds cc-connect may take to take a report
+MAX_DETAIL = 500  # characters of cc-connect's own words that go into an error
+SOURCE_RULE = re.compile(r"^[a-z0-9][a-z0-9/-]{0,99}$")  # what a note's --from may be
+ARCHIVE_DIR = "reports"
+
+
+def _output(value: str | bytes | None) -> str:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return (value or "").strip()
+
+
+def _detail(proc: subprocess.CompletedProcess, text: str) -> str:
+    """cc-connect's own words about a failure, as ": ..." (empty when it said nothing)."""
+    detail = _output(proc.stderr) or _output(proc.stdout)
+    if text.strip():
+        detail = detail.replace(text.strip(), "(the report)")  # an error never carries the report
+    if len(detail) > MAX_DETAIL:
+        detail = detail[:MAX_DETAIL].rstrip() + "…"
+    return f": {detail}" if detail else ""
+
+
+def cc_connect_sender(
+    *, which=shutil.which, run=subprocess.run, env: Mapping[str, str] = os.environ
+) -> Sender:
+    """A sender that gives the text to `cc-connect send`, for the project and session in `env`.
+
+    The text goes in on stdin as UTF-8, never on the command line. ReportError says why it failed.
+    """
+
+    def send_text(text: str) -> None:
+        cc = which("cc-connect")
+        if cc is None:
+            raise ReportError("cc-connect not found on PATH")
+        argv = [cc, "send"]
+        if env.get("CC_PROJECT"):
+            argv += ["-p", env["CC_PROJECT"]]
+        if env.get("CC_SESSION_KEY"):
+            argv += ["-s", env["CC_SESSION_KEY"]]
+        argv.append("--stdin")
+        try:
+            proc = run(argv, input=text.encode("utf-8"), capture_output=True, timeout=SEND_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise ReportError(
+                f"cc-connect send did not answer within {SEND_TIMEOUT} seconds; "
+                "check that cc-connect is running and responsive"
+            ) from None
+        except OSError as exc:
+            raise ReportError(f"cannot run cc-connect: {exc}") from None
+        if proc.returncode != 0:
+            raise ReportError(
+                f"cc-connect send failed (exit {proc.returncode}){_detail(proc, text)}"
+            )
+
+    return send_text
+
+
+@dataclass
+class SendResult:
+    status: str  # "sent" | "empty" | "already"
+    sections: int
+    notes: int
+    archive: str | None  # the archive file, relative to the hub, with /
+    warning: str | None  # a problem after the report went out; the report itself was sent
+
+
+def _require_aware(now: datetime) -> None:
+    if now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+
+
+def _archive(hub: Path, period: str, now: datetime, text: str) -> str:
+    """Write the report to reports/<year>/<date>-<period>[-2, -3, ...].md; its path in the hub."""
+    year = f"{now.year:04d}"
+    stem = f"{now.date().isoformat()}-{period}"
+    number = 1
+    while True:
+        name = f"{stem}.md" if number == 1 else f"{stem}-{number}.md"
+        if not os.path.lexists(hub / ARCHIVE_DIR / year / name):
+            break
+        number += 1
+    write_text(hub / ARCHIVE_DIR / year / name, text + "\n")
+    return f"{ARCHIVE_DIR}/{year}/{name}"
+
+
+def send(
+    hub: Path,
+    period: str,
+    now: datetime,
+    *,
+    again: bool = False,
+    runner: Runner = run_command,
+    sender: Sender | None = None,
+) -> SendResult:
+    """Build the `period` report and send it; once a day unless `again`.
+
+    Nothing changes when the sender fails (ReportError). After it went out, a problem with the
+    archive comes back as the result's warning: the report must not go out a second time.
+    `now` is timezone-aware; a day is a day in its timezone.
+    """
+    _require_aware(now)
+    hub = Path(hub).absolute()
+    with apps.hub_lock(hub):
+        before = last_sent(load_state(hub), period)
+        if not again and before is not None and before.astimezone(now.tzinfo).date() == now.date():
+            return SendResult("already", 0, 0, None, None)
+        built = build(hub, period, now, runner=runner)
+        if not built.text:
+            record_run(hub, period, now, sent=False)
+            clear_drafts(hub, period)
+            return SendResult("empty", 0, 0, None, None)
+        (sender if sender is not None else cc_connect_sender())(built.text)
+        archive: str | None = None
+        try:
+            archive = _archive(hub, period, now, built.text)
+        except OSError as exc:
+            warning: str | None = f"report not archived: {exc}"
+        else:
+            warning = gitops.commit_paths(hub, [archive], f"cc-hub: report {period}")
+        for written_for, count in built.included.items():
+            drop_notes(hub, written_for, count)  # the first ones: later notes stay
+        clear_drafts(hub, period)
+        record_run(hub, period, now, sent=True)
+        return SendResult("sent", built.sections, built.notes, archive, warning)
+
+
+def add_routed_note(hub: Path, period: str, source: str, text: str, now: datetime) -> str | None:
+    """Store a note for the `period` report; returns the report that will carry it.
+
+    That is the first report from `period` up that is on, and None, with nothing stored, when
+    none is. The note stays under `period`: `build` of the report it routes to picks it up.
+    """
+    _require_aware(now)
+    hub = Path(hub).absolute()
+    with apps.hub_lock(hub):
+        target = note_target(hub, period)
+        if target is not None:
+            add_note(hub, period, source, text, now)
+        return target
