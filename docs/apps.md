@@ -98,73 +98,21 @@ While developing, link your working copy so edits apply at once:
 ## Scheduled tasks
 
 Each `cron/<task>.md` is one task, registered with cc-connect as
-`hub:<app>/<task>` when the app is set up. The frontmatter decides the kind.
-
-A **prompt task** wakes the agent on a schedule:
+`hub:<app>/<task>` when the app is set up:
 
     ---
     schedule: "0 9 1 * *"        # five-field cron expression
     default: true                # registered at setup; false: only when the user turns it on
     session: new_per_run         # or reuse: run inside the chat's ongoing session
-    silent: true                 # optional: no "⏰" line in the chat when a run starts
     ---
     What the agent does when the task fires.
 
-A **script task** runs one command on a schedule without the agent, and
-nothing it prints reaches the chat:
-
-    ---
-    schedule: "*/5 * * * *"
-    default: true
-    exec: "uv run apps/mail/scripts/mk.py poll"
-    timeout_mins: 5              # optional, default 10
-    ---
-    What the command does. The agent shows the user this text and the command,
-    and registers the task only if the user agrees.
-
-`exec` is a program and its arguments only: no `&&`, pipes, redirects or
-nested quotes, and no `"` (nor `“`, `”`, `„`, which PowerShell reads as
-`"`), `$`, backtick or `\` (single quotes around an argument with spaces,
-`/` in paths). It runs in the hub root through `sh -c`,
-or PowerShell on Windows, with the environment of the cc-connect daemon
-rather than the agent's, so `uv` and `cc-hub` must be on the daemon's PATH
-([cc-connect.md](cc-connect.md#script-tasks-and-path)). Its output is never
-seen; write your own log in the app's data directory.
-
-An **on-demand task** has no schedule and runs only when woken. It is always
-silent:
-
-    ---
-    on_demand: true
-    default: true
-    session: new_per_run
-    ---
-    What the agent does when a script wakes the task.
-
-A script wakes it with `cc-hub cron wake <app>/<task>`. Exit status 0 means
-cc-connect took the job, not that the agent has finished, so the usual
-pattern is: a script task polls cheaply and records what is pending, wakes
-the on-demand task when there is something, the agent acknowledges each item
-through the app's script when done, and the script wakes the task again
-later for anything not acknowledged. Keep two runs from working on the same
-items.
-
-A prompt or on-demand task with `allow` is **restricted**: its runs may run
-only commands that start with one of the listed prefixes, and may read only
-inside the hub, or inside the directory of an app installed with `--link`
-(not `secrets/` or `.env*`). It needs `session: new_per_run`.
-Use it for a task that reads outside content, such as mail from strangers,
-and give that task, in your script, a separate command group that only
-reads, or records the app's own local state (so a restricted run can
-acknowledge its work), and never sends, deletes or changes anything outside
-the app, so one prefix covers it:
-
-    allow:
-      - "uv run apps/mail/scripts/mk.py bg"
-
-On Claude Code a hook enforces this even when the agent runs without
-approvals ([cc-connect.md](cc-connect.md#restricted-tasks-and-yolo)). An app
-that uses script, on-demand or restricted tasks needs `min_hub = "0.5.0"`.
+The task is registered with a prompt that points at this file, so the agent
+reads the body each time the task fires, and a new version of the app takes
+effect at the next run. The body may call the app's scripts. Users pick
+their own times with `cc-hub cron set` (see above); `SETUP.md` may ask for a
+time and run `cc-hub cron set <app>/<task> "<expr>"`, which needs
+`min_hub = "0.5.0"`.
 
 ## Publish
 

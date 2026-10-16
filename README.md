@@ -41,7 +41,7 @@ lists the subcommands of a group.
 | `cc-hub link <skills-dir>` | Link every hub skill into an agent's skills directory. |
 | `cc-hub tap add\|list\|remove` | Register git repositories of apps (taps). |
 | `cc-hub app search\|install\|list\|update\|remove\|sync\|setup-state` | Install, update and remove apps from taps. |
-| `cc-hub cron list\|set\|reset\|wake\|guard-setup` | Scheduled tasks: list them, change their times, wake on-demand tasks, guard restricted tasks. |
+| `cc-hub cron list\|set\|reset` | Scheduled tasks: list them, change their times, turn them off or on. |
 | `cc-hub feedback [--app NAME] [--json]` | Where to report a problem, with an environment block; sends nothing. |
 | `cc-hub where` | Print the hub directory and the package location. |
 | `cc-hub version` | Print the cc-hub version. |
@@ -52,15 +52,13 @@ Examples:
     cc-hub cron set plans/morning "0 7 * * *"       # run the plans app's morning task at 07:00
     cc-hub cron set ledger/prices --off             # turn a task off (--on turns it back on)
     cc-hub cron reset plans/morning                 # back to the time the app's file gives
-    cc-hub cron wake mail/triage                    # run an on-demand task now; scripts do this
 
 Quote the cron expression, or the shell splits it. A task's name is its file
 name without `.md` for the hub's own tasks (`cron/<name>.md`), and
 `<app>/<task>` for an app's. Times you set are kept in `hub.toml`, so
 `cc-hub update` and app updates keep them; `set` and `reset` print the steps
 that re-register the task with cc-connect, which the agent runs. Usually you
-just ask the agent. `cc-hub cron guard-setup` installs the guard for
-restricted tasks on Claude Code (see [docs/cc-connect.md](docs/cc-connect.md)).
+just ask the agent.
 
 ## Hub layout
 
