@@ -10,6 +10,7 @@ import typer
 
 from cc_hub import apps, cronoverrides, crontasks, gitops
 from cc_hub.applock import LockError
+from cc_hub.cli import ignore_hook_event
 from cc_hub.console import echo_json, fail, resolve_hub, warn
 
 cron_app = typer.Typer(
@@ -134,6 +135,20 @@ def reset_cmd(
     warn(warning)
     for line in reregister_steps(row, task):
         typer.echo(line)
+
+
+@cron_app.command(
+    "guard",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def guard_cmd() -> None:
+    """PreToolUse hook entry point that never decides anything; settings files may still call it.
+
+    It reads the hook event on stdin, prints nothing and exits 0. A plain `cc-hub cron guard`
+    is answered by `cli.main` without loading the command line.
+    """
+    ignore_hook_event()
 
 
 def register(app: typer.Typer) -> None:

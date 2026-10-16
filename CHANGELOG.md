@@ -4,7 +4,7 @@
 
 ### Removed
 
-- `cc-hub cron wake`, `cc-hub cron guard` and `cc-hub cron guard-setup`.
+- `cc-hub cron wake` and `cc-hub cron guard-setup`.
 - Script tasks (`exec`, `timeout_mins`), on-demand tasks (`on_demand`),
   restricted tasks (`allow`) and the `silent` task key. A task definition
   has `schedule`, `default` and `session`; other keys are not read.
@@ -23,15 +23,17 @@
   name, time in force and on/off.
 - The app install overview lists each task as
   `hub:<app>/<task>: <schedule> (<default|optional>, <session>)`.
+- `cc-hub cron guard` is a hidden PreToolUse hook entry point: it reads the
+  event on stdin, prints nothing and exits 0, without deciding anything.
 
 ### Migration notes
 
 - Run `cc-hub update`, so that `AGENTS.md`, `cron/README.md` and the
   `hub-adapt` and `hub-apps` skills match this version.
-- If `cc-hub cron guard-setup` ran in a hub, delete the `PreToolUse` entry
-  whose command ends in ` cron guard` from the hub's `.claude/settings.json`.
-  That command now exits with status 2, which Claude Code treats as a
-  refusal of every tool call.
+- If `cc-hub cron guard-setup` ran in a hub, its `.claude/settings.json`
+  has a `PreToolUse` entry whose command ends in ` cron guard`. It may be
+  deleted; while it stays, it runs `cc-hub cron guard`, which exits 0
+  without a decision.
 - Remove apps whose tasks use `exec` or `on_demand` (`hub-apps` also deletes
   their jobs from cc-connect). This version does not read `exec`, so it
   lists such a task as a prompt task, and an `on_demand` task without

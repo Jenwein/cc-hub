@@ -666,7 +666,7 @@ cc-hub/
 ├── README.md  README.zh-CN.md  LICENSE  CHANGELOG.md
 ├── .gitattributes            * text=auto eol=lf
 ├── src/cc_hub/
-│   ├── cli.py                typer 分发，where、version
+│   ├── cli.py                入口，交给 commands/root.py
 │   ├── console.py            定位总站、JSON 输出、rich console
 │   ├── hub.py                定位总站、读写 hub.toml
 │   ├── manifest.py           文件所有权清单、模板渲染
@@ -678,7 +678,8 @@ cc-hub/
 │   ├── apps.py               app.toml 解析与校验、本机设置状态、安装升级卸载、sync
 │   ├── crontasks.py          任务定义解析、列出任务、登记命令、cron list 的行
 │   ├── cronoverrides.py      hub.toml 里 [cron."<任务>"] 覆盖的读取和原地编辑
-│   ├── commands/             init doctor update memory link tap app cron feedback
+│   ├── commands/             root（typer 应用，where、version）init doctor update memory
+│   │                         link tap app cron feedback
 │   └── templates/            AGENTS.md BOOTSTRAP.md SOUL.md IDENTITY.md USER.md MEMORY.md
 │                             AGENTS.local.md hub.toml _gitignore _gitattributes cron/
 │                             skills/hub-adapt/ hub-memory/ hub-apps/ hub-feedback/
