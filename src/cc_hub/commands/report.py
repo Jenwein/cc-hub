@@ -100,7 +100,8 @@ def _overview(hub: Path) -> dict:
             }
         )
     sections = [_section_row(s, config, state) for s in reports.discover_sections(hub)]
-    return {"language": config.language or "en", "periods": periods, "sections": sections}
+    # language stays null until one is set, so that the caller can tell unset from chosen
+    return {"language": config.language, "periods": periods, "sections": sections}
 
 
 def _period_line(row: dict) -> str:

@@ -106,7 +106,8 @@ def test_list_json_periods_and_language(hub: Path) -> None:
     r = run(hub, "report", "list", "--json")
     assert r.exit_code == 0, r.output
     data = json.loads(r.stdout)
-    assert data["language"] == "en" and data["sections"] == []
+    assert "language" in data and data["language"] is None  # unset is null, not "en"
+    assert data["sections"] == []
     assert [p["period"] for p in data["periods"]] == list(reports.PERIODS)
     assert data["periods"][0] == {
         "period": "daily", "task": "report-daily", "schedule": "0 8 * * *", "on": True,
@@ -122,9 +123,20 @@ def test_list_json_without_report_tasks_has_no_schedule(hub: Path) -> None:
     assert data["periods"][0]["task"] == "report-daily"
 
 
-def test_list_json_language_is_the_one_in_hub_toml(hub: Path) -> None:
-    reports.save_language(hub, "zh-CN")
+@pytest.mark.parametrize("tag", ["zh-CN", "en"])
+def test_list_json_language_is_the_one_in_hub_toml(hub: Path, tag: str) -> None:
+    reports.save_language(hub, tag)  # a chosen "en" is not the same as none chosen
+    assert json.loads(run(hub, "report", "list", "--json").stdout)["language"] == tag
+
+
+def test_list_json_language_after_the_language_command(hub: Path) -> None:
+    assert json.loads(run(hub, "report", "list", "--json").stdout)["language"] is None
+    assert run(hub, "report", "language", "zh-CN").exit_code == 0
     assert json.loads(run(hub, "report", "list", "--json").stdout)["language"] == "zh-CN"
+
+
+def test_plan_json_language_still_falls_back_to_en(hub: Path) -> None:
+    assert json.loads(run(hub, "report", "plan", "daily", "--json").stdout)["language"] == "en"
 
 
 def test_list_json_sections(hub: Path) -> None:
