@@ -16,14 +16,15 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
-from cc_hub import __version__, cronoverrides, crontasks, gitops, manifest
-from cc_hub.applock import LockError, from_tilde, load_lock
+from cc_hub import __version__, cronoverrides, crontasks, gitops, manifest, reports, reportstate
+from cc_hub.applock import LOCK_FILE, LockError, from_tilde, load_lock
 from cc_hub.apps import app_statuses
 from cc_hub.commands.init import enclosing_git_repo
 from cc_hub.commands.link import POINTERS, inspect_skill_links
 from cc_hub.crontasks import CronError
 from cc_hub.encoding import read_text, write_text
-from cc_hub.hub import load_config
+from cc_hub.hub import HUB_FILE, load_config
+from cc_hub.reports import ReportError
 
 Which = Callable[[str], "str | None"]
 
@@ -158,6 +159,58 @@ def cron_check(hub: Path) -> Check:
     if problems:
         return Check("cron", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
     return _ok("cron", f"{len(task_rows)} task(s) checked")
+
+
+def reports_check(hub: Path) -> Check:
+    """Report sections: their files, the [report] settings in hub.toml, and their approvals.
+
+    A hub.toml or apps.lock that cannot be read is the business of the hub-toml and apps checks,
+    so this one says so and stops.
+    """
+    try:
+        # load_config words a TOML syntax error as a report problem; it belongs to hub-toml
+        settings = tomllib.loads(read_text(hub / HUB_FILE)).get("report", {})
+        config = reports.load_config(hub)
+    except _READ_ERRORS:
+        return _ok("reports", "hub.toml unreadable; see hub-toml")
+    except ReportError as exc:
+        return Check("reports", "warn", str(exc), "fix hub.toml")
+    try:
+        sections = reports.discover_sections(hub)
+        installed = set(load_lock(hub).apps)
+    except (LockError, OSError, UnicodeDecodeError):
+        return _ok("reports", "apps.lock unreadable; see apps")
+
+    problems: list[str] = []
+    fixes: list[str] = []
+    state = reportstate.load_state(hub)
+    for section in sections:
+        if section.error:  # print the error, not the key: a bad app name has no period
+            problems.append(section.error)
+            if section.file == LOCK_FILE:
+                fixes.append(f"fix {LOCK_FILE}, or restore it with git")
+            else:
+                fixes.append(f"fix {section.file}, or run cc-hub app update {section.app}")
+        elif (
+            section.command is not None
+            and section.key not in config.off  # a section that is off never runs
+            and not reportstate.is_approved(state, section.app, section.period, section.command)
+        ):
+            problems.append(f"{section.key}: command is not approved on this machine")
+            fixes.append(f"approve it during app setup: cc-hub report approve {section.app}")
+    keys = {section.key for section in sections}
+    for key, table in settings.items():
+        app, _, period = key.partition("/")
+        if not isinstance(table, dict) or key in keys:
+            continue
+        if app in installed and not (hub / "apps" / app).is_dir():
+            continue  # a section of an app that is not on disk yet: the apps check says what to do
+        problems.append(f'hub.toml: [report."{key}"] has no section')
+        fixes.append(f"run cc-hub report section {app} {period} --on")
+
+    if problems:
+        return Check("reports", "warn", "; ".join(problems), "; ".join(dict.fromkeys(fixes)))
+    return _ok("reports", f"{len(sections)} report section(s) checked")
 
 
 def run_checks(
@@ -334,6 +387,9 @@ def run_checks(
 
     # cron
     checks.append(cron_check(hub))
+
+    # reports
+    checks.append(reports_check(hub))
 
     # git
     checks.append(git_check(hub))

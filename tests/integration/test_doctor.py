@@ -12,7 +12,7 @@ from cc_hub.cli import app
 from cc_hub.commands.doctor import run_checks
 from cc_hub.commands.init import init_hub
 from cc_hub.commands.link import sync_skill_links
-from tests.conftest import write
+from tests.conftest import fake_app, write
 
 NO_AGENTS = dict(which=lambda name: None)
 CHECK_IDS = [
@@ -25,6 +25,7 @@ CHECK_IDS = [
     "pointers",
     "apps",
     "cron",
+    "reports",
     "git",
     "nested-git",
 ]
@@ -345,7 +346,7 @@ def test_cron_check_is_ok_for_a_hub_with_tasks_and_a_valid_override(
 
     save(hub_with_plans, "plans/morning", {"schedule": "0 7 * * *"})
     check = _cron_check(hub_with_plans, tmp_path)
-    assert (check.status, check.message) == ("ok", "3 task(s) checked")
+    assert (check.status, check.message) == ("ok", "8 task(s) checked")
 
 
 def test_cron_check_names_a_broken_task_file(hub: Path, tmp_path: Path) -> None:
@@ -426,3 +427,236 @@ def test_cron_check_leaves_the_overrides_of_an_app_that_is_not_synced_yet(
     assert _cron_check(hub_with_plans, tmp_path).status == "ok"
     s = statuses(run_checks(hub_with_plans, home=tmp_path / "home", **NO_AGENTS))
     assert s["apps"] == "warn"
+
+
+# --- reports ---
+
+MAIL_CMD = "cc-hub-mail report daily"
+MAIL_DAILY = f'---\ncommand: "{MAIL_CMD}"\ntitle: Mail\n---\n'
+DIARY_WEEKLY = "---\ntitle: Diary\n---\nSummarise the week.\n"
+
+
+def _reports_check(hub: Path, tmp_path: Path):
+    checks = run_checks(hub, home=tmp_path / "home", **NO_AGENTS)
+    return next(c for c in checks if c.id == "reports")
+
+
+def _hub_with_sections(hub: Path, *, approved: bool = True) -> Path:
+    from cc_hub import reportstate
+
+    fake_app(hub, "mail", {"reports/daily.md": MAIL_DAILY})
+    fake_app(hub, "diary", {"reports/weekly.md": DIARY_WEEKLY})
+    if approved:
+        reportstate.approve(hub, "mail", {"daily": MAIL_CMD})
+    return hub
+
+
+def test_reports_check_runs_right_after_the_cron_check(hub: Path, tmp_path: Path) -> None:
+    ids = [c.id for c in run_checks(hub, home=tmp_path / "home", **NO_AGENTS)]
+    assert ids.index("reports") == ids.index("cron") + 1
+
+
+def test_reports_check_is_ok_for_a_hub_without_sections(hub: Path, tmp_path: Path) -> None:
+    check = _reports_check(hub, tmp_path)
+    assert (check.status, check.message) == ("ok", "0 report section(s) checked")
+
+
+def test_reports_check_is_ok_for_a_clean_hub(hub: Path, tmp_path: Path) -> None:
+    check = _reports_check(_hub_with_sections(hub), tmp_path)
+    assert (check.status, check.message) == ("ok", "2 report section(s) checked")
+
+
+def test_reports_check_names_a_broken_section_file(hub: Path, tmp_path: Path) -> None:
+    _hub_with_sections(hub)
+    write(hub / "apps" / "diary" / "reports" / "weekly.md", "no frontmatter\n")
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "apps/diary/reports/weekly.md: needs a frontmatter block" in check.message
+    assert "mail" not in check.message
+    assert check.fix == (
+        "fix apps/diary/reports/weekly.md, or run cc-hub app update diary"
+    )
+
+
+def test_reports_check_names_an_empty_command(hub: Path, tmp_path: Path) -> None:
+    fake_app(hub, "mail", {"reports/daily.md": "---\ncommand:\n---\n"})
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "apps/mail/reports/daily.md: command is empty" in check.message
+
+
+def test_reports_check_names_a_file_that_is_not_a_period(hub: Path, tmp_path: Path) -> None:
+    fake_app(hub, "mail", {"reports/hourly.md": "---\n---\n"})
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "apps/mail/reports/hourly.md: hourly is not a report period" in check.message
+    assert "apps/mail/reports/hourly.md" in check.fix and "cc-hub app update mail" in check.fix
+
+
+def test_reports_check_joins_the_problems_of_several_files(hub: Path, tmp_path: Path) -> None:
+    fake_app(hub, "mail", {"reports/hourly.md": "---\n---\n", "reports/daily.md": "nope\n"})
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "hourly.md" in check.message and "daily.md" in check.message
+    assert check.message.count("; ") == 1
+    assert "fix apps/mail/reports/daily.md," in check.fix
+    assert "fix apps/mail/reports/hourly.md," in check.fix
+
+
+def test_reports_check_prints_the_error_of_an_app_name_apps_lock_cannot_hold(
+    hub: Path, tmp_path: Path
+) -> None:
+    fake_app(hub, "Bad_App", {"reports/daily.md": MAIL_DAILY})
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "apps.lock: app name 'Bad_App': use lowercase letters" in check.message
+    assert "Bad_App/" not in check.message  # the section key of such an error is not shown
+    assert "apps.lock" in check.fix and "Bad_App/" not in check.fix
+
+
+def test_reports_check_reports_a_bad_report_setting(hub: Path, tmp_path: Path) -> None:
+    _append(hub / "hub.toml", "\n[report]\nlanguage = 7\n")
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "hub.toml: [report] language must be a language tag" in check.message
+    assert check.fix == "fix hub.toml"
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("\n[report]\nfoo = 1\n", "foo is not a setting"),
+        ('\n[report."mail"]\nenabled = false\n', "the table name must be <app>/<period>"),
+        ('\n[report."mail/daily"]\nenabled = "no"\n', "enabled must be true or false"),
+        ("\n[report]\norder = 3\n", "order must be a list of app names"),
+    ],
+)
+def test_reports_check_reports_each_kind_of_bad_setting(
+    hub: Path, tmp_path: Path, text: str, message: str
+) -> None:
+    _append(hub / "hub.toml", text)
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn" and message in check.message
+    assert check.fix == "fix hub.toml"
+
+
+def test_reports_check_reports_a_table_whose_section_is_gone(hub: Path, tmp_path: Path) -> None:
+    _hub_with_sections(hub)
+    _append(hub / "hub.toml", '\n[report."gone/daily"]\nenabled = false\n')
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert 'hub.toml: [report."gone/daily"] has no section' in check.message
+    assert check.fix == "run cc-hub report section gone daily --on"
+
+
+def test_reports_check_reports_a_table_for_a_period_the_app_has_no_section_for(
+    hub: Path, tmp_path: Path
+) -> None:
+    _hub_with_sections(hub)
+    _append(hub / "hub.toml", '\n[report."mail/weekly"]\nenabled = false\n')
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert 'hub.toml: [report."mail/weekly"] has no section' in check.message
+    assert check.fix == "run cc-hub report section mail weekly --on"
+
+
+def test_reports_check_accepts_the_table_of_a_section_that_is_switched_off(
+    hub: Path, tmp_path: Path
+) -> None:
+    from cc_hub.reports import save_section
+
+    _hub_with_sections(hub)
+    save_section(hub, "diary/weekly", False)
+    check = _reports_check(hub, tmp_path)
+    assert (check.status, check.message) == ("ok", "2 report section(s) checked")
+
+
+def test_reports_check_does_not_call_a_table_orphaned_because_its_file_is_broken(
+    hub: Path, tmp_path: Path
+) -> None:
+    from cc_hub.reports import save_section
+
+    _hub_with_sections(hub)
+    save_section(hub, "diary/weekly", False)
+    write(hub / "apps" / "diary" / "reports" / "weekly.md", "no frontmatter\n")
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn"
+    assert "has no section" not in check.message and "frontmatter" in check.message
+
+
+def test_reports_check_leaves_the_tables_of_an_app_that_is_not_synced_yet(
+    hub: Path, tmp_path: Path
+) -> None:
+    from cc_hub.platform import rmtree
+    from cc_hub.reports import save_section
+
+    _hub_with_sections(hub)
+    save_section(hub, "diary/weekly", False)
+    rmtree(hub / "apps" / "diary")  # as in a clone before `cc-hub app sync`
+    assert _reports_check(hub, tmp_path).status == "ok"
+    s = statuses(run_checks(hub, home=tmp_path / "home", **NO_AGENTS))
+    assert s["apps"] == "warn"
+
+
+def test_reports_check_warns_about_a_command_that_is_not_approved(
+    hub: Path, tmp_path: Path
+) -> None:
+    check = _reports_check(_hub_with_sections(hub, approved=False), tmp_path)
+    assert check.status == "warn"
+    assert "mail/daily" in check.message and "not approved" in check.message
+    assert "diary" not in check.message  # a section with instructions needs no approval
+    assert check.fix == "approve it during app setup: cc-hub report approve mail"
+
+
+def test_reports_check_warns_when_a_command_changed_after_it_was_approved(
+    hub: Path, tmp_path: Path
+) -> None:
+    _hub_with_sections(hub)
+    assert _reports_check(hub, tmp_path).status == "ok"
+    write(hub / "apps" / "mail" / "reports" / "daily.md", MAIL_DAILY.replace("daily", "daily -v"))
+    check = _reports_check(hub, tmp_path)
+    assert check.status == "warn" and "mail/daily" in check.message
+
+
+def test_reports_check_asks_about_each_app_whose_commands_are_not_approved(
+    hub: Path, tmp_path: Path
+) -> None:
+    _hub_with_sections(hub, approved=False)
+    fake_app(hub, "feeds", {"reports/monthly.md": '---\ncommand: "feeds-report"\n---\n'})
+    check = _reports_check(hub, tmp_path)
+    assert "mail/daily" in check.message and "feeds/monthly" in check.message
+    assert "cc-hub report approve mail" in check.fix and "cc-hub report approve feeds" in check.fix
+
+
+def test_reports_check_does_not_ask_to_approve_a_section_switched_off(
+    hub: Path, tmp_path: Path
+) -> None:
+    from cc_hub.reports import save_section
+
+    _hub_with_sections(hub, approved=False)
+    save_section(hub, "mail/daily", False)
+    assert _reports_check(hub, tmp_path).status == "ok"
+
+
+def test_reports_check_leaves_an_unreadable_hub_toml_to_the_hub_toml_check(
+    hub: Path, tmp_path: Path
+) -> None:
+    (hub / "hub.toml").write_text("[hub\n", encoding="utf-8")
+    check = _reports_check(hub, tmp_path)
+    assert (check.status, check.message) == ("ok", "hub.toml unreadable; see hub-toml")
+
+
+def test_reports_check_leaves_a_missing_hub_toml_to_the_hub_toml_check(
+    hub: Path, tmp_path: Path
+) -> None:
+    (hub / "hub.toml").unlink()
+    check = _reports_check(hub, tmp_path)
+    assert (check.status, check.message) == ("ok", "hub.toml unreadable; see hub-toml")
+
+
+def test_reports_check_leaves_a_broken_apps_lock_to_the_apps_check(
+    hub: Path, tmp_path: Path
+) -> None:
+    (hub / "apps.lock").write_text("[apps\n", encoding="utf-8")
+    check = _reports_check(hub, tmp_path)
+    assert (check.status, check.message) == ("ok", "apps.lock unreadable; see apps")

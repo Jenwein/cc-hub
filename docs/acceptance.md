@@ -68,3 +68,22 @@ up. Remove `probe` afterwards.
    from cc-connect. Set a time for the app's task, then have the agent remove
    the app: the `cc-hub: app remove <app>` commit also drops its table from
    `hub.toml`.
+
+## Reports
+
+Same environment, with a native cc-connect, and a test tap whose app has
+`reports/daily.md` with a `command` (for example one that prints the date).
+Turn the report off again afterwards.
+
+1. Ask the agent in the private chat to turn on the daily report: it runs
+   `cc-hub cron set report-daily --on` and the printed steps, and
+   `cc-connect cron info <id> silent` of `hub:report-daily` is `true`.
+2. Ask the agent to install the test app: setup shows the section's command,
+   and runs `cc-hub report approve <app>` after you agree; `cc-hub report
+   list` shows the section `approved`.
+3. Run the task with `cc-connect cron exec <id>`: the report arrives in the
+   private chat with the app's section, no "⏰" line comes before it, and the
+   agent's own reply is not sent (it is `NO_REPLY`). The hub has
+   `reports/<year>/<date>-daily.md` in a `cc-hub: report daily` commit.
+4. Let `hub:memory-consolidate` run: nothing arrives in the chat, and its
+   paragraph shows up under the notes of the next daily report.

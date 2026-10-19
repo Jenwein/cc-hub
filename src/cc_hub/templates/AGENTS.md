@@ -11,6 +11,7 @@ File map:
 - `skills/<name>/`: how-to guides, one directory per skill. The `hub-*` ones
   are built in. New skills go here too; `hub-adapt` links them for you.
 - `cron/`: scheduled task definitions.
+- `reports/`: sent reports, one file each (`cc-hub report`).
 - `scripts/`: scripts you or the user wrote.
 - `apps/<name>/`: installed apps (`cc-hub app`), each with its own skills,
   scheduled tasks and setup steps; `apps.lock` records them. An app's data
@@ -61,6 +62,10 @@ cc-connect, the bridge to the chat, explains how to send files back and how
 to schedule tasks: in your system prompt, or in a block it appends below the
 end of this file. Scheduled tasks (`cron/`, `apps/<app>/cron/`) are
 registered and retimed as `cron/README.md` describes.
+
+Reports are scheduled tasks of the hub (`cron/README.md`, "Reports"). When
+the user refers to an item of a report, read the latest file of that period
+under `reports/`.
 
 A scheduled task's prompt names its definition file: read it, skip the
 frontmatter, do what the body says. If you cannot, do not guess what the

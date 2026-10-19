@@ -37,11 +37,22 @@ fresh clone of the hub), run `cc-hub app sync` first.
    `cc-hub app setup-state <name> waiting --note "<what is left>"` and stop.
 2. **App steps.** Follow `apps/<name>/SETUP.md` if it exists. Personal
    settings go into the app's data directory, never into `apps/`.
-3. **Scheduled tasks.** Run `cc-hub cron list --json` and follow
+3. **Reports.** Run `cc-hub report list --json`. For each of the app's
+   `sections` (`app` is `<name>`) with `kind` `command`, `on` true and
+   `approved` false, show the user the command and what it does. For each
+   period whose command they decline, run
+   `cc-hub report section <name> <period> --off`, so that reports and
+   `cc-hub doctor` stop flagging it. Then, if they agreed to any, run
+   `cc-hub report approve <name>`: it approves only the sections that are on,
+   so a declined one that is switched on later needs approving then. If a
+   period the app writes for is off (`periods`), ask whether to turn it on,
+   as `cron/README.md` "Reports" says. For a section with an `error`, tell
+   the user what is wrong.
+4. **Scheduled tasks.** Run `cc-hub cron list --json` and follow
    `cron/README.md` for every row whose `source` is the app (`<name>`). It
    registers what is missing, replaces what differs and removes what is off
    or gone.
-4. **Finish.** `cc-hub app setup-state <name> done`, then
+5. **Finish.** `cc-hub app setup-state <name> done`, then
    `cc-hub memory log "app <name> set up"`, then commit the changes to the
    data directory and today's log.
 
@@ -62,9 +73,11 @@ time" in `cron/README.md` to run them, in a direct chat.
 
 1. `cc-hub app update <name>` shows what changed and changes nothing.
 2. Summarise for the user: new software, changed scripts, a changed
-   `SETUP.md`, new or changed scheduled tasks. Show the full diff if they ask.
-3. When they agree, run the printed confirm command. If setup changed, the app
-   is `pending` again: set it up right away.
+   `SETUP.md`, new or changed scheduled tasks and report sections. Show the
+   full diff if they ask.
+3. When they agree, run the printed confirm command. If setup or a report
+   section changed, the app is `pending` again: set it up right away. A
+   changed report command needs the user's approval again (step 3 of "Set up").
 
 ## Remove
 
@@ -73,7 +86,8 @@ time" in `cron/README.md` to run them, in a direct chat.
    `cc-connect cron list`, then `cc-connect cron del <id>`. Follow `REMOVE.md`
    if the plan shows one. Ask whether to uninstall the software it used.
 3. `cc-hub app remove <name> --yes`; it also drops the app's time overrides
-   from `hub.toml`. Then tell the user where the data stays.
+   and report settings from `hub.toml`, and this machine's report approvals.
+   Then tell the user where the data stays.
 
 ## Write or publish an app
 

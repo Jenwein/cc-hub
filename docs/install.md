@@ -65,7 +65,8 @@ notes in [cc-connect.md](cc-connect.md).
 
 `update` replaces only framework-owned files (`AGENTS.md` above its closing
 marker, `BOOTSTRAP.md`, `skills/hub-*`, `cron/README.md`,
-`cron/memory-consolidate.md`, `.gitignore`, `.gitattributes`), removes
+`cron/memory-consolidate.md`, `cron/report-*.md`, `.gitignore`,
+`.gitattributes`), removes
 framework files the package no longer ships, and merges new keys into
 `hub.toml`. Previous versions are copied to `.cc-hub/backups/<old version>/`.
 Read `CHANGELOG.md` before upgrading across minor versions.

@@ -192,3 +192,25 @@ def test_save_keeps_crlf_and_every_other_byte(tmp_path: Path):
     save(target, "a", None)
     assert path.read_bytes() == original
     assert load(target) == {}
+
+
+def test_an_override_with_a_child_table_is_refused():
+    text = BASE + '\n[cron."a"]\nenabled = false\n\n[cron."a".x]\ny = 1\n'
+    with pytest.raises(CronError, match="by hand"):
+        apply(text, "a", {"enabled": True})
+    with pytest.raises(CronError, match="by hand"):
+        apply(text, "a", None)
+
+
+def test_an_override_with_an_array_of_tables_child_is_refused():
+    text = BASE + '\n[cron."a"]\nenabled = false\n\n[[cron."a".x]]\ny = 1\n'
+    with pytest.raises(CronError, match="by hand"):
+        apply(text, "a", {"enabled": True})
+    with pytest.raises(CronError, match="by hand"):
+        apply(text, "a", None)
+
+
+def test_an_unknown_inline_table_key_goes_with_the_replaced_override():
+    text = BASE + '\n[cron."a"]\nenabled = false\nx = {y = 1}\n'
+    assert apply(text, "a", {"enabled": True}) == BASE + '\n[cron."a"]\nenabled = true\n'
+    assert apply(text, "a", None) == BASE

@@ -58,12 +58,50 @@ registration command, and the agent compares it with
 and deleting what is turned off or gone. A task is registered with the
 description `hub:<name>` and a prompt that points at its definition file:
 
-    cc-connect cron add --cron "0 3 * * *" --prompt "Scheduled task hub:memory-consolidate: follow the body of cron/memory-consolidate.md in the hub." --session-mode new_per_run --desc "hub:memory-consolidate"
+    cc-connect cron add --cron "0 3 * * *" --prompt "Scheduled task hub:memory-consolidate: follow the body of cron/memory-consolidate.md in the hub." --session-mode new_per_run --desc "hub:memory-consolidate" --silent
 
 so an edited body takes effect at the next run without registering again.
+`--silent` stops cc-connect from posting a line in the chat each time a task
+fires; the chat shows only what the agent replies.
 
 Change a task's time with `cc-hub cron set` or `cc-hub cron reset` (see the
 README), not in cc-connect: the next registration puts the hub's time back.
+
+## Reports
+
+`cc-hub report send` delivers a report itself, so that what the apps' report
+commands print reaches the chat without passing through the agent. It runs
+
+    cc-connect send -p <project> -s <session> --stdin
+
+and writes the report to its standard input. `<project>` and `<session>` are
+the `CC_PROJECT` and `CC_SESSION_KEY` that cc-connect sets for the agent
+process; cc-hub inherits them when the agent runs it, and leaves out `-p`
+when `CC_PROJECT` is unset. Without `CC_SESSION_KEY`, `send` refuses:
+cc-connect would pick any active session, which may be a group chat. Run it
+from the agent in the chat, or set the variable by hand. The PATH is
+inherited the same way, so `cc-connect` must be on the PATH given to the
+agent in `[projects.agent.options.env]` (see "PATH under a service"), next
+to `cc-hub`. When `cc-connect` is missing or does not answer within 60
+seconds, `send` fails with a message, nothing is recorded, and the task
+replies with that error.
+
+cc-connect sends what it is given as one message, and a chat platform refuses
+one that is too long, so a long report goes out as several messages of at most
+4000 characters each: cut before a section where possible, else at the end of
+a line. When one after the first fails, the rest is not sent; the report
+counts as sent (it is not sent again that day), the archive holds all of it,
+and `send` exits 1 saying the report was cut short and where the archive is;
+the task replies with that.
+
+Every task is registered with `--silent`, so no line appears when a report
+task fires. A reply of exactly `NO_REPLY` makes cc-connect send nothing: a
+report task ends with it once the report is sent or when there is nothing to
+send, and so does a background task whose result was left as a note for a
+report.
+
+A section command that an app provides runs only after the user approved it
+on this machine (see [apps.md](apps.md), "Reports").
 
 ## Working directory
 

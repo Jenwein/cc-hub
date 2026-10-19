@@ -143,3 +143,99 @@ def test_app_remove_without_overrides_says_none(hub_with_plans: Path) -> None:
     r = run(hub_with_plans, "app", "remove", "plans")
     assert r.exit_code == 0, r.output
     assert "overrides: none" in r.output
+
+
+SECTIONS = {
+    "ledger/reports/daily.md": '---\ncommand: "ledger-report daily"\n---\n',
+    "ledger/reports/weekly.md": "---\n---\nSummarise the week.\n",
+}
+
+
+def test_app_install_overview_lists_the_report_sections(
+    hub: Path, ledger_tap: Path, tap_commit
+) -> None:
+    assert run(hub, "tap", "add", ledger_tap.as_uri(), "--name", "my-apps").exit_code == 0
+    r = run(hub, "app", "install", "my-apps/ledger")
+    assert r.exit_code == 0, r.output
+    assert "report sections: none" in r.output
+
+    tap_commit(ledger_tap, SECTIONS)
+    r = run(hub, "app", "install", "my-apps/ledger")
+    assert r.exit_code == 0, r.output
+    lines = r.output.splitlines()
+    start = lines.index("report sections:")
+    assert lines[start : start + 3] == [
+        "report sections:",
+        "  daily: command ledger-report daily",
+        "  weekly: instructions",
+    ]
+
+
+def test_app_install_refuses_a_report_file_that_is_not_a_period(
+    hub: Path, ledger_tap: Path, tap_commit
+) -> None:
+    tap_commit(ledger_tap, {"ledger/reports/hourly.md": "---\n---\n"})
+    assert run(hub, "tap", "add", ledger_tap.as_uri(), "--name", "my-apps").exit_code == 0
+    r = run(hub, "app", "install", "my-apps/ledger", "--yes")
+    assert r.exit_code == 1
+    assert "ledger/reports/hourly.md: hourly is not a report period" in r.output
+    assert not (hub / "apps").exists()
+
+
+def test_app_update_preview_shows_a_changed_report_section(
+    hub: Path, ledger_tap: Path, tap_commit
+) -> None:
+    tap_commit(ledger_tap, SECTIONS)
+    assert run(hub, "tap", "add", ledger_tap.as_uri(), "--name", "my-apps").exit_code == 0
+    assert run(hub, "app", "install", "my-apps/ledger", "--yes").exit_code == 0
+    daily_v2 = '---\ncommand: "ledger-report daily -v"\n---\n'
+    tap_commit(ledger_tap, {"ledger/reports/daily.md": daily_v2})
+    r = run(hub, "app", "update", "ledger")
+    assert r.exit_code == 0, r.output
+    assert "M reports/daily.md" in r.output
+    assert "--- app.toml, SETUP.md, REMOVE.md, skills/, scripts/, cron/, reports/ ---" in r.output
+    assert '+command: "ledger-report daily -v"' in r.output
+
+
+def test_app_remove_lists_and_drops_the_report_settings(git_hub_with_plans: Path) -> None:
+    from cc_hub import reports
+    from cc_hub.gitops import commit_paths
+
+    hub = git_hub_with_plans
+    reports.save_section(hub, "plans/daily", False)
+    reports.save_section(hub, "ledger/monthly", False)
+    assert commit_paths(hub, ["hub.toml", "apps.lock"], "cc-hub: set up") is None
+    r = run(hub, "app", "remove", "plans")
+    assert r.exit_code == 0, r.output
+    assert "report settings: plans/daily (removed from hub.toml)" in r.output
+    assert "ledger/monthly" not in r.output
+    assert (hub / "apps" / "plans").exists()
+    r = run(hub, "app", "remove", "plans", "--yes")
+    assert r.exit_code == 0, r.output
+    toml = (hub / "hub.toml").read_text(encoding="utf-8")
+    assert "plans/daily" not in toml and "ledger/monthly" in toml
+
+
+def test_app_remove_without_report_settings_says_none(hub_with_plans: Path) -> None:
+    r = run(hub_with_plans, "app", "remove", "plans")
+    assert r.exit_code == 0, r.output
+    assert "report settings: none" in r.output
+
+
+def test_app_remove_warns_when_the_report_state_stays(
+    hub_with_plans: Path, monkeypatch
+) -> None:
+    from contextlib import contextmanager
+
+    from cc_hub import reportstate
+
+    @contextmanager
+    def busy(_hub):
+        raise TimeoutError("the reports state is busy; try again shortly")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(reportstate, "state_lock", busy)
+    r = run(hub_with_plans, "app", "remove", "plans", "--yes")
+    assert r.exit_code == 0, r.output
+    assert "removed plans" in r.output and "reports state is busy" in r.output
+    assert not (hub_with_plans / "apps" / "plans").exists()
