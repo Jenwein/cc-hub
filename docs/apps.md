@@ -163,6 +163,8 @@ During setup the agent shows the user each report command and approves it
 a line saying the command is not approved in place of that section. The user
 can leave an app out of one period (`cc-hub report section <app> <period>
 --off`), and `cc-hub report list` shows every period, section and approval.
+A command the user declines is switched off that way; `approve` covers only
+the sections that are on, so a section switched on later needs approving then.
 
 ## Publish
 

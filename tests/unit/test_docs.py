@@ -164,6 +164,7 @@ def test_apps_doc_covers_reports() -> None:
                    "`CC_HUB_DIR`", "`CC_HUB_REPORT_PERIOD`", "`CC_HUB_REPORT_SINCE`",
                    "`CC_HUB_REPORT_UNTIL`", "`CC_HUB_LANGUAGE`", "cc-hub report note",
                    "once the user has approved it on that machine",
+                   "only the sections that are on",
                    "Empty output means no section", 'min_hub = "0.7.0"'):
         assert phrase in section, phrase
     # the command rules are the same in the guide the agent reads

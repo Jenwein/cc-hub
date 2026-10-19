@@ -38,13 +38,16 @@ fresh clone of the hub), run `cc-hub app sync` first.
 2. **App steps.** Follow `apps/<name>/SETUP.md` if it exists. Personal
    settings go into the app's data directory, never into `apps/`.
 3. **Reports.** Run `cc-hub report list --json`. For each of the app's
-   `sections` (`app` is `<name>`) with `kind` `command` and `approved` false,
-   show the user the command and what it does. For each period whose command
-   they decline, run `cc-hub report section <name> <period> --off`, so that
-   reports and `cc-hub doctor` stop flagging it. When they agree, run
-   `cc-hub report approve <name>`. If a period the app writes for is off
-   (`periods`), ask whether to turn it on, as `cron/README.md` "Reports" says.
-   For a section with an `error`, tell the user what is wrong.
+   `sections` (`app` is `<name>`) with `kind` `command`, `on` true and
+   `approved` false, show the user the command and what it does. For each
+   period whose command they decline, run
+   `cc-hub report section <name> <period> --off`, so that reports and
+   `cc-hub doctor` stop flagging it. Then, if they agreed to any, run
+   `cc-hub report approve <name>`: it approves only the sections that are on,
+   so a declined one that is switched on later needs approving then. If a
+   period the app writes for is off (`periods`), ask whether to turn it on,
+   as `cron/README.md` "Reports" says. For a section with an `error`, tell
+   the user what is wrong.
 4. **Scheduled tasks.** Run `cc-hub cron list --json` and follow
    `cron/README.md` for every row whose `source` is the app (`<name>`). It
    registers what is missing, replaces what differs and removes what is off

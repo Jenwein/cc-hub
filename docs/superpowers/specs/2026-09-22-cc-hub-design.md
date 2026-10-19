@@ -426,7 +426,7 @@ cc-hub report approve ledger
 
 `report language <标签>`：校验是语言标签（如 `en`、`zh-CN`），写 `[report] language`，提交（`cc-hub: report language`）。
 
-`report approve <应用>`：把该应用现有的每条脚本段命令的确切文字记为这台机器已批准，记在 `.cc-hub/reports/state.toml`；应用须已安装，没有脚本段时输出 `nothing to approve`。命令后来变了，批准就不再适用，要重新批准。
+`report approve <应用>`：把该应用现有的、没关掉的每条脚本段命令的确切文字记为这台机器已批准，记在 `.cc-hub/reports/state.toml`；关掉的段不批准，以后打开了要再批准；应用须已安装，没有这样的段时输出 `nothing to approve`。命令后来变了，批准就不再适用，要重新批准。
 
 cc-hub 调用 cc-connect 只有 `report send` 这一处，`cc-connect` 在 agent 进程的 PATH 上找（§11）。
 
@@ -600,7 +600,7 @@ link = "~/dev/hub-apps/machines"   # 链接安装
 
 1. **依赖**：`cc-hub app list --json` 给出缺少的依赖和本平台的安装命令。告诉用户每条命令做什么，请求批准；批准就执行并再查一遍；不批准或做不到（例如需要 sudo）就把步骤列给用户，执行 `cc-hub app setup-state <name> waiting --note "<还差什么>"` 并停下。
 2. **应用自己的步骤**：照 `SETUP.md` 做，例如问用户的账户和币种并写进数据目录，按用户的意愿配置服务。
-3. **报告**：跑 `cc-hub report list --json`，对该应用 `kind` 为 `command` 而 `approved` 为 false 的每一段，把命令和它做什么告诉用户，同意后执行 `cc-hub report approve <name>`；它供稿的周期里还没开的（`periods`），问用户要不要打开（§4.6）；有 `error` 的段告诉用户哪里错了。
+3. **报告**：跑 `cc-hub report list --json`，对该应用 `kind` 为 `command`、`on` 为 true 而 `approved` 为 false 的每一段，把命令和它做什么告诉用户；用户不同意的周期用 `cc-hub report section <name> <周期> --off` 关掉，然后只要用户同意了一条就执行 `cc-hub report approve <name>`（它只批准开着的段）；它供稿的周期里还没开的（`periods`），问用户要不要打开（§4.6）；有 `error` 的段告诉用户哪里错了。
 4. **定时任务**：跑 `cc-hub cron list --json`，对 `source` 为该应用的每一行按 `cron/README.md` 做（§4.5）：按实际生效的时间登记缺的，与 `cc-connect cron list`、`cc-connect cron info <id>` 不一致的删掉重登，关掉的和定义已删的 `hub:<name>/…` 删掉。所以设置重跑、应用升级都不会把用户设的时间改回去。
 5. **收尾**：`cc-hub app setup-state <name> done`，写一条 memory log，再提交数据目录的改动和当天的日志。
 

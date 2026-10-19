@@ -87,7 +87,8 @@ Then run the steps it prints, in a direct chat. Before the first one goes on,
 run `cc-hub report list --json`: if `language` is null, ask the user which
 language the reports are in and run `cc-hub report language <tag>` (such as
 `en` or `zh-CN`). An app's section of a period's report is switched with
-`cc-hub report section <app> <period> --off` (or `--on`).
+`cc-hub report section <app> <period> --off` (or `--on`). Approve a command
+section switched on with `cc-hub report approve <app>` if the user agrees.
 
 Every task is registered `--silent`: the chat shows only what the agent
 replies, and `NO_REPLY` shows nothing. A task that finishes work quietly

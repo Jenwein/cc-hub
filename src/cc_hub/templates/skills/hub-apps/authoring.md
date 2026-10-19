@@ -67,7 +67,8 @@ with a marker. A failure, or a run over 300 seconds, shows a one-line failure
 in the report, with the first line of standard error (at most 300 characters);
 so does a section file that cannot be read, until it is fixed or switched off.
 An approval is for the exact command text: a version of the app that changes it
-asks the user again.
+asks the user again. Setup approves only the sections that are on; one the user
+declined is switched off, and needs approving if it is switched on later.
 
 The command is not run through a shell: its arguments are split the POSIX way
 (write paths with forward slashes), and there are no pipes and no `$VAR`

@@ -21,7 +21,8 @@
   for the next report (exit 3 and nothing kept when no report is on, so the
   task replies itself); `section <app> <period> --on|--off` and `language
   <tag>` write the `[report]` settings of `hub.toml`; `approve <app>`
-  approves an app's section commands on this machine.
+  approves the commands of an app's sections that are on, on this machine
+  (a section switched on later needs approving then).
 - App report sections: `reports/<period>.md` in an app. With a `command` the
   section is a script that cc-hub runs, not through a shell, in the hub, once
   the user has approved that exact command on this machine; its output goes

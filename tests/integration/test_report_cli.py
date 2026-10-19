@@ -924,6 +924,30 @@ def test_approve_skips_a_section_with_a_broken_file(hub: Path) -> None:
     assert r.stdout.strip() == f"approved: daily: {MAIL}"
 
 
+def test_approve_skips_a_section_that_is_off(hub: Path) -> None:
+    command(hub, "mail", "daily", "uv run mail.py daily")
+    command(hub, "mail", "weekly", "uv run mail.py weekly")
+    run(hub, "report", "section", "mail", "weekly", "--off")  # the user declined it
+    r = run(hub, "report", "approve", "mail")
+    assert r.exit_code == 0, r.output
+    assert r.stdout.strip() == "approved: daily: uv run mail.py daily"
+    state = reportstate.load_state(hub)
+    assert not reportstate.is_approved(state, "mail", "weekly", "uv run mail.py weekly")
+
+
+def test_a_section_turned_back_on_is_not_approved(hub: Path, sent: Collector) -> None:
+    periods_on(hub, "daily")
+    command(hub, "mail", cmd=echo_cmd(SECRET))
+    run(hub, "report", "section", "mail", "daily", "--off")
+    assert run(hub, "report", "approve", "mail").stdout.strip() == "nothing to approve"
+    run(hub, "report", "section", "mail", "daily", "--on")
+    assert "mail/daily  command  on  not approved" in run(hub, "report", "list").stdout
+    r = run(hub, "report", "send", "daily", "--again")
+    assert r.exit_code == 0, r.output
+    assert "not approved on this machine" in sent.sent[0]
+    assert SECRET not in sent.sent[0]
+
+
 def test_approve_an_app_that_is_not_installed(hub: Path) -> None:
     r = run(hub, "report", "approve", "ghost")
     assert r.exit_code == 1 and "ghost" in r.stderr

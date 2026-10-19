@@ -276,6 +276,7 @@ def test_cron_readme_covers_reports() -> None:
                    "cc-hub cron set report-<period> --on", "cc-hub report list --json",
                    "cc-hub report note", "NO_REPLY", "`language`", "urgent"):
         assert phrase in reports, phrase
+    assert "cc-hub report approve <app>" in reports  # a command section switched on
     assert "cc-hub report note <period> --from <task> -- '<text>'" in reports
     assert '"<text>"' not in reports and "a single quote inside it must be escaped" in reports
     assert "`kept for ...`, the task replies `NO_REPLY`" in reports
@@ -405,6 +406,9 @@ def test_hub_apps_setup_approves_report_commands() -> None:
     assert "`cc-hub report section <name> <period> --off`" in setup
     assert "For each period whose command they decline" in setup
     assert "doctor" in setup
+    # approve covers only the sections that are on: a declined one is switched off first
+    assert "`on` true" in setup and "only the sections that are on" in setup
+    assert setup.index("--off`") < setup.index("`cc-hub report approve <name>`")
     assert setup.index("**App steps.**") < setup.index("`cc-hub report list --json`")
     assert setup.index("`cc-hub report list --json`") < setup.index("**Scheduled tasks.**")
     update = " ".join(skill.split("## Update", 1)[1].split("\n## ", 1)[0].split())
@@ -421,6 +425,7 @@ def test_authoring_covers_reports() -> None:
                    "`CC_HUB_REPORT_PERIOD`", "`CC_HUB_REPORT_SINCE`", "`CC_HUB_REPORT_UNTIL`",
                    "`CC_HUB_DIR`", "`CC_HUB_LANGUAGE`", "cc-hub report note",
                    "once the user has approved it on that machine",
+                   "only the sections that are on",
                    "Empty output means no section"):
         assert phrase in reports, phrase
     assert 'min_hub = "0.7.0"' in reports

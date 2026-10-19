@@ -353,19 +353,21 @@ def approve_cmd(
     ctx: typer.Context,
     app_name: str = typer.Argument(..., metavar="APP", help="Installed app to approve."),
 ) -> None:
-    """Approve the commands in an app's report sections, as they are now, on this machine.
+    """Approve, on this machine, the commands of an app's report sections that are on.
 
     A section command runs only while it is approved. An approval is for the exact command
-    text, so an app that changes a command needs approving again.
+    text, so an app that changes a command needs approving again. A section that is off is
+    left out, so turning it on later needs approving too.
     """
     hub = resolve_hub(ctx)
     try:
         if app_name not in load_lock(hub).apps:
             raise ReportError(f"{app_name} is not an installed app; see cc-hub app list")
+        off = reports.load_config(hub).off
         commands = {
             s.period: s.command
             for s in reports.discover_sections(hub)
-            if s.app == app_name and s.command is not None
+            if s.app == app_name and s.command is not None and s.key not in off
         }
         if commands:
             with reportstate.state_lock(hub):
